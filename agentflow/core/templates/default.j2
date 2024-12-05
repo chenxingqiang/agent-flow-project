@@ -1,0 +1,24 @@
+# {{ title | default('Document') }}
+
+{% if author %}
+**Author**: {{ author }}
+{% endif %}
+
+{% if date %}
+**Date**: {{ date }}
+{% endif %}
+
+## Summary
+
+{{ summary | default('No summary provided.') }}
+
+{% for section_name, section_content in sections.items() %}
+## {{ section_name }}
+
+{{ section_content }}
+
+{% endfor %}
+
+{% if tags %}
+**Tags**: {{ tags | join(', ') }}
+{% endif %}

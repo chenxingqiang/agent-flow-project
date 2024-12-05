@@ -1,0 +1,18 @@
+{
+    "WORKFLOW": [
+        {
+            "step": 1,
+            "input": ["research_topic", "deadline", "academic_level"],
+            "output": {
+                "type": "research"
+            }
+        },
+        {
+            "step": 2,
+            "input": ["WORKFLOW.1"],
+            "output": {
+                "type": "document"
+            }
+        }
+    ]
+}

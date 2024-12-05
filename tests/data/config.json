@@ -1,0 +1,32 @@
+{
+  "variables": {
+    "invalid_type": {
+      "type": "invalid"
+    }
+  },
+  "agent_type": "research",
+  "model": {
+    "provider": "openai",
+    "name": "gpt-4",
+    "temperature": 0.7
+  },
+  "workflow": {
+    "max_iterations": 10,
+    "logging_level": "INFO",
+    "distributed": false,
+    "steps": [
+      {
+        "type": "research_planning",
+        "config": {
+          "depth": "comprehensive"
+        }
+      },
+      {
+        "type": "document_generation",
+        "config": {
+          "format": "academic"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{xeCJK}
+\usepackage{hyperref}
+\usepackage{graphicx}
+
+% Chinese font configuration
+\setCJKmainfont{SimSun}
+
+\begin{document}
+
+\title{ {{title}} }
+\author{ {{author}} }
+\maketitle
+
+{% for section in sections %}
+\section{ {{section.title}} }
+{{section.content}}
+{% endfor %}
+
+{% if bibliography %}
+\begin{thebibliography}{99}
+{% for ref in bibliography %}
+\bibitem{ {{ref.key}} } {{ref.text}}
+{% endfor %}
+\end{thebibliography}
+{% endif %}
+
+\end{document} 

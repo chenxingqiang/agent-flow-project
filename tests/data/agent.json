@@ -1,0 +1,30 @@
+{
+  "AGENT": "Test_Agent",
+  "CONTEXT": "Test context for unit testing",
+  "ENVIRONMENT": {
+    "INPUT": ["research_topic", "deadline", "academic_level"],
+    "OUTPUT": ["research_plan", "document"]
+  },
+  "WORKFLOW": [
+    {
+      "step": 1,
+      "name": "Research Step",
+      "input": ["research_topic", "deadline", "academic_level"],
+      "function": "process_research",
+      "output": {
+        "type": "research",
+        "format": "json"
+      }
+    },
+    {
+      "step": 2,
+      "name": "Document Generation Step",
+      "input": ["research_topic", "content"],
+      "function": "process_document",
+      "output": {
+        "type": "document",
+        "format": "markdown"
+      }
+    }
+  ]
+}

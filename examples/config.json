@@ -1,0 +1,54 @@
+{
+    "language": "中文",
+    "output_format": "Markdown",
+    "pdf_engine": "xelatex",
+    "word_count_limits": {
+      "step_1": 200,
+      "step_2": 1000,
+      "step_3": 1200,
+      "step_4": 300,
+      "step_5": 500
+    },
+    "template_variables": {
+      "STUDENT_NEEDS": {
+        "research_topic": "",
+        "deadline": "",
+        "academic_level": "",
+        "field": "",
+        "special_requirements": ""
+      },
+      "LANGUAGE": {
+        "type": "中文",
+        "academic_style": "formal",
+        "citation_style": "APA"
+      },
+      "TEMPLATE": {
+        "format": "IEEE",
+        "sections": [
+          "Abstract",
+          "Introduction",
+          "Literature Review",
+          "Methodology",
+          "Results",
+          "Discussion",
+          "Conclusion"
+        ],
+        "formatting": {
+          "font": "Times New Roman",
+          "size": 12,
+          "spacing": 1.5,
+          "margins": "1 inch"
+        }
+      }
+    },
+    "validation_rules": {
+      "word_count": {
+        "min": 100,
+        "max": 5000
+      },
+      "deadline": {
+        "min_days": 7,
+        "max_days": 365
+      }
+    }
+  }

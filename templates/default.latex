@@ -1,0 +1,9 @@
+\documentclass{article}
+\begin{document}
+
+\title{ {{title}} }
+\maketitle
+
+{{ content }}
+
+\end{document}
