@@ -92,10 +92,11 @@ def sample_workflow_config():
                 "type": "test",
                 "description": "Test agent 1",
                 "model": {
-                    "name": "test-model",
-                    "provider": "test"
+                    "name": "gpt-4",
+                    "provider": "openai"
                 },
-                "system_prompt": "You are a test agent"
+                "system_prompt": "You are a test agent",
+                "config": {}  
             },
             {
                 "id": "agent2", 
@@ -103,10 +104,11 @@ def sample_workflow_config():
                 "type": "test",
                 "description": "Test agent 2",
                 "model": {
-                    "name": "test-model",
-                    "provider": "test"
+                    "name": "gpt-4",
+                    "provider": "openai"
                 },
-                "system_prompt": "You are another test agent"
+                "system_prompt": "You are another test agent",
+                "config": {}  
             }
         ],
         "processors": [

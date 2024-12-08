@@ -178,10 +178,6 @@ class WorkflowExecutor:
                 await self._update_node_status(node)
                 return None, {"error": f"Node {node_id} requires input but none provided"}
 
-            # Convert input data to hashable format if needed
-            if input_data is not None:
-                input_data = self._make_hashable(input_data)
-
             # Determine the processing method based on node type
             if isinstance(node, ProcessorNode):
                 # Prefer process_data, fallback to process
@@ -200,12 +196,8 @@ class WorkflowExecutor:
             if process_method is None:
                 raise AttributeError(f"No process method found for node {node_id}")
             
-            # Ensure input data is processed correctly
             output = await process_method(input_data)
 
-            # Process output to ensure it's hashable
-            output = self._make_hashable(output)
-            
             # Update node metrics if available
             if isinstance(node, (AgentNode, ProcessorNode)):
                 processing_obj = node.agent if isinstance(node, AgentNode) else node.processor
@@ -268,25 +260,10 @@ class WorkflowExecutor:
 
             raise WorkflowExecutionError(error_details) from e
 
-    async def execute(self, input_data: Dict[str, Any] = None):
+    async def execute(self, input_data: Union[Dict[str, Any], List[Dict[str, Any]]] = None):
         """Execute workflow with given input data"""
         logger.info("=== Starting workflow execution ===")
         
-        # Convert input data to hashable format
-        if input_data is not None:
-            # Create a copy to avoid modifying the original input
-            hashable_input = {}
-            for k, v in input_data.items():
-                try:
-                    if isinstance(v, (dict, list, set)):
-                        hashable_input[k] = str(v)
-                    else:
-                        hashable_input[k] = v
-                except Exception as e:
-                    logger.error(f"Error converting input {k} to hashable format: {e}")
-                    hashable_input[k] = str(v)
-            input_data = hashable_input
-
         # Validate input data
         if input_data is None:
             input_data = {}
