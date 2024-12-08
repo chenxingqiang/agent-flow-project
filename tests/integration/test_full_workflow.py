@@ -6,18 +6,17 @@ from pathlib import Path
 import os
 
 @pytest.fixture
-def mock_openai():
-    with patch('openai.ChatCompletion.create') as mock:
-        mock.return_value = {
-            'choices': [{
-                'message': {
-                    'content': 'Test research results for mock API call',
-                    'role': 'assistant'
-                }
-            }],
-            'usage': {'total_tokens': 100}
-        }
-        yield mock
+def mock_openai(mocker):
+    """Mock OpenAI client"""
+    mock_response = mocker.Mock()
+    mock_response.choices = [mocker.Mock(message=mocker.Mock(content="test_output"))]
+    mock_response.usage = mocker.Mock(total_tokens=100)
+    
+    mock_client = mocker.Mock()
+    mock_client.chat.completions.create.return_value = mock_response
+    
+    mock_openai = mocker.patch('openai.OpenAI', return_value=mock_client)
+    return mock_openai
 
 def test_complete_workflow(test_data_dir, mock_openai):
     """Test complete workflow execution"""
