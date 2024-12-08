@@ -1,161 +1,177 @@
-import logging
-import ell
-import ray
-import os
-from typing import Dict, Any, Optional, List
-from agentflow.core.base_workflow import BaseWorkflow
-from agentflow.core.rate_limiter import ModelRateLimiter
-from ell.types import Message, ContentBlock
+"""
+Research Workflow Module for AgentFlow
+"""
 
-logger = logging.getLogger(__name__)
+from typing import Dict, List, Any, Optional, Union
+from dataclasses import dataclass, field
+from .base_workflow import BaseWorkflow
+from .config import WorkflowConfig, AgentConfig, ExecutionPolicies
+from .agent import Agent
 
-# Initialize Ray if not already initialized
-if not ray.is_initialized():
-    ray.init()
-
-@ray.remote
+@dataclass
 class DistributedStep:
-    """Distributed step implementation"""
+    """
+    Represents a distributed step in a research workflow
+    """
+    id: str
+    name: str
+    input_type: str
+    output_type: str
+    agents: List[str] = field(default_factory=list)
+    dependencies: List[str] = field(default_factory=list)
+    completed: bool = False
     
-    def __init__(self, step_num: int, config: Dict[str, Any]):
-        self.step_num = step_num
-        self.config = config
-        self.state = {}
-
-    def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute distributed step"""
-        try:
-            if not isinstance(input_data, dict):
-                raise ValueError("Input must be a dictionary")
-                
-            if "research_topic" not in input_data:
-                raise ValueError("Missing required input: research_topic")
-
-            messages = [
-                Message(role="system", content=[ContentBlock(text="You are a research assistant.")]),
-                Message(role="user", content=[ContentBlock(text=f"Research topic: {input_data['research_topic']}")]),
-                Message(role="assistant", content=[ContentBlock(text="Here are the research findings...")])
-            ]
-
-            return {
-                "step": self.step_num,
-                "status": "completed",
-                "result": messages,
-                "messages": messages
-            }
-
-        except Exception as e:
-            return {
-                "step": self.step_num,
-                "status": "failed",
-                "error": str(e)
-            }
+    def add_agent(self, agent_id: str):
+        """
+        Add an agent to the step
+        
+        Args:
+            agent_id: ID of the agent to add
+        """
+        self.agents.append(agent_id)
+    
+    def mark_completed(self):
+        """
+        Mark the step as completed
+        """
+        self.completed = True
 
 class ResearchWorkflow(BaseWorkflow):
-    """Research workflow implementation"""
-
-    def __init__(self, workflow_def: Dict[str, Any], rate_limiter: Optional[ModelRateLimiter] = None):
-        super().__init__(workflow_def)
-        self.rate_limiter = rate_limiter or ModelRateLimiter()
+    """
+    Specialized workflow for research-oriented tasks
+    """
+    
+    def __init__(
+        self, 
+        workflow_def: Union[Dict[str, Any], WorkflowConfig]
+    ):
+        """
+        Initialize a research workflow
         
-        # Check Anthropic API key
-        if not os.getenv("ANTHROPIC_API_KEY"):
-            raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
-            
-        # Initialize ell with Anthropic key
-        ell.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-
-    def validate_input(self, input_data: Dict[str, Any]) -> bool:
-        """Validate research workflow input data"""
-        super().validate_input(input_data)
-        
-        # Research-specific validation
-        required = ['research_topic', 'deadline', 'academic_level']
-        missing = [f for f in required if not input_data.get(f)]
-        if missing:
-            raise ValueError(f"Missing or empty research inputs: {', '.join(missing)}")
-            
-        return True
-
-    def _process_step_impl(self, step_number: int, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Internal implementation of step processing"""
-        messages = [
-            Message(role="system", content=[ContentBlock(text="You are a research assistant.")]),
-            Message(role="user", content=[ContentBlock(text=f"Research topic: {inputs['research_topic']}")]),
-        ]
-        return {
-            "messages": messages,
-            "result": ["Research finding 1", "Research finding 2"],
-            "methodology": ["Systematic literature review", "Qualitative analysis"],
-            "recommendations": ["Further research needed", "Explore alternative approaches"],
-            "status": "completed"
-        }
-
-    def process_step(self, step_number: int, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Process a workflow step"""
-        try:
-            if step_number < 1 or step_number > len(self.workflow_def["steps"]):
-                raise ValueError(f"Step {step_number} not found")
-                
-            step_def = self.workflow_def["steps"][step_number - 1]
-            
-            # Call LLM with rate limiting
-            step_result = self._process_step_impl(step_number, inputs)
-            
-            # Ensure step_result has required keys
-            if not all(key in step_result for key in ['messages', 'result']):
-                raise ValueError("Step result missing required output fields")
-            
-            result = {
-                "type": step_def["type"],
-                "step": step_number,
-                "status": "completed",
-                "messages": step_result.get("messages", []),
-                "result": step_result.get("result", []),
-                "methodology": step_result.get("methodology", []),
-                "recommendations": step_result.get("recommendations", []),
-                **inputs
-            }
-
-            self.validate_step_output(step_number, result)
-            return result
-
-        except Exception as e:
-            self.logger.error(f"Step {step_number} execution failed: {str(e)}")
-            raise
-
-    def execute_distributed(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute workflow steps in distributed mode"""
-        try:
-            # Validate input data before proceeding
-            self.validate_input(input_data)
-            
-            step = DistributedStep.remote(
-                step_num=1,
-                config={
-                    "type": "research",
-                    "input_keys": ["research_topic", "academic_level"],
-                    "output_fields": ["messages", "result", "methodology", "recommendations"]
+        Args:
+            workflow_def: Workflow configuration or dict
+        """
+        # Convert dict to WorkflowConfig if needed
+        if isinstance(workflow_def, dict):
+            if 'execution_policies' not in workflow_def:
+                workflow_def['execution_policies'] = {
+                    'required_fields': workflow_def.get('required_fields', []),
+                    'default_status': workflow_def.get('default_status', 'initialized'),
+                    'error_handling': workflow_def.get('error_handling', {}),
+                    'steps': workflow_def.get('steps', [])
                 }
+            
+            workflow_def = WorkflowConfig(
+                id=workflow_def.get('name', 'research_workflow'),
+                name=workflow_def.get('name', 'Research Workflow'),
+                description=workflow_def.get('description', ''),
+                agents=[AgentConfig(**agent) for agent in workflow_def.get('agents', [])],
+                execution_policies=ExecutionPolicies(**workflow_def['execution_policies'])
             )
+        
+        super().__init__(workflow_def)
+        self.research_steps: List[DistributedStep] = []
+        self.agents: List[Agent] = []
+        
+        # Initialize agents from config
+        if workflow_def.agents:
+            for agent_config in workflow_def.agents:
+                agent = Agent(config=agent_config)
+                self.agents.append(agent)
+        
+        # Initialize research steps from config
+        for step in workflow_def.execution_policies.steps:
+            self.add_research_step(DistributedStep(
+                id=step.id,
+                name=step.name,
+                input_type=step.input_type,
+                output_type=step.output_type,
+                agents=step.agents
+            ))
+
+    def initialize_state(self):
+        """Initialize workflow state"""
+        super().initialize_state()
+        for step in self.research_steps:
+            step.completed = False
+
+    async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute the research workflow
+        
+        Args:
+            input_data: Input data for the workflow
+        
+        Returns:
+            Workflow execution results
+        """
+        results = {}
+        
+        # Validate required inputs
+        required_inputs = self.config.execution_policies.required_fields
+        for required in required_inputs:
+            if required not in input_data:
+                raise ValueError(f"Missing required input: {required}")
+        
+        # Execute research steps in sequence
+        for step in self.research_steps:
+            step_results = {}
             
-            try:
-                result = ray.get(step.execute.remote(input_data))
-            except Exception as exec_error:
-                self.logger.error(f"Distributed step execution failed: {str(exec_error)}")
-                raise ValueError("Missing required input")
+            # Execute each agent in the step
+            for agent_id in step.agents:
+                agent = self.get_agent(agent_id)
+                if agent:
+                    try:
+                        agent_result = await agent.process(input_data)
+                        step_results[agent_id] = agent_result
+                    except Exception as e:
+                        step_results[agent_id] = {"error": str(e)}
+                        
+            results[step.id] = step_results
+            step.mark_completed()
             
-            if result.get("status") == "failed":
-                raise ValueError(f"Step execution failed: {result.get('error', 'Unknown error')}")
+        return results
+    
+    def get_agent(self, agent_id: str) -> Optional[Agent]:
+        """
+        Get agent by ID
+        
+        Args:
+            agent_id: ID of the agent
             
-            return {
-                "type": "research",
-                "status": "completed",
-                "result": result.get("result", []),
-                "messages": result.get("messages", []),
-                **input_data
-            }
-            
-        except ValueError as ve:
-            self.logger.error(f"Distributed execution failed: {str(ve)}")
-            raise
+        Returns:
+            Agent if found, None otherwise
+        """
+        return next((agent for agent in self.agents if agent.id == agent_id), None)
+    
+    def add_research_step(self, step: Union[DistributedStep, Dict[str, Any]]):
+        """
+        Add a research workflow step
+        
+        Args:
+            step: Configuration for the research step
+        """
+        if isinstance(step, dict):
+            step = DistributedStep(**step)
+        self.research_steps.append(step)
+    
+    def get_workflow_status(self) -> Dict[str, Any]:
+        """
+        Get current workflow status
+        
+        Returns:
+            Workflow status dictionary
+        """
+        return {
+            "total_steps": len(self.research_steps),
+            "completed_steps": len([step for step in self.research_steps if step.completed]),
+            "agents": [agent.id for agent in self.agents]
+        }
+    
+    def stop(self):
+        """
+        Stop the research workflow
+        """
+        # Placeholder implementation for stopping workflow
+        for agent in self.agents:
+            agent.stop()

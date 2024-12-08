@@ -1,0 +1,89 @@
+{
+    "dashboards": {
+        "system_overview": {
+            "title": "System Overview Dashboard",
+            "refresh_interval": 30,
+            "layout": {
+                "type": "grid",
+                "columns": 2
+            },
+            "panels": [
+                {
+                    "title": "System Health",
+                    "type": "gauge",
+                    "metrics": ["success_rate"],
+                    "thresholds": {
+                        "warning": 0.8,
+                        "critical": 0.6
+                    }
+                },
+                {
+                    "title": "Response Times",
+                    "type": "timeseries",
+                    "metrics": ["latency"],
+                    "aggregation": "mean",
+                    "timespan": "1h"
+                },
+                {
+                    "title": "Resource Usage",
+                    "type": "timeseries",
+                    "metrics": ["memory_usage", "token_count"],
+                    "aggregation": "max",
+                    "timespan": "1h"
+                },
+                {
+                    "title": "Validation Results",
+                    "type": "pie",
+                    "metrics": ["validation_score"],
+                    "timespan": "1h"
+                }
+            ]
+        },
+        "validation_dashboard": {
+            "title": "Validation Metrics Dashboard",
+            "refresh_interval": 60,
+            "layout": {
+                "type": "grid",
+                "columns": 2
+            },
+            "panels": [
+                {
+                    "title": "Validation Success Rate",
+                    "type": "timeseries",
+                    "metrics": ["validation_score"],
+                    "aggregation": "mean",
+                    "timespan": "1d"
+                },
+                {
+                    "title": "Validation Types",
+                    "type": "pie",
+                    "metrics": ["validation_type"],
+                    "timespan": "1d"
+                },
+                {
+                    "title": "Error Distribution",
+                    "type": "bar",
+                    "metrics": ["error_rate"],
+                    "aggregation": "sum",
+                    "timespan": "1d"
+                },
+                {
+                    "title": "Validation Timeline",
+                    "type": "timeline",
+                    "metrics": ["validation_events"],
+                    "timespan": "1d"
+                }
+            ]
+        }
+    },
+    "visualization_settings": {
+        "color_scheme": {
+            "success": "#00ff00",
+            "warning": "#ffff00",
+            "error": "#ff0000"
+        },
+        "default_timespan": "1h",
+        "max_datapoints": 1000,
+        "animation_enabled": true
+    }
+}

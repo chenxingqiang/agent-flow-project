@@ -2,7 +2,9 @@
 
 from .agent import Agent
 from .config import AgentConfig, ModelConfig, WorkflowConfig
-from .workflow import BaseWorkflow
+from .base_workflow import BaseWorkflow
+from .workflow import WorkflowEngine
+from .objective_workflow import ObjectiveWorkflow
 from .research_workflow import ResearchWorkflow
 from .rate_limiter import ModelRateLimiter, RateLimitError
 
@@ -14,5 +16,7 @@ __all__ = [
     'BaseWorkflow',
     'ResearchWorkflow',
     'ModelRateLimiter',
-    'RateLimitError'
+    'RateLimitError',
+    'WorkflowEngine',
+    'ObjectiveWorkflow'
 ]

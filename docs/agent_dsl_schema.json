@@ -1,0 +1,267 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "AGENT": {
+            "type": "object",
+            "required": ["NAME", "VERSION"],
+            "properties": {
+                "NAME": {"type": "string"},
+                "VERSION": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$"},
+                "TYPE": {"type": "string"}
+            }
+        },
+        "INPUT_SPECIFICATION": {
+            "type": "object",
+            "properties": {
+                "MODES": {
+                    "type": "array",
+                    "items": {
+                        "enum": [
+                            "DIRECT_INPUT", 
+                            "CONTEXT_INJECTION", 
+                            "STREAM_INPUT", 
+                            "REFERENCE_INPUT"
+                        ]
+                    }
+                },
+                "TYPES": {
+                    "type": "object",
+                    "properties": {
+                        "DIRECT": {"type": "object"},
+                        "CONTEXT": {
+                            "type": "object",
+                            "properties": {
+                                "sources": {
+                                    "type": "array",
+                                    "items": {
+                                        "enum": [
+                                            "PREVIOUS_AGENT_OUTPUT", 
+                                            "GLOBAL_MEMORY", 
+                                            "EXTERNAL_CONTEXT"
+                                        ]
+                                    }
+                                }
+                            }
+                        },
+                        "STREAM": {
+                            "type": "object",
+                            "properties": {
+                                "modes": {
+                                    "type": "array",
+                                    "items": {
+                                        "enum": [
+                                            "REAL_TIME", 
+                                            "BATCH", 
+                                            "INCREMENTAL"
+                                        ]
+                                    }
+                                }
+                            }
+                        },
+                        "REFERENCE": {
+                            "type": "object",
+                            "properties": {
+                                "types": {
+                                    "type": "array",
+                                    "items": {
+                                        "enum": [
+                                            "FILE_PATH", 
+                                            "DATABASE_QUERY", 
+                                            "MEMORY_POINTER"
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "VALIDATION": {
+                    "type": "object",
+                    "properties": {
+                        "STRICT_MODE": {"type": "boolean"},
+                        "SCHEMA_VALIDATION": {"type": "boolean"},
+                        "TRANSFORM_STRATEGIES": {
+                            "type": "array",
+                            "items": {
+                                "enum": [
+                                    "TYPE_COERCION", 
+                                    "DEFAULT_VALUE", 
+                                    "NULLABLE"
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "OUTPUT_SPECIFICATION": {
+            "type": "object",
+            "properties": {
+                "MODES": {
+                    "type": "array",
+                    "items": {
+                        "enum": [
+                            "RETURN", 
+                            "FORWARD", 
+                            "STORE", 
+                            "TRIGGER"
+                        ]
+                    }
+                },
+                "STRATEGIES": {
+                    "type": "object",
+                    "properties": {
+                        "RETURN": {
+                            "type": "object",
+                            "properties": {
+                                "options": {
+                                    "type": "array",
+                                    "items": {
+                                        "enum": [
+                                            "FULL_RESULT", 
+                                            "PARTIAL_RESULT", 
+                                            "SUMMARY"
+                                        ]
+                                    }
+                                }
+                            }
+                        },
+                        "FORWARD": {
+                            "type": "object",
+                            "properties": {
+                                "routing_options": {
+                                    "type": "array",
+                                    "items": {
+                                        "enum": [
+                                            "DIRECT_PASS", 
+                                            "TRANSFORM", 
+                                            "SELECTIVE_FORWARD"
+                                        ]
+                                    }
+                                }
+                            }
+                        },
+                        "STORE": {
+                            "type": "object",
+                            "properties": {
+                                "storage_types": {
+                                    "type": "array",
+                                    "items": {
+                                        "enum": [
+                                            "GLOBAL_MEMORY", 
+                                            "TEMPORARY_CACHE", 
+                                            "PERSISTENT_STORAGE"
+                                        ]
+                                    }
+                                }
+                            }
+                        },
+                        "TRIGGER": {
+                            "type": "object",
+                            "properties": {
+                                "trigger_types": {
+                                    "type": "array",
+                                    "items": {
+                                        "enum": [
+                                            "WORKFLOW_CONTINUATION", 
+                                            "PARALLEL_EXECUTION", 
+                                            "CONDITIONAL_BRANCH"
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "TRANSFORMATION": {
+                    "type": "object",
+                    "properties": {
+                        "ENABLED": {"type": "boolean"},
+                        "METHODS": {
+                            "type": "array",
+                            "items": {
+                                "enum": [
+                                    "FILTER", 
+                                    "MAP", 
+                                    "REDUCE", 
+                                    "AGGREGATE"
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "COLLABORATION": {
+            "type": "object",
+            "properties": {
+                "MODE": {
+                    "type": "string",
+                    "enum": [
+                        "SEQUENTIAL", 
+                        "PARALLEL", 
+                        "DYNAMIC_ROUTING", 
+                        "ADAPTIVE", 
+                        "EVENT_DRIVEN"
+                    ]
+                },
+                "WORKFLOW": {
+                    "oneOf": [
+                        {
+                            "type": "array",
+                            "description": "顺序模式工作流"
+                        },
+                        {
+                            "type": "object",
+                            "description": "并行/动态路由模式工作流"
+                        }
+                    ]
+                },
+                "COMMUNICATION_PROTOCOL": {
+                    "type": "object",
+                    "properties": {
+                        "TYPE": {
+                            "type": "string",
+                            "enum": [
+                                "SEMANTIC_MESSAGE", 
+                                "RPC", 
+                                "EVENT_STREAM"
+                            ]
+                        },
+                        "CONSTRAINTS": {
+                            "type": "object",
+                            "properties": {
+                                "MAX_DEPTH": {"type": "integer"},
+                                "TIMEOUT": {"type": "number"},
+                                "RETRY_STRATEGY": {
+                                    "type": "object",
+                                    "properties": {
+                                        "MAX_RETRIES": {"type": "integer"},
+                                        "BACKOFF_FACTOR": {"type": "number"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "PERFORMANCE_TRACKING": {
+                    "type": "object",
+                    "properties": {
+                        "METRICS": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "EXECUTION_TIME", 
+                                    "RESOURCE_UTILIZATION", 
+                                    "TASK_COMPLETION_RATE"
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

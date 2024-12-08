@@ -1,0 +1,96 @@
+{
+    "metric_mappings": {
+        "ell_to_agentflow": {
+            "response_time": {
+                "type": "latency",
+                "unit_conversion": 1.0,
+                "aggregation": "mean"
+            },
+            "memory_usage": {
+                "type": "memory_usage",
+                "unit_conversion": 1048576,
+                "aggregation": "max"
+            },
+            "token_usage": {
+                "type": "token_count",
+                "unit_conversion": 1.0,
+                "aggregation": "sum"
+            },
+            "api_requests": {
+                "type": "api_calls",
+                "unit_conversion": 1.0,
+                "aggregation": "sum"
+            },
+            "validation_result": {
+                "type": "validation_score",
+                "unit_conversion": 1.0,
+                "aggregation": "mean"
+            },
+            "error_count": {
+                "type": "error_rate",
+                "unit_conversion": 0.01,
+                "aggregation": "mean"
+            },
+            "success_ratio": {
+                "type": "success_rate",
+                "unit_conversion": 1.0,
+                "aggregation": "mean"
+            }
+        },
+        "agentflow_to_ell": {
+            "latency": {
+                "type": "response_time",
+                "unit_conversion": 1.0,
+                "aggregation": "mean"
+            },
+            "memory_usage": {
+                "type": "memory_usage",
+                "unit_conversion": 0.000001,
+                "aggregation": "max"
+            },
+            "token_count": {
+                "type": "token_usage",
+                "unit_conversion": 1.0,
+                "aggregation": "sum"
+            },
+            "api_calls": {
+                "type": "api_requests",
+                "unit_conversion": 1.0,
+                "aggregation": "sum"
+            },
+            "validation_score": {
+                "type": "validation_result",
+                "unit_conversion": 1.0,
+                "aggregation": "mean"
+            },
+            "error_rate": {
+                "type": "error_count",
+                "unit_conversion": 100.0,
+                "aggregation": "mean"
+            },
+            "success_rate": {
+                "type": "success_ratio",
+                "unit_conversion": 1.0,
+                "aggregation": "mean"
+            }
+        }
+    },
+    "custom_metrics": {
+        "enabled": true,
+        "mappings": {}
+    },
+    "aggregation_strategies": {
+        "mean": {
+            "window_size": 60,
+            "min_samples": 1
+        },
+        "max": {
+            "window_size": 60,
+            "min_samples": 1
+        },
+        "sum": {
+            "window_size": 60,
+            "reset_on_window": true
+        }
+    }
+}

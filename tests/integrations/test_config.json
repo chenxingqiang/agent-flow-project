@@ -1,0 +1,46 @@
+{
+    "persistence": {
+        "storage_path": "/tmp/test_storage",
+        "backup_interval": 300,
+        "max_backups": 5
+    },
+    "ell_integration": {
+        "api_endpoint": "http://localhost:8000",
+        "sync_interval": 60,
+        "metrics_mapping": {
+            "cpu_usage": "system.cpu",
+            "memory_usage": "system.memory",
+            "disk_usage": "system.disk",
+            "network_traffic": "system.network"
+        },
+        "health_checks": {
+            "enabled": true,
+            "interval": 30,
+            "timeout": 5
+        }
+    },
+    "visualization": {
+        "refresh_rate": 5,
+        "default_layout": "grid",
+        "themes": {
+            "light": {
+                "background": "#ffffff",
+                "text": "#000000"
+            },
+            "dark": {
+                "background": "#1a1a1a",
+                "text": "#ffffff"
+            }
+        },
+        "dashboards": {
+            "system_overview": {
+                "layout": "grid",
+                "components": ["metrics", "health", "alerts"]
+            },
+            "validation_dashboard": {
+                "layout": "vertical",
+                "components": ["test_results", "coverage"]
+            }
+        }
+    }
+}

@@ -1,0 +1,36 @@
+{
+    "AGENT": {
+        "NAME": "Academic Research Assistant",
+        "VERSION": "1.0.0",
+        "TYPE": "research"
+    },
+    "INPUT_SPECIFICATION": {
+        "MODES": ["CONTEXT_INJECTION", "DIRECT_INPUT"],
+        "TYPES": {
+            "DIRECT": {},
+            "CONTEXT": {
+                "sources": ["PREVIOUS_AGENT_OUTPUT", "GLOBAL_MEMORY"]
+            }
+        },
+        "VALIDATION": {
+            "STRICT_MODE": true,
+            "SCHEMA_VALIDATION": true,
+            "TRANSFORM_STRATEGIES": ["TYPE_COERCION", "DEFAULT_VALUE"]
+        }
+    },
+    "OUTPUT_SPECIFICATION": {
+        "MODES": ["FORWARD", "STORE"],
+        "STRATEGIES": {
+            "FORWARD": {
+                "routing_options": ["TRANSFORM", "SELECTIVE_FORWARD"]
+            },
+            "STORE": {
+                "storage_types": ["GLOBAL_MEMORY", "TEMPORARY_CACHE"]
+            }
+        },
+        "TRANSFORMATION": {
+            "ENABLED": true,
+            "METHODS": ["FILTER", "MAP"]
+        }
+    }
+}

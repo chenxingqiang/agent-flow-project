@@ -1,0 +1,53 @@
+{
+    "AGENT": {
+        "NAME": "Research Project Collaboration System",
+        "VERSION": "1.0.0"
+    },
+    "COLLABORATION": {
+        "MODE": "DYNAMIC_ROUTING",
+        "WORKFLOW": {
+            "topic_selection_agent": {
+                "dependencies": [],
+                "output_topics": ["research_direction"]
+            },
+            "literature_review_agent": {
+                "dependencies": ["topic_selection_agent"],
+                "output_topics": ["literature_summary"]
+            },
+            "data_collection_agent": {
+                "dependencies": ["literature_review_agent"],
+                "output_topics": ["research_data"]
+            },
+            "analysis_agent": {
+                "dependencies": ["data_collection_agent"],
+                "output_topics": ["analysis_results"]
+            },
+            "writing_agent": {
+                "dependencies": ["analysis_agent"],
+                "output_topics": ["draft_paper"]
+            },
+            "optimization_agent": {
+                "dependencies": ["writing_agent"],
+                "output_topics": ["final_paper"]
+            }
+        },
+        "COMMUNICATION_PROTOCOL": {
+            "TYPE": "SEMANTIC_MESSAGE",
+            "CONSTRAINTS": {
+                "MAX_DEPTH": 5,
+                "TIMEOUT": 300,
+                "RETRY_STRATEGY": {
+                    "MAX_RETRIES": 3,
+                    "BACKOFF_FACTOR": 2
+                }
+            }
+        },
+        "PERFORMANCE_TRACKING": {
+            "METRICS": [
+                "EXECUTION_TIME", 
+                "RESOURCE_UTILIZATION", 
+                "TASK_COMPLETION_RATE"
+            ]
+        }
+    }
+}

@@ -1,9 +1,11 @@
 # Configuration Management
 
 ## Overview
+
 The AgentFlow configuration management system provides a flexible and secure way to manage settings across different environments. It supports multiple LLM providers and models through ell integration, combining configuration files, environment variables, and runtime settings in a unified interface.
 
 ## Directory Structure
+
 ```bash
 agentflow/
 ├── config/
@@ -16,6 +18,7 @@ agentflow/
 ## Configuration Files
 
 ### Default Configuration (default.ini)
+
 ```ini
 [api_keys]
 # OpenAI
@@ -119,6 +122,7 @@ meta_models = [
 ## Model-Specific Configuration
 
 ### Model Parameters
+
 ```ini
 [model_parameters]
 # Common parameters
@@ -143,6 +147,7 @@ max_tokens = 4096
 ```
 
 ### Rate Limits
+
 ```ini
 [rate_limits]
 max_retries = 3
@@ -164,6 +169,7 @@ tokens_per_minute = 80000
 ```
 
 ### Model Fallbacks
+
 ```ini
 [model_fallbacks]
 # Fallback chain for each provider
@@ -179,6 +185,7 @@ order = ["anthropic", "openai", "mistral", "ai21", "amazon", "cohere", "meta"]
 ## Usage
 
 ### Basic Usage
+
 ```python
 from agentflow.config import config
 
@@ -202,6 +209,7 @@ priority = config.get_provider_priority()
 ```
 
 ### Environment Variables
+
 ```bash
 # Set environment
 export AGENTFLOW_ENV=development  # or production
@@ -218,6 +226,7 @@ export COHERE_API_KEY=your-cohere-key
 ```
 
 ### Integration with ell
+
 ```python
 from agentflow.config import config
 
@@ -232,6 +241,7 @@ def your_llm_function():
 ## Model Selection Strategy
 
 ### Priority and Fallbacks
+
 The system uses a sophisticated model selection strategy:
 
 1. Provider Priority:
@@ -246,7 +256,8 @@ The system uses a sophisticated model selection strategy:
    - Respects provider-specific rate limits
    - Automatically switches to fallback when limits are reached
 
-### Example Selection Flow:
+### Example Selection Flow
+
 ```python
 # Configuration-based model selection
 primary_model = config.get_model_settings().get('default_model')
@@ -266,18 +277,21 @@ except RateLimitError:
 ## Best Practices
 
 ### Model Configuration
+
 1. Set appropriate fallback chains for each provider
 2. Configure rate limits based on your API tier
 3. Adjust model parameters for your use case
 4. Monitor token usage across providers
 
 ### Security
+
 1. Never commit API keys to version control
 2. Use environment variables for sensitive data
 3. Regularly rotate API keys
 4. Monitor API usage and costs
 
 ### Testing
+
 1. Create test configurations for each provider
 2. Mock API responses in tests
 3. Test fallback scenarios
@@ -286,16 +300,21 @@ except RateLimitError:
 ## Troubleshooting
 
 ### Common Issues
+
 1. Model Not Available:
+
 ```python
 ValueError: "Model not available in current configuration"
 ```
+
 Solution: Check model name and provider configuration
 
 2. Rate Limit Exceeded:
+
 ```python
 RateLimitError: "Provider rate limit exceeded"
 ```
+
 Solution: Check rate limit settings and implement backoff
 
 ## References
