@@ -193,71 +193,70 @@ class TransformProcessor(BaseProcessor):
         self.transformations = config.get("transformations", {})
         
     async def process(self, input_data: Dict[str, Any]) -> ProcessorResult:
-        """Transform input data
-        
+        """Process input data and apply transformations
+
         Args:
-            input_data: Input data to transform
-            
+            input_data: Input data dictionary
+
         Returns:
-            Transformed data
+            Processed result with transformed data
         """
-        try:
-            # Validate input
-            if not input_data:
-                return ProcessorResult(
-                    output={},
-                    error="Empty input data"
-                )
-            
-            # Perform transformations
-            result = {}
-            transformed_fields = []
-            
-            for output_field, expression in self.transformations.items():
-                try:
-                    # Handle $input. prefix explicitly
-                    if expression.startswith('$input.'):
-                        # Direct field extraction
-                        field = expression.replace('$input.', '')
-                        
-                        # Handle nested field extraction
-                        if '.' in field:
-                            # Use nested access
-                            parts = field.split('.')
-                            current = input_data
-                            for part in parts:
-                                current = current.get(part, {})
-                            result[output_field] = current if current != {} else None
-                        else:
-                            # Simple field extraction
-                            result[output_field] = input_data.get(field)
-                        
-                        transformed_fields.append(output_field)
-                    else:
-                        # Fallback to eval for complex expressions
-                        result[output_field] = eval(expression.replace('input.', ''), 
-                                                   {"__builtins__": {"len": len, "str": str, "int": int, "max": max, "min": min, "upper": str.upper}}, 
-                                                   {"input": input_data})
-                        transformed_fields.append(output_field)
-                except Exception:
-                    result[output_field] = None
-                    transformed_fields.append(output_field)
-            
-            # Ensure all specified fields are present with None if not found
-            for field in self.transformations.keys():
-                if field not in result:
-                    result[field] = None
-            
-            return ProcessorResult(
-                output=result,
-                metadata={"transformed_fields": transformed_fields}
-            )
-        
-        except Exception as e:
+        # Validate input
+        if not input_data:
             return ProcessorResult(
                 output={},
-                error=str(e)
+                error="Empty input data"
             )
+        
+        # Perform transformations
+        result = {}
+        transformed_fields = []
+        
+        for output_field, expression in self.transformations.items():
+            try:
+                # Handle $input. prefix explicitly
+                if expression.startswith('$input.'):
+                    # Direct field extraction
+                    field = expression.replace('$input.', '')
+                    
+                    # Handle nested field extraction
+                    if '.' in field:
+                        # Use nested access
+                        parts = field.split('.')
+                        current = input_data
+                        for part in parts:
+                            if isinstance(current, dict):
+                                current = current.get(part)
+                                if current is None:
+                                    break
+                            else:
+                                current = None
+                                break
+                        result[output_field] = current
+                    else:
+                        # Simple field extraction
+                        result[output_field] = input_data.get(field)
+                    
+                    transformed_fields.append(output_field)
+                else:
+                    # Fallback to eval for complex expressions
+                    result[output_field] = eval(expression.replace('input.', ''), 
+                                               {"__builtins__": {"len": len, "str": str, "int": int, "max": max, "min": min, "upper": str.upper}}, 
+                                               {"input": input_data})
+                    transformed_fields.append(output_field)
+            except Exception:
+                result[output_field] = None
+                transformed_fields.append(output_field)
+        
+        # Ensure all specified fields are present with None if not found
+        for field in self.transformations.keys():
+            if field not in result:
+                result[field] = None
+        
+        return ProcessorResult(
+            output=result,
+            metadata={"transformed_fields": str(transformed_fields)}
+        )
 
     async def process_data(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Transform input data
@@ -309,6 +308,11 @@ class TransformProcessor(BaseProcessor):
                     except Exception:
                         result[output_field] = None
                 
+                # Ensure all specified fields are present with None if not found
+                for field in self.transformations.keys():
+                    if field not in result:
+                        result[field] = None
+                
                 return result
             elif isinstance(input_data, list):
                 return [await self.process_data(item) for item in input_data]
@@ -327,18 +331,70 @@ class TransformProcessor(BaseProcessor):
         Returns:
             True if valid, False otherwise
         """
-        return isinstance(input_data, dict)
+        # Check if input is a dictionary
+        if not isinstance(input_data, dict):
+            return False
         
+        # Validate each transformation field exists in input
+        for output_field, expression in self.transformations.items():
+            # Skip if not a direct field reference
+            if not expression.startswith('$input.'):
+                continue
+            
+            # Extract field name
+            field = expression.replace('$input.', '')
+            
+            # Handle nested field validation
+            if '.' in field:
+                parts = field.split('.')
+                current = input_data
+                for part in parts:
+                    if not isinstance(current, dict) or part not in current:
+                        return False
+                    current = current[part]
+            else:
+                # Simple field validation
+                if field not in input_data:
+                    return False
+        
+        return True
+
     def get_input_schema(self) -> Dict[str, Any]:
         """Get input schema
         
         Returns:
             JSON schema for input data
         """
-        return {
-            "type": "object"
-        }
+        # Build input schema based on transformation fields
+        properties = {}
+        required = []
         
+        for output_field, expression in self.transformations.items():
+            if expression.startswith('$input.'):
+                field = expression.replace('$input.', '')
+                
+                # Handle nested fields
+                if '.' in field:
+                    parts = field.split('.')
+                    current = properties
+                    for i, part in enumerate(parts):
+                        if i == len(parts) - 1:
+                            current[part] = {"type": ["string", "number", "boolean", "null"]}
+                        else:
+                            if part not in current:
+                                current[part] = {"type": "object", "properties": {}}
+                            current = current[part].get("properties", {})
+                else:
+                    # Simple field
+                    properties[field] = {"type": ["string", "number", "boolean", "null"]}
+                    required.append(field)
+        
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": required
+        }
+
     def get_output_schema(self) -> Dict[str, Any]:
         """Get output schema
         
@@ -387,32 +443,38 @@ class AggregateProcessor(BaseProcessor):
                 self._grouped_data[group_key].append(input_data)
                 self._total_records += 1
             
-            # Compute aggregations
-            result = {}
-            
-            for group, group_data in self._grouped_data.items():
-                group_result = {"group_data": group_data}
+            # If this is the final call, return the aggregated results
+            if self._total_records > 0:
+                result = {}
+                for group, group_data in self._grouped_data.items():
+                    group_result = {}
+                    for agg_name, agg_config in self.aggregations.items():
+                        agg_type = agg_config['type']
+                        agg_field = agg_config['field']
+                        
+                        if agg_type == 'sum':
+                            group_result[agg_name] = sum(item[agg_field] for item in group_data)
+                        elif agg_type == 'avg':
+                            group_result[agg_name] = sum(item[agg_field] for item in group_data) / len(group_data)
+                        elif agg_type == 'count':
+                            group_result[agg_name] = len(group_data)
                 
-                for agg_name, agg_config in self.aggregations.items():
-                    agg_type = agg_config.get("type")
-                    field = agg_config.get("field")
-                    
-                    values = [item.get(field, 0) for item in group_data]
-                    
-                    if agg_type == "sum":
-                        group_result[agg_name] = sum(values)
-                    elif agg_type == "avg":
-                        group_result[agg_name] = sum(values) / len(values) if values else 0
-                    elif agg_type == "count":
-                        group_result[agg_name] = len(values)
-                
-                result[group] = group_result
+                    result[group] = group_result
             
+                return ProcessorResult(
+                    output=result,
+                    metadata={
+                        "group_count": str(len(self._grouped_data)),
+                        "total_records": str(self._total_records)
+                    }
+                )
+            
+            # If no records processed, return empty result
             return ProcessorResult(
-                output=result,
+                output={},
                 metadata={
-                    "group_count": len(self._grouped_data),
-                    "total_records": self._total_records
+                    "group_count": "0",
+                    "total_records": "0"
                 }
             )
         
@@ -482,18 +544,46 @@ class AggregateProcessor(BaseProcessor):
         Returns:
             True if valid, False otherwise
         """
-        return isinstance(input_data, dict)
+        # Check if input is a dictionary
+        if not isinstance(input_data, dict):
+            return False
         
+        # Validate group_by field exists
+        if not self.group_by or self.group_by not in input_data:
+            return False
+        
+        # Validate aggregation fields
+        for agg_config in self.aggregations.values():
+            field = agg_config.get('field')
+            if not field or field not in input_data:
+                return False
+        
+        return True
+
     def get_input_schema(self) -> Dict[str, Any]:
         """Get input schema
         
         Returns:
             JSON schema for input data
         """
-        return {
-            "type": "object"
+        # Build input schema based on group_by and aggregation fields
+        properties = {
+            self.group_by: {"type": ["string", "number", "boolean"]}
         }
+        required = [self.group_by]
         
+        for agg_config in self.aggregations.values():
+            field = agg_config.get('field')
+            if field:
+                properties[field] = {"type": ["number", "null"]}
+                required.append(field)
+        
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": required
+        }
+
     def get_output_schema(self) -> Dict[str, Any]:
         """Get output schema
         

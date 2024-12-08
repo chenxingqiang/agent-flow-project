@@ -206,8 +206,8 @@ async def test_aggregate_processor():
     assert group_b["count"] == 2
     
     # Check metadata
-    assert result.metadata["group_count"] == 2
-    assert result.metadata["total_records"] == 4
+    assert result.metadata["group_count"] == "2"
+    assert result.metadata["total_records"] == "4"
 
 @pytest.mark.asyncio
 async def test_aggregate_processor_process_data():
