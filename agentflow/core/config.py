@@ -36,42 +36,168 @@ class InterfaceContract(BaseModel):
 
 class ModelConfig(BaseModel):
     """Configuration for AI model"""
-    provider: str = Field(default="openai", description="AI model provider")
-    name: str = Field(default="gpt-4", description="Specific model name")
-    temperature: float = Field(default=0.7, description="Sampling temperature")
-    max_tokens: Optional[int] = Field(default=None, description="Maximum token limit")
+    provider: str
+    name: str
+    temperature: float = 0.5
+    max_tokens: Optional[int] = None
+    
+    @field_validator('provider')
+    @classmethod
+    def validate_provider(cls, v: str) -> str:
+        """Validate model provider"""
+        valid_providers = ['openai', 'anthropic', 'google', 'default']
+        if v not in valid_providers:
+            raise ValueError(f"Invalid model provider: {v}. Must be one of {valid_providers}")
+        return v
     
     @field_validator('temperature')
     @classmethod
     def validate_temperature(cls, v: float) -> float:
-        """Validate temperature value."""
-        if not 0.0 <= v <= 1.0:
+        """Validate temperature value"""
+        if v < 0 or v > 1:
             raise ValueError("Temperature must be between 0 and 1")
         return v
 
-class AgentConfig(BaseModel):
-    """Agent配置模型"""
+class WorkflowStep(BaseModel):
+    """工作流步骤配置"""
+    type: str
+    config: Optional[Dict[str, Any]] = None
+
+class WorkflowConfig(BaseModel):
+    """
+    工作流配置类，定义工作流执行的关键参数
+    """
     id: Optional[str] = Field(default_factory=lambda: str(uuid.uuid4()))
     name: Optional[str] = None
-    description: Optional[str] = None
-    type: Optional[str] = "default"
-    agent_type: Optional[str] = "default"
     
-    # 模型和执行配置
-    model: Optional[ModelConfig] = Field(default_factory=ModelConfig)
-    system_prompt: Optional[str] = None
-    tools: Optional[List[str]] = None
-    config: Dict[str, Any] = Field(default_factory=dict)
+    # 工作流执行参数
+    max_iterations: int = 10  # 默认最大迭代次数为10
+    timeout: Optional[int] = None
+    logging_level: str = 'INFO'  # 默认日志级别为INFO
     
-    # 输入输出规范
-    input_specification: Optional[InputSpec] = Field(default_factory=InputSpec)
-    output_specification: Optional[OutputSpec] = Field(default_factory=OutputSpec)
+    # 代理和连接配置
+    agents: Optional[List['AgentConfig']] = None
+    connections: Optional[List[Dict[str, Any]]] = None
+    
+    # 处理器配置
+    processors: Optional[List['ProcessorConfig']] = None
     
     # 执行策略
     execution_policies: Optional[Dict[str, Any]] = None
     
-    # 元数据和额外配置
+    # 元数据
     metadata: Optional[Dict[str, Any]] = None
+    
+    # 步骤配置
+    steps: Optional[List[WorkflowStep]] = None  # 工作流步骤，可选
+    
+    def __init__(self, **data):
+        """
+        初始化方法，确保默认值被正确设置
+        """
+        # 如果没有提供steps，设置为空列表
+        if 'steps' not in data or data['steps'] is None:
+            data['steps'] = []
+        
+        # 如果没有提供execution_policies，设置为空字典
+        if 'execution_policies' not in data or data['execution_policies'] is None:
+            data['execution_policies'] = {}
+        
+        super().__init__(**data)
+    
+    class Config:
+        """
+        Pydantic配置类，启用额外属性和不可变性
+        """
+        extra = 'allow'
+        allow_population_by_field_name = True
+        frozen = False
+    
+    @classmethod
+    def from_dict(cls, workflow_dict: Dict[str, Any]) -> 'WorkflowConfig':
+        """
+        从字典创建WorkflowConfig
+        
+        :param workflow_dict: 工作流配置字典
+        :return: WorkflowConfig实例
+        """
+        # 处理代理配置
+        if 'agents' in workflow_dict:
+            workflow_dict['agents'] = [
+                AgentConfig.from_dict(agent) if isinstance(agent, dict) else agent
+                for agent in workflow_dict['agents']
+            ]
+        
+        # 处理处理器配置
+        if 'processors' in workflow_dict:
+            workflow_dict['processors'] = [
+                ProcessorConfig.from_dict(processor) if isinstance(processor, dict) else processor
+                for processor in workflow_dict['processors']
+            ]
+        
+        # 处理执行策略
+        if 'execution_policies' in workflow_dict:
+            workflow_dict['execution_policies'] = ExecutionPolicies(**workflow_dict['execution_policies'])
+        
+        # 处理步骤配置
+        if 'steps' in workflow_dict:
+            workflow_dict['steps'] = [
+                WorkflowStep(**step) if isinstance(step, dict) else step
+                for step in workflow_dict['steps']
+            ]
+        
+        # 处理默认值
+        workflow_dict.setdefault('id', str(uuid.uuid4()))
+        workflow_dict.setdefault('max_iterations', 10)
+        workflow_dict.setdefault('logging_level', 'INFO')
+        workflow_dict.setdefault('steps', [])
+        
+        return cls(**workflow_dict)
+
+class AgentConfig(BaseModel):
+    """
+    Agent配置类，定义Agent的关键参数和行为
+    """
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    type: str = 'default'
+    agent_type: str = 'default'
+    
+    # 模型配置
+    model: ModelConfig
+    
+    # 工作流配置
+    workflow: WorkflowConfig = Field(default_factory=lambda: WorkflowConfig(max_iterations=10, logging_level='INFO'))
+    
+    # 其他可选配置
+    name: Optional[str] = None
+    description: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+    
+    # 输入输出规范
+    input_specification: Optional[InputSpec] = None
+    output_specification: Optional[OutputSpec] = None
+    
+    def __init__(self, **data):
+        """
+        初始化方法，确保默认值和工作流配置被正确设置
+        """
+        # 处理类型映射
+        if 'type' not in data and 'agent_type' in data:
+            data['type'] = data['agent_type']
+        
+        # 处理默认值
+        data.setdefault('id', str(uuid.uuid4()))
+        data.setdefault('type', 'default')
+        data.setdefault('agent_type', 'default')
+        
+        # 处理输入输出规范
+        if 'input_specification' in data and not isinstance(data['input_specification'], InputSpec):
+            data['input_specification'] = InputSpec(**data['input_specification'])
+        
+        if 'output_specification' in data and not isinstance(data['output_specification'], OutputSpec):
+            data['output_specification'] = OutputSpec(**data['output_specification'])
+        
+        super().__init__(**data)
     
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'AgentConfig':
@@ -90,8 +216,10 @@ class AgentConfig(BaseModel):
         # 处理嵌套的工作流配置
         if 'workflow' in config_dict:
             workflow_config = config_dict.get('workflow', {})
-            config_dict['execution_policies'] = workflow_config
-            config_dict.pop('workflow', None)
+            config_dict['workflow'] = WorkflowConfig(**workflow_config)
+        else:
+            # 总是创建默认工作流配置
+            config_dict['workflow'] = WorkflowConfig(max_iterations=10, logging_level='INFO')
         
         # 处理类型映射
         if 'type' not in config_dict and 'agent_type' in config_dict:
@@ -110,6 +238,49 @@ class AgentConfig(BaseModel):
             config_dict['output_specification'] = OutputSpec(**config_dict['output_specification'])
         
         return cls(**config_dict)
+    
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        """
+        序列化配置，包括工作流详情
+        """
+        dump_dict = super().model_dump(**kwargs)
+        
+        # 确保工作流被正确序列化
+        if isinstance(dump_dict.get('workflow'), WorkflowConfig):
+            dump_dict['workflow'] = dump_dict['workflow'].model_dump()
+        
+        return dump_dict
+    
+    def __setattr__(self, name, value):
+        """Override __setattr__ to prevent modification of immutable attributes"""
+        # 不可变属性列表
+        immutable_attrs = [
+            'id', 'type', 'agent_type', 
+            'model', 'workflow', 
+            'input_specification', 'output_specification'
+        ]
+        
+        if name in immutable_attrs:
+            raise TypeError(f"Cannot modify immutable attribute '{name}'")
+        
+        super().__setattr__(name, value)
+    
+    @field_validator('agent_type')
+    @classmethod
+    def validate_agent_type(cls, v: Optional[str]) -> Optional[str]:
+        """Validate agent type"""
+        valid_types = ['research', 'default', 'analysis', 'generation']
+        if v and v not in valid_types:
+            raise ValueError(f"Invalid agent type: {v}. Must be one of {valid_types}")
+        return v
+    
+    class Config:
+        """
+        Pydantic配置类，启用额外属性和不可变性
+        """
+        extra = 'allow'
+        allow_population_by_field_name = True
+        frozen = True
 
 class ProcessorConfig(BaseModel):
     """Processor configuration"""
@@ -138,62 +309,6 @@ class ExecutionPolicies(BaseModel):
     error_handling: Dict[str, Any] = Field(default_factory=dict, description="Error handling policies")
     steps: List[StepConfig] = Field(default_factory=list, description="Workflow steps")
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
-class WorkflowConfig(BaseModel):
-    """工作流配置模型"""
-    id: Optional[str] = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: Optional[str] = None
-    
-    # 工作流执行参数
-    max_iterations: int = 10
-    timeout: Optional[int] = None
-    logging_level: str = 'INFO'
-    
-    # 代理和连接配置
-    agents: Optional[List[AgentConfig]] = None
-    connections: Optional[List[Dict[str, Any]]] = None
-    
-    # 处理器配置
-    processors: Optional[List[ProcessorConfig]] = None
-    
-    # 执行策略
-    execution_policies: Optional[ExecutionPolicies] = None
-    
-    # 元数据
-    metadata: Optional[Dict[str, Any]] = None
-    
-    @classmethod
-    def from_dict(cls, workflow_dict: Dict[str, Any]) -> 'WorkflowConfig':
-        """
-        从字典创建WorkflowConfig
-        
-        :param workflow_dict: 工作流配置字典
-        :return: WorkflowConfig实例
-        """
-        # 处理代理配置
-        if 'agents' in workflow_dict:
-            workflow_dict['agents'] = [
-                AgentConfig.from_dict(agent) if isinstance(agent, dict) else agent
-                for agent in workflow_dict['agents']
-            ]
-        
-        # 处理处理器配置
-        if 'processors' in workflow_dict:
-            workflow_dict['processors'] = [
-                ProcessorConfig.from_dict(processor) if isinstance(processor, dict) else processor
-                for processor in workflow_dict['processors']
-            ]
-        
-        # 处理执行策略
-        if 'execution_policies' in workflow_dict:
-            workflow_dict['execution_policies'] = ExecutionPolicies(**workflow_dict['execution_policies'])
-        
-        # 处理默认值
-        workflow_dict.setdefault('id', str(uuid.uuid4()))
-        workflow_dict.setdefault('max_iterations', 10)
-        workflow_dict.setdefault('logging_level', 'INFO')
-        
-        return cls(**workflow_dict)
 
 class ConfigManager:
     """Configuration manager for handling config files and validation"""
