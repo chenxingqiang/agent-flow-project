@@ -266,15 +266,10 @@ class WorkflowEngine(BaseWorkflow):
             global_model = {}
             model_params_count = 0
             
-            # 遍历所有结果，收集模型参数
-            for result_key, result_value in results.items():
-                # 跳过非字典类型的结果
-                if not isinstance(result_value, dict):
-                    continue
-                
-                # 尝试获取模型参数
-                model_params = result_value.get('model_params', {})
-                if model_params:
+            # 遍历工作流配置，找到模型参数
+            for workflow_item in self.workflow:
+                if isinstance(workflow_item, dict) and 'model_params' in workflow_item:
+                    model_params = workflow_item['model_params']
                     model_params_count += 1
                     for key, value in model_params.items():
                         global_model[key] = global_model.get(key, 0) + value
@@ -289,11 +284,9 @@ class WorkflowEngine(BaseWorkflow):
             # 层级合并协议
             result_levels = {}
             for result_key, result_value in results.items():
-                if isinstance(result_value, dict):
-                    # 根据处理过的数据标记层级
-                    if result_key.endswith('_processed'):
-                        level_key = result_key.split('_')[0] + '_level_0'
-                        result_levels[level_key] = result_value
+                if result_key.endswith('_processed'):
+                    level_key = result_key.split('_')[0] + '_level_0'
+                    result_levels[level_key] = result_value
             
             return result_levels
         else:
