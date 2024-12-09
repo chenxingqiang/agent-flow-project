@@ -232,17 +232,17 @@ class WorkflowExecutor:
                 "node_config": {
                     "id": node_id,
                     "name": node.name if hasattr(node, 'name') else None,
-                    "type": node.type,
+                    "type": "agent" if isinstance(node, AgentNode) else "processor",
                     "state": str(node.state)
                 },
-                "input_data": input_data,  # Add input data to error details
+                "input_data": input_data,  
                 "failed_nodes": [
                     {
                         "node_id": node_id,
                         "node_config": {
                             "id": node_id,
                             "name": node.name if hasattr(node, 'name') else None,
-                            "type": node.type,
+                            "type": "agent" if isinstance(node, AgentNode) else "processor",
                             "state": str(node.state)
                         },
                         "error": str(e)
@@ -281,13 +281,38 @@ class WorkflowExecutor:
         node_outputs = {}
         node_states = {node_id: NodeState.PENDING for node_id in self.nodes}
 
+        # Process workflow definition if it exists
+        if hasattr(self, 'workflow_def') and 'WORKFLOW' in self.workflow_def:
+            # Resolve workflow references
+            for step in self.workflow_def['WORKFLOW']:
+                # Check if input contains workflow references
+                processed_input = []
+                for input_item in step.get('input', []):
+                    if isinstance(input_item, str) and input_item.startswith('WORKFLOW.'):
+                        # Extract step number from reference
+                        try:
+                            ref_step_num = int(input_item.split('.')[1])
+                            if ref_step_num in node_outputs:
+                                processed_input.append(node_outputs[ref_step_num])
+                            else:
+                                processed_input.append(input_item)
+                        except (IndexError, ValueError):
+                            processed_input.append(input_item)
+                    else:
+                        processed_input.append(input_item)
+                
+                # Update input data with processed references
+                input_data.update({
+                    f'step_{step["step"]}': processed_input
+                })
+
         try:
             # Execute start nodes first
             for node_id in start_nodes:
                 node = self.nodes[node_id]
                 try:
                     output, _ = await self._execute_node(node_id, input_data)
-                    node_outputs[node_id] = output
+                    node_outputs[node.id] = output
                     node_states[node_id] = NodeState.COMPLETED
                     node.state = NodeState.COMPLETED
                     await self._update_node_status(node)
@@ -346,41 +371,46 @@ class WorkflowExecutor:
                     try:
                         await processing_obj.cleanup()
                     except Exception as e:
-                        logger.error(f"Error during cleanup for node {node_id}: {e}")
+                        logger.error(f"Cleanup error for node {node_id}: {e}")
 
-            # Return workflow execution result
             return {
-                "status": "completed",
-                "nodes": node_states
+                "result": node_outputs, 
+                "status": "completed", 
+                "nodes": {node_id: "completed" for node_id in self.nodes},
+                "node_config": {
+                    node_id: {
+                        "id": node_id,
+                        "type": "agent" if isinstance(node, AgentNode) else "processor",
+                        "config": node.config if isinstance(node.config, dict) else node.config.model_dump() if hasattr(node.config, 'model_dump') else {}
+                    }
+                    for node_id, node in self.nodes.items()
+                }
             }
-
         except Exception as e:
-            # Ensure cleanup is called even during errors
-            for node_id, node in self.nodes.items():
-                processing_obj = node.agent if isinstance(node, AgentNode) else node.processor
-                if processing_obj is not None and hasattr(processing_obj, 'cleanup'):
-                    try:
-                        await processing_obj.cleanup()
-                    except Exception as cleanup_error:
-                        logger.error(f"Error during cleanup for node {node_id}: {cleanup_error}")
-
-            # Prepare error details
+            # Log and re-raise the error
+            logger.error(f"Workflow execution failed: {e}")
             error_details = {
                 "error": str(e),
-                "input_data": input_data,
-                "failed_nodes": [{
-                    "node_id": node_id,
-                    "node_config": {
-                        "id": node.id,
-                        "name": node.name if hasattr(node, 'name') else None,
-                        "type": node.type,
-                        "state": str(node.state)
-                    },
-                    "error": str(e)
-                } for node_id, node in self.nodes.items()]
+                "status": "failed",
+                "input_data": input_data,  # Add input data to error details
+                "nodes": {
+                    node_id: "error" if node.state == NodeState.ERROR else "completed"
+                    for node_id, node in self.nodes.items()
+                },
+                "node_config": {
+                    node_id: {
+                        "id": node_id,
+                        "type": "agent" if isinstance(node, AgentNode) else "processor",
+                        "config": node.config if isinstance(node.config, dict) else node.config.model_dump() if hasattr(node.config, 'model_dump') else {}
+                    }
+                    for node_id, node in self.nodes.items()
+                },
+                "failed_nodes": [
+                    {"node_id": node_id, "state": node.state, "error": str(e)}
+                    for node_id, node in self.nodes.items() 
+                    if node.state == NodeState.ERROR
+                ]
             }
-
-            # Raise WorkflowExecutionError
             raise WorkflowExecutionError(error_details) from e
 
     async def _update_node_status(self, node: Node):
