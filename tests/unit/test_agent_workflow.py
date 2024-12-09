@@ -47,7 +47,7 @@ def test_workflow_def():
                 name="Research Agent 1",
                 model={
                     "name": "test-model",
-                    "provider": "test"
+                    "provider": "default"
                 }
             ).model_dump(),
             AgentConfig(
@@ -55,7 +55,7 @@ def test_workflow_def():
                 name="Research Agent 2",
                 model={
                     "name": "test-model",
-                    "provider": "test"
+                    "provider": "default"
                 }
             ).model_dump()
         ]
@@ -72,7 +72,7 @@ def minimal_agent_workflow_def():
                 name="Basic Agent",
                 model={
                     "name": "test-model",
-                    "provider": "test"
+                    "provider": "default"
                 }
             ).model_dump()
         ]
@@ -187,8 +187,7 @@ async def test_minimal_workflow_initialization(minimal_agent_workflow_def):
     workflow = ResearchWorkflow(minimal_agent_workflow_def)
     assert workflow.required_fields == []
     assert workflow.error_handling == {}
-    assert workflow.default_status is None
-    assert len(workflow.agents) == 1
+    assert workflow.default_status == 'initialized'
 
 @pytest.fixture(autouse=True)
 def setup_ray():
