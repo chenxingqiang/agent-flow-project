@@ -3,9 +3,9 @@ from unittest.mock import Mock, patch
 import ray
 from agentflow.core.research_workflow import ResearchWorkflow, DistributedStep
 from agentflow.core.workflow import Workflow
+from agentflow.core.config import WorkflowConfig, ExecutionPolicies, AgentConfig
 from agentflow.core.node import Node, NodeState
 from agentflow.core.rate_limiter import ModelRateLimiter
-from agentflow.core.config import ExecutionPolicies, StepConfig, AgentConfig
 import tenacity
 import os
 
@@ -19,29 +19,30 @@ def mock_ell():
 
 @pytest.fixture
 def test_workflow_def():
-    return {
-        "name": "test_research_workflow",
-        "description": "Test research workflow",
-        "execution_policies": {
-            "required_fields": ["research_topic", "deadline", "academic_level"],
-            "default_status": "pending",
-            "error_handling": {
+    return WorkflowConfig(
+        name="test_research_workflow",
+        description="Test research workflow",
+        execution_policies=ExecutionPolicies(
+            required_fields=["research_topic", "deadline", "academic_level"],
+            default_status="pending",
+            error_handling={
                 "missing_input_error": "Missing required inputs",
                 "missing_field_error": "Missing required fields"
             },
-            "steps": [
-                StepConfig(
-                    id="step_1",
-                    name="Research Step",
-                    agents=["research_agent_1", "research_agent_2"],
-                    input_type="research_topic",
-                    output_type="research_findings",
-                    input=["research_topic"],
-                    output={"type": "research"}
-                ).model_dump()
+            steps=[
+                {
+                    "step": 1,
+                    "id": "1",
+                    "name": "Research Step",
+                    "agents": ["research_agent_1", "research_agent_2"],
+                    "input_type": "research_topic",
+                    "output_type": "research_findings",
+                    "input": ["research_topic"],
+                    "output": {"type": "research"}
+                }
             ]
-        },
-        "agents": [
+        ),
+        agents=[
             AgentConfig(
                 id="research_agent_1",
                 name="Research Agent 1",
@@ -49,7 +50,7 @@ def test_workflow_def():
                     "name": "test-model",
                     "provider": "default"
                 }
-            ).model_dump(),
+            ),
             AgentConfig(
                 id="research_agent_2", 
                 name="Research Agent 2",
@@ -57,9 +58,9 @@ def test_workflow_def():
                     "name": "test-model",
                     "provider": "default"
                 }
-            ).model_dump()
+            )
         ]
-    }
+    )
 
 @pytest.fixture
 def minimal_agent_workflow_def():
@@ -113,7 +114,7 @@ async def test_workflow_execution(test_workflow):
 def test_workflow_step_processing(test_workflow):
     """Test individual step processing"""
     step = test_workflow.research_steps[0]
-    assert step.id == "step_1"
+    assert step.id == "1"
     assert len(step.agents) == 2
     assert step.input_type == "research_topic"
     assert step.output_type == "research_findings"
@@ -178,7 +179,7 @@ async def test_workflow_error_propagation(test_workflow):
 def test_workflow_step_validation(test_workflow):
     """Test step validation"""
     step = test_workflow.research_steps[0]
-    assert step.id == "step_1"
+    assert step.id == "1"
     assert step.name == "Research Step"
 
 @pytest.mark.asyncio

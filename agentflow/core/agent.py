@@ -177,7 +177,7 @@ class Agent:
     def _validate_config(self):
         """验证配置的有效性"""
         # 检查模型提供者
-        valid_providers = {'openai', 'anthropic', 'google', 'test'}
+        valid_providers = {'openai', 'anthropic', 'google', 'test', 'default'}
         if self.model.provider not in valid_providers:
             raise ValueError(f"Unsupported model provider: {self.model.provider}")
         
