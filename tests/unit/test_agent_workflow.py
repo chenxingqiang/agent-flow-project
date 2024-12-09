@@ -61,6 +61,23 @@ def test_workflow_def():
         ]
     }
 
+@pytest.fixture
+def minimal_agent_workflow_def():
+    return {
+        "name": "minimal_agent_workflow",
+        "description": "Minimal agent workflow without execution policies",
+        "agents": [
+            AgentConfig(
+                id="basic_agent",
+                name="Basic Agent",
+                model={
+                    "name": "test-model",
+                    "provider": "test"
+                }
+            ).model_dump()
+        ]
+    }
+
 class TestResearchWorkflow(ResearchWorkflow):
     async def execute_step(self, step_id, input_data):
         return {"result": "test_result"}
@@ -163,6 +180,15 @@ def test_workflow_step_validation(test_workflow):
     step = test_workflow.research_steps[0]
     assert step.id == "step_1"
     assert step.name == "Research Step"
+
+@pytest.mark.asyncio
+async def test_minimal_workflow_initialization(minimal_agent_workflow_def):
+    """Test initialization of workflow without execution policies."""
+    workflow = ResearchWorkflow(minimal_agent_workflow_def)
+    assert workflow.required_fields == []
+    assert workflow.error_handling == {}
+    assert workflow.default_status is None
+    assert len(workflow.agents) == 1
 
 @pytest.fixture(autouse=True)
 def setup_ray():

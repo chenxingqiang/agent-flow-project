@@ -21,11 +21,11 @@ class BaseWorkflow(ABC):
         self.state = {}
         self.logger = logging.getLogger(__name__)
         
-        # 从配置中获取工作流设置
-        self.required_fields = self.config.execution_policies.required_fields
-        self.default_status = self.config.execution_policies.default_status
-        self.error_handling = self.config.execution_policies.error_handling
-        self.steps = self.config.execution_policies.steps
+        # Get workflow settings from config
+        self.required_fields = self.config.execution_policies.required_fields if hasattr(self.config, 'execution_policies') else []
+        self.error_handling = self.config.execution_policies.error_handling if hasattr(self.config, 'execution_policies') else {}
+        self.default_status = self.config.execution_policies.default_status if hasattr(self.config, 'execution_policies') else None
+        self.steps = self.config.execution_policies.steps if hasattr(self.config, 'execution_policies') else []
 
     def initialize_state(self):
         """Initialize workflow state when execution starts"""
@@ -123,7 +123,7 @@ class BaseWorkflow(ABC):
         if not isinstance(output, dict):
             raise ValueError(f"Step {step_number} output must be a dictionary")
             
-        workflow_steps = self.config.execution_policies.steps
+        workflow_steps = self.config.execution_policies.steps if hasattr(self.config, 'execution_policies') else []
         expected_outputs = workflow_steps[step_number - 1].get("outputs", [])
         for field in expected_outputs:
             if field not in output:

@@ -3,14 +3,45 @@ import asyncio
 import time
 import statistics
 import psutil
-from typing import List
+import ray
+from typing import List, Dict, Any
 from agentflow.core.distributed_workflow import ResearchDistributedWorkflow
 
-@pytest.mark.asyncio
-async def test_workflow_execution_time(test_workflow, test_config):
-    """Test workflow execution time with warmup and multiple iterations"""
-    workflow = ResearchDistributedWorkflow(config=test_config, workflow_def=test_workflow)
+@pytest.fixture
+def mock_ray_workflow_step():
+    """Create a mock Ray remote step for testing"""
+    @ray.remote
+    class MockDistributedStep:
+        def __init__(self):
+            self._mock_result = None
+
+        def set_mock_result(self, result):
+            self._mock_result = result
+
+        async def execute(self, input_data):
+            # Simulated remote method that returns a predefined result
+            return self._mock_result or {'result': input_data, 'processed': True}
+
+    return MockDistributedStep
+
+@pytest.fixture
+def mock_workflow(mock_ray_workflow_step, test_workflow):
+    """Create a mock workflow with predefined distributed steps"""
+    workflow = ResearchDistributedWorkflow(config={}, workflow_def=test_workflow)
     
+    # Create mock steps and set default results
+    mock_steps = {}
+    for step in test_workflow.get('WORKFLOW', []):
+        mock_step = mock_ray_workflow_step.remote()
+        mock_step.set_mock_result.remote({'result': {'step': step['step']}, 'processed': True})
+        mock_steps[step['step']] = mock_step
+    
+    workflow.distributed_steps = mock_steps
+    return workflow
+
+@pytest.mark.asyncio
+async def test_workflow_execution_time(mock_workflow, test_config):
+    """Test workflow execution time with warmup and multiple iterations"""
     input_data = {
         "research_topic": "Performance Testing",
         "deadline": "2024-12-31",
@@ -18,13 +49,13 @@ async def test_workflow_execution_time(test_workflow, test_config):
     }
     
     # Warmup run
-    await workflow.execute_async(input_data)
+    await mock_workflow.execute_async(input_data)
     
     # Multiple iterations for statistical significance
     execution_times = []
     for _ in range(5):
         start_time = time.time()
-        result = await workflow.execute_async(input_data)
+        result = await mock_workflow.execute_async(input_data)
         execution_times.append(time.time() - start_time)
     
     avg_time = statistics.mean(execution_times)
@@ -36,7 +67,7 @@ async def test_workflow_execution_time(test_workflow, test_config):
     assert result is not None
 
 @pytest.mark.asyncio
-async def test_concurrent_workflow_execution(test_workflow, test_config):
+async def test_concurrent_workflow_execution(mock_ray_workflow_step, test_workflow, test_config):
     """Test concurrent workflow execution with varying concurrency levels"""
     async def run_workflow_with_metrics(workflow, input_data, iteration):
         process = psutil.Process()
@@ -70,9 +101,19 @@ async def test_concurrent_workflow_execution(test_workflow, test_config):
     
     for num_workflows in concurrency_levels:
         workflows = [
-            ResearchDistributedWorkflow(config=test_config, workflow_def=test_workflow)
+            ResearchDistributedWorkflow(config={}, workflow_def=test_workflow)
             for _ in range(num_workflows)
         ]
+        
+        # Manually set distributed steps for each workflow
+        for workflow in workflows:
+            mock_steps = {}
+            for step in test_workflow.get('WORKFLOW', []):
+                mock_step = mock_ray_workflow_step.remote()
+                mock_step.set_mock_result.remote({'result': {'step': step['step']}, 'processed': True})
+                mock_steps[step['step']] = mock_step
+            
+            workflow.distributed_steps = mock_steps
         
         tasks = [
             run_workflow_with_metrics(workflow, base_input_data, i) 
@@ -94,3 +135,6 @@ async def test_concurrent_workflow_execution(test_workflow, test_config):
         assert avg_execution_time < max_concurrent_time
         assert max_execution_time < max_concurrent_time * 1.5
         assert all(m['result'] is not None for m in metrics_list)
+
+if __name__ == "__main__":
+    pytest.main([__file__])

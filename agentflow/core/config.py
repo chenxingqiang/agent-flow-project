@@ -63,6 +63,15 @@ class WorkflowStep(BaseModel):
     type: str
     config: Optional[Dict[str, Any]] = None
 
+class ExecutionPolicies(BaseModel):
+    """Execution policies configuration"""
+    required_fields: List[str] = Field(default_factory=list)
+    default_status: str = "initialized"
+    error_handling: Dict[str, str] = Field(default_factory=lambda: {
+        "missing_field_error": "Missing required fields: {}",
+        "missing_input_error": "Empty input data"
+    })
+
 class WorkflowConfig(BaseModel):
     """
     工作流配置类，定义工作流执行的关键参数
@@ -83,13 +92,16 @@ class WorkflowConfig(BaseModel):
     processors: Optional[List['ProcessorConfig']] = None
     
     # 执行策略
-    execution_policies: Optional[Dict[str, Any]] = None
+    execution_policies: ExecutionPolicies = Field(default_factory=ExecutionPolicies)
     
     # 元数据
     metadata: Optional[Dict[str, Any]] = None
     
     # 步骤配置
     steps: Optional[List[WorkflowStep]] = None  # 工作流步骤，可选
+    
+    # 协作配置
+    collaboration: Dict[str, Any] = Field(default_factory=dict)
     
     def __init__(self, **data):
         """
@@ -290,14 +302,6 @@ class StepConfig(BaseModel):
     output_type: str = Field(..., description="Output type for the step")
     input: List[str] = Field(default_factory=list, description="Required input fields")
     output: Dict[str, Any] = Field(default_factory=dict, description="Output configuration")
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-class ExecutionPolicies(BaseModel):
-    """Configuration for workflow execution policies"""
-    required_fields: List[str] = Field(default_factory=list, description="Required input fields")
-    default_status: str = Field(default="initialized", description="Default workflow status")
-    error_handling: Dict[str, Any] = Field(default_factory=dict, description="Error handling policies")
-    steps: List[StepConfig] = Field(default_factory=list, description="Workflow steps")
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 class ConfigManager:

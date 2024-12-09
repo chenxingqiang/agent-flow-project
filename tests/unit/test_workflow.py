@@ -45,8 +45,17 @@ def base_workflow_config():
             "error_handling": {
                 "missing_input_error": "Empty input data",
                 "missing_field_error": "Missing required fields: {}"
-            }
+            },
+            "steps": []
         }
+    }
+
+@pytest.fixture
+def minimal_workflow_config():
+    """Minimal workflow configuration without execution policies."""
+    return {
+        "name": "minimal_workflow",
+        "description": "Minimal workflow without execution policies"
     }
 
 @pytest.fixture
@@ -377,6 +386,15 @@ class TestWorkflowExecution:
         assert len(workflow._agent_cache) == 1
         second_agent = workflow._agent_cache.get('agent1')
         assert second_agent is first_agent
+
+    @pytest.mark.asyncio
+    async def test_workflow_without_execution_policies(self, minimal_workflow_config):
+        """Test workflow initialization without execution policies."""
+        workflow = WorkflowEngine(minimal_workflow_config)
+        assert workflow.required_fields == []
+        assert workflow.error_handling == {}
+        assert workflow.default_status is None
+        assert workflow.steps == []
 
 if __name__ == "__main__":
     pytest.main([__file__])

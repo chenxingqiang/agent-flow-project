@@ -96,6 +96,36 @@ def test_config():
     }
 
 @pytest.fixture
+def minimal_distributed_workflow():
+    """Create a minimal distributed workflow definition without execution policies."""
+    return {
+        "name": "minimal_distributed_workflow",
+        "description": "Minimal distributed workflow",
+        "WORKFLOW": [
+            StepConfig(
+                id="step_1",
+                step=1,
+                name="Basic Step",
+                agents=["basic_agent"],
+                input_type="text",
+                output_type="text",
+                input=["input_text"],
+                output={"type": "text"}
+            ).model_dump()
+        ],
+        "agents": [
+            AgentConfig(
+                id="basic_agent",
+                name="Basic Agent",
+                model={
+                    "name": "test-model",
+                    "provider": "test"
+                }
+            ).model_dump()
+        ]
+    }
+
+@pytest.fixture
 def mock_research_step():
     """Create a mock research step actor"""
     @ray.remote
@@ -149,6 +179,15 @@ async def test_distributed_workflow_initialization(test_workflow, test_config):
     assert workflow.state_manager is not None
     assert workflow.retry_config is not None
     assert workflow.retry_config.max_retries == 3
+
+@pytest.mark.asyncio
+async def test_minimal_distributed_workflow(minimal_distributed_workflow, test_config):
+    """Test distributed workflow initialization without execution policies."""
+    workflow = DistributedWorkflow(minimal_distributed_workflow, test_config)
+    assert workflow.required_fields == []
+    assert workflow.error_handling == {}
+    assert workflow.default_status is None
+    assert len(workflow.workflow_steps) == 1
 
 @pytest.mark.asyncio
 async def test_distributed_workflow_execution(test_workflow, test_config, mock_research_step, mock_document_step):
