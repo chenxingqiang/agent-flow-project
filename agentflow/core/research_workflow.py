@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from .base_workflow import BaseWorkflow
 from .config import WorkflowConfig, AgentConfig, ExecutionPolicies
 from .agent import Agent
+import asyncio
 
 @dataclass
 class DistributedStep:
@@ -53,40 +54,51 @@ class ResearchWorkflow(BaseWorkflow):
         """
         # Convert dict to WorkflowConfig if needed
         if isinstance(workflow_def, dict):
-            if 'execution_policies' not in workflow_def:
-                workflow_def['execution_policies'] = {
-                    'required_fields': workflow_def.get('required_fields', []),
-                    'default_status': workflow_def.get('default_status', 'initialized'),
-                    'error_handling': workflow_def.get('error_handling', {}),
-                    'steps': workflow_def.get('steps', [])
-                }
-            
+            # Prepare execution policies
+            execution_policies = {
+                'required_fields': workflow_def.get('required_inputs', []),
+                'default_status': workflow_def.get('default_status', 'initialized'),
+                'error_handling': workflow_def.get('error_handling', {}),
+                'steps': workflow_def.get('steps', [
+                    {
+                        'step': workflow_def.get('step', 1),
+                        'type': workflow_def.get('type', 'research'),
+                        'name': workflow_def.get('name', 'Research Workflow'),
+                        'description': workflow_def.get('description', ''),
+                        'input_type': 'dict',
+                        'output_type': 'dict',
+                        'agents': [],
+                        'outputs': workflow_def.get('outputs', [])
+                    }
+                ])
+            }
+
             workflow_def = WorkflowConfig(
                 id=workflow_def.get('name', 'research_workflow'),
                 name=workflow_def.get('name', 'Research Workflow'),
                 description=workflow_def.get('description', ''),
-                agents=[AgentConfig(**agent) for agent in workflow_def.get('agents', [])],
-                execution_policies=ExecutionPolicies(**workflow_def['execution_policies'])
+                agents=[],  # No agents by default
+                execution_policies=ExecutionPolicies(**execution_policies)
             )
-        
+
         super().__init__(workflow_def)
         self.research_steps: List[DistributedStep] = []
         self.agents: List[Agent] = []
-        
+
         # Initialize agents from config
         if workflow_def.agents:
             for agent_config in workflow_def.agents:
                 agent = Agent(config=agent_config)
                 self.agents.append(agent)
-        
+
         # Initialize research steps from config
         for step in workflow_def.execution_policies.steps:
             self.add_research_step(DistributedStep(
-                id=step.id,
-                name=step.name,
-                input_type=step.input_type,
-                output_type=step.output_type,
-                agents=step.agents
+                id=str(step.get('step', 1)),  # Convert step to string
+                name=step.get('name', f'Step {step.get("step", 1)}'),
+                input_type=step.get('input_type', 'dict'),
+                output_type=step.get('output_type', 'dict'),
+                agents=step.get('agents', [])
             ))
 
     def initialize_state(self):
@@ -175,3 +187,37 @@ class ResearchWorkflow(BaseWorkflow):
         # Placeholder implementation for stopping workflow
         for agent in self.agents:
             agent.stop()
+            
+    def execute_step(self, step: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a single step in the research workflow
+        
+        Args:
+            step: Current step definition
+            inputs: Input data for the step
+            
+        Returns:
+            Dict containing step results
+        """
+        # If no agents are defined, return inputs
+        if not step.get('agents', []):
+            return inputs
+        
+        # Find an agent for this step
+        agent_id = step['agents'][0]  # Take the first agent
+        agent = self.get_agent(agent_id)
+        
+        if not agent:
+            raise ValueError(f"No agent found for step: {step}")
+        
+        # Process the step with the selected agent
+        try:
+            result = asyncio.run(agent.process(inputs))
+            
+            # Validate the step output
+            self.validate_step_output(step.get('step', 1), result)
+            
+            return result
+        except Exception as e:
+            # Handle step execution errors
+            error_handler = self.error_handling.get('handler', self._default_error_handler)
+            return error_handler(e, inputs)
