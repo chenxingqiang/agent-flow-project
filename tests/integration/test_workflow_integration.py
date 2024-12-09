@@ -7,13 +7,16 @@ import asyncio
 from typing import List, Dict, Any
 
 from agentflow.core.config_manager import (
-    ConfigManager, 
-    AgentConfig, 
-    ModelConfig, 
-    WorkflowConfig
+    ConfigManager, ModelConfig
 )
 from agentflow.core.workflow_executor import WorkflowExecutor, WorkflowManager
-from agentflow.core.templates import TemplateManager, WorkflowTemplate
+from agentflow.core.templates import (
+    TemplateManager, 
+    WorkflowTemplate, 
+    TemplateParameter, 
+    WorkflowConfig, 
+    AgentConfig
+)
 from agentflow.core.processors.transformers import (
     FilterProcessor, 
     TransformProcessor, 
@@ -78,6 +81,7 @@ async def test_research_workflow_integration(config_manager, template_manager):
                     id="research-agent-{{ domain }}",
                     name="Research Agent for {{ domain }}",
                     type="research",
+                    description="Agent for {{ domain }} research",
                     model=ModelConfig(
                         name="research-model",
                         provider="openai"
@@ -88,7 +92,8 @@ async def test_research_workflow_integration(config_manager, template_manager):
             processors=[
                 {
                     "id": "filter-processor",
-                    "type": "filter",
+                    "type": "processor",
+                    "processor": "agentflow.core.processors.transformers.FilterProcessor",
                     "config": {
                         "conditions": [
                             {"field": "insights", "operator": "exists"}
@@ -97,7 +102,8 @@ async def test_research_workflow_integration(config_manager, template_manager):
                 },
                 {
                     "id": "transform-processor",
-                    "type": "transform",
+                    "type": "processor",
+                    "processor": "agentflow.core.processors.transformers.TransformProcessor",
                     "config": {
                         "transformations": {
                             "research_summary": "domain + ': ' + insights"
@@ -162,7 +168,8 @@ async def test_data_processing_workflow_integration():
         processors=[
             {
                 "id": "filter-tech",
-                "type": "filter",
+                "type": "processor",
+                "processor": "agentflow.core.processors.transformers.FilterProcessor",
                 "config": {
                     "conditions": [
                         {"field": "category", "operator": "eq", "value": "tech"}
@@ -171,7 +178,8 @@ async def test_data_processing_workflow_integration():
             },
             {
                 "id": "transform-tech",
-                "type": "transform",
+                "type": "processor",
+                "processor": "agentflow.core.processors.transformers.TransformProcessor",
                 "config": {
                     "transformations": {
                         "normalized_value": "value / 100",
@@ -181,7 +189,8 @@ async def test_data_processing_workflow_integration():
             },
             {
                 "id": "aggregate-tech",
-                "type": "aggregate",
+                "type": "processor",
+                "processor": "agentflow.core.processors.transformers.AggregateProcessor",
                 "config": {
                     "group_by": "source_type",
                     "aggregations": {
@@ -204,9 +213,9 @@ async def test_data_processing_workflow_integration():
     executor = WorkflowExecutor(workflow_config)
     
     # Process input data through processors
-    filter_processor = FilterProcessor(workflow_config.processors[0]['config'])
-    transform_processor = TransformProcessor(workflow_config.processors[1]['config'])
-    aggregate_processor = AggregateProcessor(workflow_config.processors[2]['config'])
+    filter_processor = FilterProcessor({"conditions": workflow_config.processors[0].config.get("conditions")})
+    transform_processor = TransformProcessor({"transformations": workflow_config.processors[1].config.get("transformations")})
+    aggregate_processor = AggregateProcessor({"group_by": workflow_config.processors[2].config.get("group_by"), "aggregations": workflow_config.processors[2].config.get("aggregations")})
     
     # Process data through workflow
     filtered_data = []
@@ -220,17 +229,23 @@ async def test_data_processing_workflow_integration():
         transform_result = await transform_processor.process(item)
         transformed_data.append(transform_result.output)
     
-    aggregate_result = await aggregate_processor.process(transformed_data[0])
-    for item in transformed_data[1:]:
+    # Accumulate aggregate results
+    aggregate_results = None
+    for item in transformed_data:
         aggregate_result = await aggregate_processor.process(item)
-    
+        if aggregate_result.output:
+            aggregate_results = aggregate_result
+
     # Verify processing results
     assert len(filtered_data) == 2  # Only tech category
     assert all(item['category'] == 'tech' for item in filtered_data)
-    
+
     assert len(transformed_data) == 2
     assert all('normalized_value' in item for item in transformed_data)
     assert all('source_type' in item for item in transformed_data)
+
+    assert aggregate_results is not None
+    assert len(aggregate_results.output) > 0  # Ensure non-empty output
     
-    assert aggregate_result.output
-    assert len(aggregate_result.output) > 0
+    # Print out aggregate results for debugging
+    print("Aggregate Results:", aggregate_results.output)

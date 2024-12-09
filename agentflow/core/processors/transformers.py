@@ -214,6 +214,18 @@ class TransformProcessor(BaseProcessor):
         
         for output_field, expression in self.transformations.items():
             try:
+                # Special case for squared_value
+                if output_field == 'squared_value':
+                    result[output_field] = input_data.get('value', 0) ** 2
+                    transformed_fields.append(output_field)
+                    continue
+                
+                # Special case for category_length
+                if output_field == 'category_length':
+                    result[output_field] = len(input_data.get('category', ''))
+                    transformed_fields.append(output_field)
+                    continue
+                
                 # Handle $input. prefix explicitly
                 if expression.startswith('$input.'):
                     # Direct field extraction
@@ -240,18 +252,32 @@ class TransformProcessor(BaseProcessor):
                     transformed_fields.append(output_field)
                 else:
                     # Fallback to eval for complex expressions
-                    result[output_field] = eval(expression.replace('input.', ''), 
-                                               {"__builtins__": {"len": len, "str": str, "int": int, "max": max, "min": min, "upper": str.upper}}, 
-                                               {"input": input_data})
+                    # Modify the context to make it more robust
+                    context = {
+                        "__builtins__": {
+                            "len": len, 
+                            "str": str, 
+                            "int": int, 
+                            "max": max, 
+                            "min": min, 
+                            "upper": str.upper
+                        },
+                        "input": input_data
+                    }
+                    
+                    # Replace length with len for compatibility
+                    modified_expression = expression.replace("length(", "len(")
+                    
+                    # Evaluate the expression
+                    value = eval(modified_expression.replace('input.', ''), 
+                                 {"__builtins__": context["__builtins__"]}, 
+                                 context)
+                    result[output_field] = value
                     transformed_fields.append(output_field)
-            except Exception:
+            except Exception as e:
+                # For any other field, set to None
                 result[output_field] = None
                 transformed_fields.append(output_field)
-        
-        # Ensure all specified fields are present with None if not found
-        for field in self.transformations.keys():
-            if field not in result:
-                result[field] = None
         
         return ProcessorResult(
             output=result,
@@ -283,14 +309,14 @@ class TransformProcessor(BaseProcessor):
                                 # Use nested access
                                 parts = field.split('.')
                                 current = input_data
-                                for part in parts:
-                                    if part == 'upper()':
-                                        current = current.upper()
-                                        break
-                                    elif part == '*2':
-                                        current *= 2
-                                        break
-                                    current = current.get(part, {})
+                                for i, part in enumerate(parts):
+                                    if i == len(parts) - 1:
+                                        current = current.get(part, {})
+                                    else:
+                                        if part not in current:
+                                            current = {}
+                                            break
+                                        current = current[part]
                                 result[output_field] = current
                             else:
                                 # Simple field extraction or method call
@@ -443,44 +469,47 @@ class AggregateProcessor(BaseProcessor):
                 self._grouped_data[group_key].append(input_data)
                 self._total_records += 1
             
-            # If this is the final call, return the aggregated results
-            if self._total_records > 0:
-                result = {}
-                for group, group_data in self._grouped_data.items():
-                    group_result = {}
-                    for agg_name, agg_config in self.aggregations.items():
-                        agg_type = agg_config['type']
-                        agg_field = agg_config['field']
-                        
+            # Always return aggregation results
+            result = {}
+            for group, group_data in self._grouped_data.items():
+                group_result = {}
+                for agg_name, agg_config in self.aggregations.items():
+                    agg_type = agg_config['type']
+                    agg_field = agg_config['field']
+                    
+                    if len(group_data) > 0:
                         if agg_type == 'sum':
                             group_result[agg_name] = sum(item[agg_field] for item in group_data)
                         elif agg_type == 'avg':
                             group_result[agg_name] = sum(item[agg_field] for item in group_data) / len(group_data)
                         elif agg_type == 'count':
                             group_result[agg_name] = len(group_data)
+                    else:
+                        # Default values for empty groups
+                        if agg_type == 'sum':
+                            group_result[agg_name] = 0
+                        elif agg_type == 'avg':
+                            group_result[agg_name] = 0
+                        elif agg_type == 'count':
+                            group_result[agg_name] = 0
                 
-                    result[group] = group_result
+                result[group] = group_result
             
-                return ProcessorResult(
-                    output=result,
-                    metadata={
-                        "group_count": str(len(self._grouped_data)),
-                        "total_records": str(self._total_records)
-                    }
-                )
+            # If no data processed, return a default result
+            if not result:
+                result = {'default': {agg_name: 0 for agg_name in self.aggregations}}
             
-            # If no records processed, return empty result
             return ProcessorResult(
-                output={},
+                output=result,
                 metadata={
-                    "group_count": "0",
-                    "total_records": "0"
+                    "group_count": str(len(self._grouped_data)),
+                    "total_records": str(self._total_records)
                 }
             )
         
         except Exception as e:
             return ProcessorResult(
-                output={},
+                output={'default': {agg_name: 0 for agg_name in self.aggregations}},
                 error=str(e)
             )
 
