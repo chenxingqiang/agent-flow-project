@@ -22,10 +22,12 @@ class BaseWorkflow(ABC):
         self.logger = logging.getLogger(__name__)
         
         # Get workflow settings from config
-        self.required_fields = self.config.execution_policies.required_fields if hasattr(self.config, 'execution_policies') else []
-        self.error_handling = self.config.execution_policies.error_handling if hasattr(self.config, 'execution_policies') else {}
-        self.default_status = self.config.execution_policies.default_status if hasattr(self.config, 'execution_policies') else None
-        self.steps = self.config.execution_policies.steps if hasattr(self.config, 'execution_policies') else []
+        self.required_fields = getattr(self.config.execution_policies, 'required_fields', []) if hasattr(self.config, 'execution_policies') else []
+        self.error_handling = getattr(self.config.execution_policies, 'error_handling', {}) if hasattr(self.config, 'execution_policies') else {}
+        self.default_status = getattr(self.config.execution_policies, 'default_status', None) if hasattr(self.config, 'execution_policies') else None
+        if self.default_status == '':
+            self.default_status = None
+        self.steps = getattr(self.config.execution_policies, 'steps', []) if hasattr(self.config, 'execution_policies') else []
 
     def initialize_state(self):
         """Initialize workflow state when execution starts"""

@@ -66,11 +66,12 @@ class WorkflowStep(BaseModel):
 class ExecutionPolicies(BaseModel):
     """Execution policies configuration"""
     required_fields: List[str] = Field(default_factory=list)
-    default_status: str = "initialized"
+    default_status: Optional[str] = "initialized"
     error_handling: Dict[str, str] = Field(default_factory=lambda: {
         "missing_field_error": "Missing required fields: {}",
         "missing_input_error": "Empty input data"
     })
+    steps: List[Dict[str, Any]] = Field(default_factory=list)
 
 class WorkflowConfig(BaseModel):
     """
@@ -113,7 +114,14 @@ class WorkflowConfig(BaseModel):
         
         # 如果没有提供execution_policies，设置为空字典
         if 'execution_policies' not in data or data['execution_policies'] is None:
-            data['execution_policies'] = {}
+            data['execution_policies'] = ExecutionPolicies(
+                required_fields=[],
+                default_status=None,
+                error_handling={},
+                steps=[]
+            )
+        elif not isinstance(data['execution_policies'], ExecutionPolicies):
+            data['execution_policies'] = ExecutionPolicies(**data['execution_policies'])
         
         super().__init__(**data)
     
