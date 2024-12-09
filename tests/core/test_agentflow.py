@@ -25,11 +25,20 @@ async def test_create_workflow(agentflow_instance):
                 id="test-agent",
                 name="Test Agent",
                 type="test",
-                model=ModelConfig(name="test-model", provider="test")
+                model=ModelConfig(name="test-model", provider="default"),
+                config={"test_key": "test_value"}
             )
         ]
     )
     
+    # Verify workflow configuration
+    assert workflow_config.id == "test-workflow"
+    assert workflow_config.name == "Test Workflow"
+    assert len(workflow_config.agents) == 1
+    assert workflow_config.agents[0].id == "test-agent"
+    assert workflow_config.agents[0].model.provider == "default"
+    assert workflow_config.agents[0].config == {"test_key": "test_value"}
+
     workflow = agentflow_instance.create_workflow("test-workflow", workflow_config)
     
     assert workflow is not None
@@ -46,11 +55,20 @@ async def test_execute_workflow(agentflow_instance):
                 id="test-agent",
                 name="Test Agent",
                 type="test",
-                model=ModelConfig(name="test-model", provider="test")
+                model=ModelConfig(name="test-model", provider="default"),
+                config={"test_key": "test_value"}
             )
         ]
     )
     
+    # Verify workflow configuration
+    assert workflow_config.id == "test-workflow"
+    assert workflow_config.name == "Test Workflow"
+    assert len(workflow_config.agents) == 1
+    assert workflow_config.agents[0].id == "test-agent"
+    assert workflow_config.agents[0].model.provider == "default"
+    assert workflow_config.agents[0].config == {"test_key": "test_value"}
+
     workflow = agentflow_instance.create_workflow("test-workflow", workflow_config)
     
     results = await agentflow_instance.execute_workflow("test-workflow")
@@ -105,11 +123,20 @@ async def test_stop_workflow(agentflow_instance):
                 id="test-agent",
                 name="Test Agent",
                 type="test",
-                model=ModelConfig(name="test-model", provider="test")
+                model=ModelConfig(name="test-model", provider="default"),
+                config={"test_key": "test_value"}
             )
         ]
     )
     
+    # Verify workflow configuration
+    assert workflow_config.id == "stop-workflow"
+    assert workflow_config.name == "Stop Workflow"
+    assert len(workflow_config.agents) == 1
+    assert workflow_config.agents[0].id == "test-agent"
+    assert workflow_config.agents[0].model.provider == "default"
+    assert workflow_config.agents[0].config == {"test_key": "test_value"}
+
     workflow = agentflow_instance.create_workflow("stop-workflow", workflow_config)
     await agentflow_instance.execute_workflow("stop-workflow")
     
