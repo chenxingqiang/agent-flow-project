@@ -100,38 +100,36 @@ def test_sync_workflow_execution(server):
     url = f"{server.base_url}/workflow/execute"
 
     workflow_config = {
-        "workflow": {
-            "WORKFLOW": [
-                {
-                    "input": ["research_topic", "deadline", "academic_level"],
-                    "output": {"type": "research"},
-                    "step": 1,
-                    "agent_config": {
-                        "model": {
-                            "provider": "openai",
-                            "name": "gpt-3.5-turbo"
-                        },
-                        "type": "research_agent",
-                        "system_prompt": "You are a research assistant",
-                        "id": "research_step"
-                    }
-                },
-                {
-                    "input": ["WORKFLOW.1"],
-                    "output": {"type": "document"},
-                    "step": 2,
-                    "agent_config": {
-                        "model": {
-                            "provider": "openai",
-                            "name": "gpt-3.5-turbo"
-                        },
-                        "type": "document_agent",
-                        "system_prompt": "You are a document generation assistant",
-                        "id": "document_step"
-                    }
+        "workflow_steps": [
+            {
+                "input": ["research_topic", "deadline", "academic_level"],
+                "output": "research",
+                "step": 1,
+                "agent_config": {
+                    "model": {
+                        "provider": "openai",
+                        "name": "gpt-3.5-turbo"
+                    },
+                    "type": "research_agent",
+                    "system_prompt": "You are a research assistant",
+                    "id": "research_step"
                 }
-            ]
-        },
+            },
+            {
+                "input": ["research_step_output"],
+                "output": "document",
+                "step": 2,
+                "agent_config": {
+                    "model": {
+                        "provider": "openai",
+                        "name": "gpt-3.5-turbo"
+                    },
+                    "type": "document_agent",
+                    "system_prompt": "You are a document generation assistant",
+                    "id": "document_step"
+                }
+            }
+        ],
         "input_data": {
             "research_topic": "API Testing in Distributed Systems",
             "deadline": "2024-05-15",
@@ -164,38 +162,36 @@ def test_async_workflow_execution(server):
     execute_url = f"{server.base_url}/workflow/execute_async"
 
     workflow_config = {
-        "workflow": {
-            "WORKFLOW": [
-                {
-                    "input": ["research_topic", "deadline", "academic_level"],
-                    "output": {"type": "research"},
-                    "step": 1,
-                    "agent_config": {
-                        "model": {
-                            "provider": "openai",
-                            "name": "gpt-3.5-turbo"
-                        },
-                        "type": "research_agent",
-                        "system_prompt": "You are a research assistant",
-                        "id": "research_step"
-                    }
-                },
-                {
-                    "input": ["WORKFLOW.1"],
-                    "output": {"type": "document"},
-                    "step": 2,
-                    "agent_config": {
-                        "model": {
-                            "provider": "openai",
-                            "name": "gpt-3.5-turbo"
-                        },
-                        "type": "document_agent",
-                        "system_prompt": "You are a document generation assistant",
-                        "id": "document_step"
-                    }
+        "workflow_steps": [
+            {
+                "input": ["research_topic", "deadline", "academic_level"],
+                "output": "research",
+                "step": 1,
+                "agent_config": {
+                    "model": {
+                        "provider": "openai",
+                        "name": "gpt-3.5-turbo"
+                    },
+                    "type": "research_agent",
+                    "system_prompt": "You are a research assistant",
+                    "id": "research_step"
                 }
-            ]
-        },
+            },
+            {
+                "input": ["research_step_output"],
+                "output": "document",
+                "step": 2,
+                "agent_config": {
+                    "model": {
+                        "provider": "openai",
+                        "name": "gpt-3.5-turbo"
+                    },
+                    "type": "document_agent",
+                    "system_prompt": "You are a document generation assistant",
+                    "id": "document_step"
+                }
+            }
+        ],
         "input_data": {
             "research_topic": "Async API Testing",
             "deadline": "2024-06-15",

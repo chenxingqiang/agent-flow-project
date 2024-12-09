@@ -14,10 +14,12 @@ async def test_federated_learning_protocol():
             "WORKFLOW": [
                 {
                     "name": "local_model_1",
+                    "agent_type": "test",
                     "model_params": {"weight1": 0.1, "bias1": 0.2}
                 },
                 {
-                    "name": "local_model_2", 
+                    "name": "local_model_2",
+                    "agent_type": "test",
                     "model_params": {"weight1": 0.3, "bias1": 0.4}
                 }
             ]
@@ -99,11 +101,19 @@ async def test_invalid_communication_protocol():
         "COLLABORATION": {
             "MODE": "SEQUENTIAL",
             "COMMUNICATION_PROTOCOL": {
-                "TYPE": "UNKNOWN_PROTOCOL"
+                "TYPE": "GOSSIP"
             },
             "WORKFLOW": [
-                {"name": "agent_1"},
-                {"name": "agent_2"}
+                {
+                    "name": "low_level_agent_1",
+                    "agent_type": "test",
+                    "model_params": {"weight1": 0.1, "bias1": 0.2}
+                },
+                {
+                    "name": "low_level_agent_2",
+                    "agent_type": "test",
+                    "model_params": {"weight1": 0.3, "bias1": 0.4}
+                }
             ]
         }
     }
@@ -129,3 +139,62 @@ async def test_empty_workflow():
     result = await workflow.execute({"task": "test_empty_workflow"})
     
     assert result == {}
+
+@pytest.mark.asyncio
+async def test_hierarchical_merge_protocol_with_test_agent():
+    workflow_config = {
+        "COLLABORATION": {
+            "MODE": "SEQUENTIAL",
+            "COMMUNICATION_PROTOCOL": {
+                "TYPE": "HIERARCHICAL_MERGE"
+            },
+            "WORKFLOW": [
+                {
+                    "name": "high_level_agent",
+                    "agent_type": "test",
+                    "model_params": {"weight1": 0.5, "bias1": 0.3}
+                },
+                {
+                    "name": "low_level_agent_1",
+                    "agent_type": "test",
+                    "model_params": {"weight1": 0.1, "bias1": 0.2}
+                },
+                {
+                    "name": "low_level_agent_2",
+                    "agent_type": "test",
+                    "model_params": {"weight1": 0.3, "bias1": 0.4}
+                }
+            ]
+        }
+    }
+    
+    workflow = WorkflowEngine(workflow_config)
+    result = await workflow.execute({"task": "test_hierarchical_merge_protocol_with_test_agent"})
+    
+    assert len(result) > 0
+
+@pytest.mark.asyncio
+async def test_invalid_communication_protocol_with_test_agent():
+    workflow_config = {
+        "COLLABORATION": {
+            "MODE": "SEQUENTIAL",
+            "COMMUNICATION_PROTOCOL": {
+                "TYPE": "UNKNOWN_PROTOCOL"
+            },
+            "WORKFLOW": [
+                {
+                    "name": "agent_1",
+                    "agent_type": "test"
+                },
+                {
+                    "name": "agent_2",
+                    "agent_type": "test"
+                }
+            ]
+        }
+    }
+    
+    workflow = WorkflowEngine(workflow_config)
+    result = await workflow.execute({"task": "test_invalid_protocol_with_test_agent"})
+    
+    assert len(result) > 0  # 应该使用默认合并策略

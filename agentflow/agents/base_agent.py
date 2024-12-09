@@ -44,7 +44,7 @@ class BaseTestAgent(Agent):
             self.agent_config.description or ''
         )
 
-    @ell.complex()
+    @ell.complex(model='gpt-3.5-turbo')
     def _generate_llm_response(self, messages: List[ell.Message]) -> List[ell.Message]:
         """
         使用ell-ai生成LLM响应
@@ -93,7 +93,7 @@ class BaseTestAgent(Agent):
         # 对于测试场景，直接返回一个默认响应
         return f"Agent {self.name} processed task: {task}"
 
-    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行逻辑，支持LLM处理
         
