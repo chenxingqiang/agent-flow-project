@@ -8,35 +8,57 @@ from typing import List, Dict, Any
 from agentflow.core.distributed_workflow import ResearchDistributedWorkflow
 
 @pytest.fixture
+def test_workflow():
+    """Fixture for a test workflow definition"""
+    return {
+        'WORKFLOW': [
+            {'input': ['research_topic', 'deadline', 'academic_level'], 'output': {'type': 'research'}, 'step': 1},
+            {'input': ['WORKFLOW.1'], 'output': {'type': 'document'}, 'step': 2}
+        ]
+    }
+
+@pytest.fixture
+def test_config():
+    """Fixture for test configuration"""
+    return {
+        'max_execution_time': 5.0,
+        'max_concurrent_time': 10.0
+    }
+
+@ray.remote
+class MockDistributedStep:
+    async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Simulate a distributed step with configurable processing time.
+        
+        Args:
+            input_data (Dict[str, Any]): Input data for the step
+        
+        Returns:
+            Dict[str, Any]: Processed result with simulated processing time
+        """
+        # Simulate processing time
+        processing_time = input_data.get('processing_time', 0.1)
+        await asyncio.sleep(processing_time)
+        
+        return {
+            'result': input_data,
+            'processing_time': processing_time
+        }
+
+@pytest.fixture
 def mock_ray_workflow_step():
     """Create a mock Ray remote step for testing"""
-    @ray.remote
-    class MockDistributedStep:
-        def __init__(self):
-            self._mock_result = None
-
-        def set_mock_result(self, result):
-            self._mock_result = result
-
-        async def execute(self, input_data):
-            # Simulated remote method that returns a predefined result
-            return self._mock_result or {'result': input_data, 'processed': True}
-
     return MockDistributedStep
 
 @pytest.fixture
 def mock_workflow(mock_ray_workflow_step, test_workflow):
-    """Create a mock workflow with predefined distributed steps"""
+    """Create a mock workflow with distributed steps"""
     workflow = ResearchDistributedWorkflow(config={}, workflow_def=test_workflow)
-    
-    # Create mock steps and set default results
-    mock_steps = {}
-    for step in test_workflow.get('WORKFLOW', []):
-        mock_step = mock_ray_workflow_step.remote()
-        mock_step.set_mock_result.remote({'result': {'step': step['step']}, 'processed': True})
-        mock_steps[step['step']] = mock_step
-    
-    workflow.distributed_steps = mock_steps
+    workflow.distributed_steps = {
+        step['step']: mock_ray_workflow_step.remote() 
+        for step in test_workflow.get('WORKFLOW', [])
+    }
     return workflow
 
 @pytest.mark.asyncio
@@ -107,13 +129,10 @@ async def test_concurrent_workflow_execution(mock_ray_workflow_step, test_workfl
         
         # Manually set distributed steps for each workflow
         for workflow in workflows:
-            mock_steps = {}
-            for step in test_workflow.get('WORKFLOW', []):
-                mock_step = mock_ray_workflow_step.remote()
-                mock_step.set_mock_result.remote({'result': {'step': step['step']}, 'processed': True})
-                mock_steps[step['step']] = mock_step
-            
-            workflow.distributed_steps = mock_steps
+            workflow.distributed_steps = {
+                step['step']: mock_ray_workflow_step.remote() 
+                for step in test_workflow.get('WORKFLOW', [])
+            }
         
         tasks = [
             run_workflow_with_metrics(workflow, base_input_data, i) 

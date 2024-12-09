@@ -54,7 +54,7 @@ def test_workflow():
                 name="Research Agent",
                 model={
                     "name": "mock_research_model",
-                    "parameters": {}
+                    "provider": "default"
                 }
             ).model_dump(),
             AgentConfig(
@@ -62,7 +62,7 @@ def test_workflow():
                 name="Document Agent",
                 model={
                     "name": "mock_document_model",
-                    "parameters": {}
+                    "provider": "default"
                 }
             ).model_dump()
         ]
@@ -119,7 +119,7 @@ def minimal_distributed_workflow():
                 name="Basic Agent",
                 model={
                     "name": "test-model",
-                    "provider": "test"
+                    "provider": "ray"  # Update the provider to a valid one
                 }
             ).model_dump()
         ]

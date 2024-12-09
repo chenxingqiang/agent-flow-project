@@ -159,6 +159,9 @@ class DistributedWorkflow(BaseWorkflow, ABC):
         self.config = copy.deepcopy(config)
         self.workflow_def = copy.deepcopy(workflow_def)
         
+        # Add required_fields attribute
+        self.required_fields = []
+        
         # Ensure WORKFLOW key exists and is a list
         if 'WORKFLOW' not in self.workflow_def:
             self.workflow_def['WORKFLOW'] = []
@@ -197,33 +200,18 @@ class DistributedWorkflow(BaseWorkflow, ABC):
             
             self.distributed_steps[step_num] = DistributedStep.remote()
     
-    @abstractmethod
     def _get_step_function(self, step: Dict[str, Any]) -> Callable:
-        """
-        Get the function to execute for a specific step
-        
-        Args:
-            step: Step definition
-        
-        Returns:
-            Callable step function
-        """
-        pass
-    
-    @abstractmethod
+        """Default implementation of step function."""
+        return lambda x: x
+
+    def execute_step(self, step_type: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Default implementation of step execution."""
+        return input_data
+
     def process_step(self, step_type: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Process a specific step type
+        """Default implementation of step processing."""
+        return input_data
         
-        Args:
-            step_type: Type of workflow step
-            input_data: Input data for the step
-        
-        Returns:
-            Processed step results
-        """
-        pass
-    
     def _prepare_step_input(self, step_def: Dict[str, Any], input_data: Dict[str, Any], previous_results: Dict[str, Any]) -> Dict[str, Any]:
         """
         Prepare input for a specific workflow step.
@@ -403,6 +391,9 @@ class ResearchDistributedWorkflow(DistributedWorkflow):
         # Deep copy to prevent modification of original input
         self.config = copy.deepcopy(config)
         self.workflow_def = copy.deepcopy(workflow_def)
+        
+        # Add required_fields attribute
+        self.required_fields = []
         
         # Ensure WORKFLOW key exists and is a list
         if 'WORKFLOW' not in self.workflow_def:
@@ -860,47 +851,48 @@ class ResearchDistributedWorkflow(DistributedWorkflow):
         """Execute the workflow asynchronously."""
         if not input_data:
             raise ValueError("Empty input data")
-            
+
         results = {}
+        futures = {}
+
+        # First, submit all remote tasks
         for step_num, step_actor in self.distributed_steps.items():
             step_def = next((s for s in self.workflow_def.get('WORKFLOW', []) if s.get('step') == step_num), None)
             if not step_def:
                 raise ValueError(f"Step definition for step {step_num} not found")
-                
+
             step_input = self._prepare_step_input(
                 step_def,
-                input_data, 
+                input_data,
                 results
             )
-            
+
             # Apply preprocessors before execution
             step_config = self.config.get(f'step_{step_num}_config', {})
             preprocessors = step_config.get('preprocessors', [])
             for preprocessor in preprocessors:
                 step_input = preprocessor(step_input)
-            
-            # Execute with retry logic
-            for attempt in range(self.retry_config.max_retries):
-                try:
-                    # Get the future from the remote call
-                    future = step_actor.execute.remote(step_input)
-                    # Await the result
-                    result = await ray.get(future)
-                    
-                    # Apply postprocessors after execution
-                    postprocessors = step_config.get('postprocessors', [])
-                    for postprocessor in postprocessors:
-                        result = postprocessor(result)
-                        
-                    results[step_num] = result
-                    break
-                except Exception as e:
-                    if attempt == self.retry_config.max_retries - 1:
-                        raise ValueError(f"Step {step_num} execution failed after {self.retry_config.max_retries} retries: {str(e)}")
-                    await asyncio.sleep(
-                        self.retry_config.delay * (self.retry_config.backoff_factor ** attempt)
-                    )
-                    
+
+            # Submit remote task
+            futures[step_num] = step_actor.execute.remote(step_input)
+
+        # Await and process results
+        for step_num, future in futures.items():
+            try:
+                # Await the result
+                result = ray.get(future)
+                
+                # Apply postprocessors
+                step_config = self.config.get(f'step_{step_num}_config', {})
+                postprocessors = step_config.get('postprocessors', [])
+                for postprocessor in postprocessors:
+                    result = postprocessor(result)
+
+                results[step_num] = result
+
+            except Exception as e:
+                raise ValueError(f"Step {step_num} execution failed: {str(e)}")
+
         return results
         
     def _prepare_step_input(self, step_config: Dict[str, Any], 

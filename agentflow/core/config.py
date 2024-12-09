@@ -45,10 +45,10 @@ class ModelConfig(BaseModel):
     @classmethod
     def validate_provider(cls, v: str) -> str:
         """Validate model provider"""
-        valid_providers = ['openai', 'anthropic', 'google', 'default']
-        if v not in valid_providers:
-            raise ValueError(f"Unsupported model provider: {v}")
-        return v
+        valid_providers = ['openai', 'anthropic', 'google', 'default', 'ray']
+        if v.lower() not in valid_providers:
+            raise ValueError(f"Unsupported model provider: {v}. Must be one of {valid_providers}")
+        return v.lower()
     
     @field_validator('temperature')
     @classmethod
@@ -206,7 +206,7 @@ class AgentConfig(BaseModel):
     @classmethod
     def validate_model(cls, v: Optional[ModelConfig]) -> Optional[ModelConfig]:
         """Validate model configuration"""
-        if v and v.provider not in ['openai', 'anthropic', 'google', 'default']:
+        if v and v.provider not in ['openai', 'anthropic', 'google', 'default', 'ray']:
             raise ValueError(f"Unsupported model provider: {v.provider}")
         return v
     
