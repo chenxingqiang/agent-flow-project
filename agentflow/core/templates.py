@@ -115,29 +115,40 @@ class TemplateManager:
         template = self.load_template(template_id)
         if not template:
             raise ValueError(f"Template not found: {template_id}")
-            
+    
         # Validate parameters
         for param in template.parameters:
             if param.required and param.name not in parameters:
                 raise ValueError(f"Missing required parameter: {param.name}")
-                
+    
             if param.name in parameters and param.options:
                 if parameters[param.name] not in param.options:
                     raise ValueError(f"Invalid value for parameter {param.name}")
-                    
+    
         # Create workflow copy
-        workflow = template.workflow.copy(deep=True)
-        
-        # Replace parameter placeholders
-        workflow_dict = workflow.dict()
+        workflow = template.workflow.model_copy(deep=True)
+    
+        # Convert workflow to dict for templating
+        workflow_dict = workflow.model_dump()
         workflow_str = json.dumps(workflow_dict)
-        
+    
+        # Replace placeholders with actual values
         for name, value in parameters.items():
+            # Convert list to a string representation for JSON replacement
+            if isinstance(value, list):
+                # For lists used in list comprehensions, convert to a list of strings
+                value_str = f"[{', '.join(str(v) for v in value)}]"
+            else:
+                value_str = str(value)
+    
+            # Replace placeholders
             placeholder = f"{{{{ {name} }}}}"
-            workflow_str = workflow_str.replace(placeholder, value)
-            
+            workflow_str = workflow_str.replace(placeholder, value_str)
+    
         # Parse back to workflow config
         workflow_dict = json.loads(workflow_str)
-        return WorkflowConfig(**workflow_dict)
+        workflow = WorkflowConfig(**workflow_dict)
+    
+        return workflow
         
 template_manager = TemplateManager()

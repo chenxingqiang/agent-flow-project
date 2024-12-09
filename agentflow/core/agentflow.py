@@ -36,24 +36,27 @@ class AgentFlow:
         Returns:
             Hashable version of input data
         """
-        if isinstance(input_data, dict):
-            # Convert dict to a tuple of sorted items, converting values to hashable types
-            return tuple(
-                (k, self._convert_input_for_hashability(v)) 
-                for k, v in sorted(input_data.items())
-            )
-        elif isinstance(input_data, list):
-            # Convert list to tuple, converting elements to hashable types
-            return tuple(self._convert_input_for_hashability(x) for x in input_data)
-        elif isinstance(input_data, set):
-            # Convert set to tuple of sorted hashable elements
-            return tuple(sorted(self._convert_input_for_hashability(x) for x in input_data))
-        elif isinstance(input_data, (dict, list, set)):
-            # Recursively convert nested structures
-            return str(input_data)
-        
-        # If already hashable, return as is
-        return input_data
+        def _convert(obj):
+            if isinstance(obj, dict):
+                # Convert dict to a tuple of sorted items, converting values to hashable types
+                return tuple(
+                    (str(k), _convert(v)) 
+                    for k, v in sorted(obj.items())
+                )
+            elif isinstance(obj, list):
+                # Convert list to tuple, converting elements to hashable types
+                return tuple(_convert(x) for x in obj)
+            elif isinstance(obj, set):
+                # Convert set to tuple of sorted hashable elements
+                return tuple(sorted(_convert(x) for x in obj))
+            elif isinstance(obj, (dict, list, set)):
+                # Recursively convert nested structures
+                return str(obj)
+            
+            # If already hashable, return as is
+            return obj
+
+        return _convert(input_data)
 
     async def execute_workflow(
         self, 
@@ -100,17 +103,43 @@ class AgentFlow:
         if hasattr(self, 'workflow_def') and self.workflow_def:
             # Preprocess workflow steps to ensure hashability
             processed_workflow = {
-                "WORKFLOW": [
-                    {
-                        "step": step.get('step', 0),
-                        "input": tuple(
-                            str(x) if isinstance(x, (dict, list, set)) else x 
-                            for x in step.get('input', [])
-                        ),  # Convert dicts, lists, sets to strings
-                        "output": step.get('output', {})  # Preserve output structure
-                    } for step in self.workflow_def.get('WORKFLOW', [])
-                ]
+                "WORKFLOW": []
             }
+            
+            # Store previous step results to handle WORKFLOW.x references
+            previous_step_results = {}
+            
+            for step in self.workflow_def.get('WORKFLOW', []):
+                # Convert input to tuple of strings for hashability
+                input_list = []
+                for input_item in step.get('input', []):
+                    if isinstance(input_item, str) and input_item.startswith('WORKFLOW.'):
+                        # Extract step number from reference
+                        try:
+                            ref_step_num = int(input_item.split('.')[1])
+                            if ref_step_num in previous_step_results:
+                                input_list.append(previous_step_results[ref_step_num])
+                            else:
+                                # Keep the reference as is if the step hasn't been processed yet
+                                input_list.append(input_item)
+                        except (IndexError, ValueError):
+                            # If reference is malformed, keep it as is
+                            input_list.append(input_item)
+                    else:
+                        input_list.append(
+                            str(x) if isinstance(x, (dict, list, set)) else x 
+                            for x in [input_item]
+                        )
+                
+                processed_step = {
+                    "step": step.get('step', 0),
+                    "input": tuple(input_list),
+                    "output": step.get('output', {}),
+                    # Preserve the original agent config for reference
+                    "agent_config": step.get('agent_config', {})
+                }
+                processed_workflow["WORKFLOW"].append(processed_step)
+            
             workflow_executor.workflow_def = processed_workflow
         
         # Convert input data to hashable format

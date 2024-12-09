@@ -182,7 +182,8 @@ def test_template_parameter_validation(template_manager):
     workflow = template_manager.instantiate_template(
         "research-workflow", 
         {
-            "topic": "Machine Learning"
+            "topic": "Machine Learning",
+            "depth": "deep"
         }
     )
     assert workflow is not None

@@ -6,7 +6,7 @@ import json
 import os
 from typing import Dict, List, Optional, Union, Any, Type
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, ValidationError, validator
 from typing_extensions import Literal
 
 class ToolConfig(BaseModel):
@@ -58,7 +58,7 @@ class ProcessorConfig(BaseModel):
         arbitrary_types_allowed=True
     )
     
-    @field_validator('name', mode='before')
+    @validator('name', pre=True)
     def set_default_name(cls, v, values):
         """Set default name if not provided"""
         return v or values.get('id', 'default_processor')
@@ -80,7 +80,7 @@ class WorkflowConfig(BaseModel):
     connections: List[ConnectionConfig]
     metadata: Dict[str, str] = Field(default_factory=dict)
     
-    @field_validator('name', mode='before')
+    @validator('name', pre=True)
     def set_default_name(cls, v, values):
         """Set default name if not provided"""
         return v or values.get('id', 'default_workflow')
@@ -266,7 +266,7 @@ class ConfigManager:
             config = AgentConfig(**data)
             self.save_agent_config(config)
             return
-        except:
+        except ValidationError:
             pass
             
         # Try loading as workflow
@@ -274,7 +274,7 @@ class ConfigManager:
             config = WorkflowConfig(**data)
             self.save_workflow_config(config)
             return
-        except:
+        except ValidationError:
             pass
             
         raise ValueError("Invalid configuration format")

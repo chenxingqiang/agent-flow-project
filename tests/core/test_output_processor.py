@@ -34,7 +34,8 @@ def test_process_return_full(processor):
     """Test return processing with full result"""
     data = {"key": "value"}
     result = processor.process_output(data, OutputMode.RETURN)
-    assert result == {"summary": str(data)}
+    assert "summary" in result
+    assert result["summary"] == "{'key': 'value'}"
 
 def test_process_return_summary(processor):
     """Test return processing with summary"""

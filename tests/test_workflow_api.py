@@ -105,12 +105,30 @@ def test_sync_workflow_execution(server):
                 {
                     "input": ["research_topic", "deadline", "academic_level"],
                     "output": {"type": "research"},
-                    "step": 1
+                    "step": 1,
+                    "agent_config": {
+                        "model": {
+                            "provider": "openai",
+                            "name": "gpt-3.5-turbo"
+                        },
+                        "type": "research_agent",
+                        "system_prompt": "You are a research assistant",
+                        "id": "research_step"
+                    }
                 },
                 {
                     "input": ["WORKFLOW.1"],
                     "output": {"type": "document"},
-                    "step": 2
+                    "step": 2,
+                    "agent_config": {
+                        "model": {
+                            "provider": "openai",
+                            "name": "gpt-3.5-turbo"
+                        },
+                        "type": "document_agent",
+                        "system_prompt": "You are a document generation assistant",
+                        "id": "document_step"
+                    }
                 }
             ]
         },
@@ -151,12 +169,30 @@ def test_async_workflow_execution(server):
                 {
                     "input": ["research_topic", "deadline", "academic_level"],
                     "output": {"type": "research"},
-                    "step": 1
+                    "step": 1,
+                    "agent_config": {
+                        "model": {
+                            "provider": "openai",
+                            "name": "gpt-3.5-turbo"
+                        },
+                        "type": "research_agent",
+                        "system_prompt": "You are a research assistant",
+                        "id": "research_step"
+                    }
                 },
                 {
                     "input": ["WORKFLOW.1"],
                     "output": {"type": "document"},
-                    "step": 2
+                    "step": 2,
+                    "agent_config": {
+                        "model": {
+                            "provider": "openai",
+                            "name": "gpt-3.5-turbo"
+                        },
+                        "type": "document_agent",
+                        "system_prompt": "You are a document generation assistant",
+                        "id": "document_step"
+                    }
                 }
             ]
         },

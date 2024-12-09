@@ -41,13 +41,48 @@ async def execute_workflow(request: WorkflowRequest):
                 'distributed': False
             }
         )
-        
+
         # Initialize agent
         agent = AgentFlow(config)
-        agent.workflow_def = request.workflow
+
+        # Process workflow configuration with references
+        processed_workflow = {
+            "WORKFLOW": []
+        }
+        previous_step_outputs = {}
+
+        for step in request.workflow['WORKFLOW']:
+            # Process input references
+            processed_input = []
+            for input_item in step.get('input', []):
+                if isinstance(input_item, str) and input_item.startswith('WORKFLOW.'):
+                    # Extract step number
+                    try:
+                        ref_step_num = int(input_item.split('.')[1])
+                        if ref_step_num in previous_step_outputs:
+                            processed_input.append(previous_step_outputs[ref_step_num])
+                        else:
+                            # Keep reference as is if not resolved
+                            processed_input.append(input_item)
+                    except (IndexError, ValueError):
+                        processed_input.append(input_item)
+                else:
+                    processed_input.append(input_item)
+
+            # Prepare processed step
+            processed_step = {
+                "step": step.get('step', 0),
+                "input": processed_input,
+                "output": step.get('output', {}),
+                "agent_config": step.get('agent_config', {})
+            }
+            processed_workflow["WORKFLOW"].append(processed_step)
+
+        # Set processed workflow definition
+        agent.workflow_def = processed_workflow
         
         # Execute workflow
-        result = agent.execute_workflow(request.input_data)
+        result = await agent.execute_workflow(request.input_data)
         return result
         
     except ValueError as e:

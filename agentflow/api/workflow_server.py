@@ -100,23 +100,23 @@ async def global_exception_handler(request: Request, exc: Exception):
 async def execute_workflow(request: WorkflowRequest):
     """Execute workflow synchronously"""
     try:
-        def _make_hashable(obj):
-            """Convert complex objects to hashable format while preserving structure"""
+        # Custom serialization to handle complex types
+        def _serialize(obj):
             if isinstance(obj, dict):
-                return {k: _make_hashable(v) for k, v in obj.items()}
-            elif isinstance(obj, (list, set)):
-                return tuple(_make_hashable(x) for x in obj)
-            elif isinstance(obj, (int, float, str, bool, tuple)):
-                return obj
+                return {str(k): _serialize(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [_serialize(item) for item in obj]
+            elif isinstance(obj, tuple):
+                return tuple(_serialize(item) for item in obj)
             else:
-                return str(obj)
+                return obj
 
         # Create agent config
         config = AgentConfig(
             agent_type='research',
             model={
-                'provider': 'test',
-                'name': 'test-model',
+                'provider': request.workflow.get('WORKFLOW', [{}])[0].get('agent_config', {}).get('model', {}).get('provider', 'openai'),
+                'name': request.workflow.get('WORKFLOW', [{}])[0].get('agent_config', {}).get('model', {}).get('name', 'gpt-3.5-turbo'),
                 'temperature': 0.5
             },
             workflow={
@@ -135,18 +135,19 @@ async def execute_workflow(request: WorkflowRequest):
         }
         
         for step in request.workflow['WORKFLOW']:
-            # Convert input to tuple of strings for hashability
+            # Preserve workflow references and input structure
             input_list = []
             for input_item in step.get('input', []):
-                input_list.append(_make_hashable(input_item))
-            
-            # Process output structure while preserving format
-            output = _make_hashable(step.get('output', {}))
+                if isinstance(input_item, str) and input_item.startswith('WORKFLOW.'):
+                    input_list.append(input_item)
+                else:
+                    input_list.append(input_item)
             
             processed_step = {
                 "step": step.get('step', 0),
-                "input": tuple(input_list),
-                "output": output
+                "input": input_list,
+                "output": step.get('output', {}),
+                "agent_config": step.get('agent_config', {})
             }
             workflow_def["WORKFLOW"].append(processed_step)
 
@@ -156,9 +157,14 @@ async def execute_workflow(request: WorkflowRequest):
         # Execute workflow
         start_time = time.time()
         try:
-            # Convert input data to hashable format
-            hashable_input = _make_hashable(request.input_data)
-            result = await agent.execute_workflow(hashable_input)
+            # Serialize input data
+            serialized_input = _serialize(request.input_data)
+            
+            # Execute workflow
+            result = await agent.execute_workflow(serialized_input)
+            
+            # Serialize result
+            serialized_result = _serialize(result)
         except Exception as workflow_error:
             logger.error(f"Workflow execution error: {workflow_error}")
             logger.error(f"Traceback: {traceback.format_exc()}")
@@ -176,19 +182,18 @@ async def execute_workflow(request: WorkflowRequest):
             status_code=200,
             content={
                 "status": "success",
-                "result": result,
+                "result": serialized_result,
                 "execution_time": execution_time
             }
         )
-        
     except Exception as e:
-        logger.error(f"Workflow execution failed: {str(e)}")
+        logger.error(f"Unexpected error in workflow execution: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         return JSONResponse(
             status_code=500,
             content={
                 "status": "error",
-                "detail": f"Internal server error: {str(e)}"
+                "detail": f"Workflow execution failed: {str(e)}"
             }
         )
 
@@ -204,38 +209,49 @@ def execute_workflow_ray(agent, input_data):
     Returns:
         Dict[str, Any]: Workflow execution results
     """
-    import asyncio
-    
-    # Use asyncio to run the async method
-    return asyncio.run(agent.execute_workflow(input_data=input_data))
+    try:
+        # Custom serialization to handle complex types
+        def _serialize(obj):
+            if isinstance(obj, dict):
+                return {str(k): _serialize(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [_serialize(item) for item in obj]
+            elif isinstance(obj, tuple):
+                return tuple(_serialize(item) for item in obj)
+            else:
+                return obj
+
+        # Serialize input data
+        serialized_input = _serialize(input_data)
+        
+        # Execute workflow
+        result = agent.execute_workflow(serialized_input)
+        
+        # Serialize result
+        serialized_result = _serialize(result)
+        
+        return serialized_result
+    except Exception as e:
+        logger.error(f"Ray workflow execution error: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise
 
 @app.post("/workflow/execute_async")
 async def execute_workflow_async(request: WorkflowRequest, background_tasks: BackgroundTasks):
     """Execute workflow asynchronously"""
     try:
-        def _make_hashable(obj):
-            """Convert complex objects to hashable format while preserving structure"""
-            if isinstance(obj, dict):
-                return {k: _make_hashable(v) for k, v in obj.items()}
-            elif isinstance(obj, (list, set)):
-                return tuple(_make_hashable(x) for x in obj)
-            elif isinstance(obj, (int, float, str, bool, tuple)):
-                return obj
-            else:
-                return str(obj)
-
         # Create agent config
         config = AgentConfig(
             agent_type='research',
             model={
-                'provider': 'test',
-                'name': 'test-model',
+                'provider': request.workflow.get('WORKFLOW', [{}])[0].get('agent_config', {}).get('model', {}).get('provider', 'openai'),
+                'name': request.workflow.get('WORKFLOW', [{}])[0].get('agent_config', {}).get('model', {}).get('name', 'gpt-3.5-turbo'),
                 'temperature': 0.5
             },
             workflow={
                 'max_iterations': 10,
                 'logging_level': 'INFO',
-                'distributed': True
+                'distributed': False
             }
         )
 
@@ -248,18 +264,19 @@ async def execute_workflow_async(request: WorkflowRequest, background_tasks: Bac
         }
         
         for step in request.workflow['WORKFLOW']:
-            # Convert input to tuple of strings for hashability
+            # Preserve workflow references and input structure
             input_list = []
             for input_item in step.get('input', []):
-                input_list.append(_make_hashable(input_item))
-            
-            # Process output structure while preserving format
-            output = _make_hashable(step.get('output', {}))
+                if isinstance(input_item, str) and input_item.startswith('WORKFLOW.'):
+                    input_list.append(input_item)
+                else:
+                    input_list.append(input_item)
             
             processed_step = {
                 "step": step.get('step', 0),
-                "input": tuple(input_list),
-                "output": output
+                "input": input_list,
+                "output": step.get('output', {}),
+                "agent_config": step.get('agent_config', {})
             }
             workflow_def["WORKFLOW"].append(processed_step)
 
@@ -269,15 +286,16 @@ async def execute_workflow_async(request: WorkflowRequest, background_tasks: Bac
         # Execute workflow asynchronously
         start_time = time.time()
         try:
-            # Use Ray to execute the workflow asynchronously
             result_ref = execute_workflow_ray.remote(agent, request.input_data)
+            background_tasks.add_task(result_ref)
         except Exception as workflow_error:
-            logger.error(f"Async workflow initialization error: {workflow_error}")
+            logger.error(f"Async workflow execution error: {workflow_error}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return JSONResponse(
                 status_code=500,
                 content={
                     "status": "error",
-                    "detail": f"Async workflow initialization failed: {str(workflow_error)}"
+                    "detail": f"Async workflow execution failed: {str(workflow_error)}"
                 }
             )
         
@@ -288,19 +306,18 @@ async def execute_workflow_async(request: WorkflowRequest, background_tasks: Bac
             content={
                 "status": "success",
                 "result_ref": str(result_ref),
-                "workflow_id": str(result_ref),  # Add workflow_id for consistency
+                "workflow_id": str(result_ref),  
                 "execution_time": execution_time
             }
         )
-        
     except Exception as e:
-        logger.error(f"Async workflow execution failed: {str(e)}")
+        logger.error(f"Unexpected error in async workflow execution: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         return JSONResponse(
             status_code=500,
             content={
                 "status": "error",
-                "detail": f"Internal async server error: {str(e)}"
+                "detail": f"Async workflow execution failed: {str(e)}"
             }
         )
 
@@ -397,6 +414,9 @@ async def get_workflow_result(result_ref: str):
                 
                 logger.info(f"Workflow result retrieved in {time.time() - start_time:.2f} seconds")
                 
+                # Restore hashable result to original type
+                result = _restore_hashable(result)
+                
                 return JSONResponse(
                     status_code=200,
                     content={
@@ -476,6 +496,13 @@ if __name__ == "__main__":
         try:
             port = int(sys.argv[1])
         except ValueError:
-            print(f"Invalid port number: {sys.argv[1]}. Using default port {port}")
+            logger.error(f"Invalid port number: {sys.argv[1]}")
+            sys.exit(1)
     
-    run_server(port=port)
+    # Run the server
+    uvicorn.run(
+        "workflow_server:app", 
+        host="0.0.0.0", 
+        port=port, 
+        reload=False
+    )

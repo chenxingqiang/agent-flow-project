@@ -73,7 +73,11 @@ class OutputProcessor:
         elif "PARTIAL_RESULT" in options:
             return self._extract_partial_result(output_data)
         else:
-            return {"result": output_data}
+            # Ensure full string representation is returned
+            return {
+                "result": output_data,
+                "summary": str(output_data)
+            }
 
     def _process_forward(self, output_data: Any) -> Dict[str, Any]:
         """处理转发输出"""
@@ -142,7 +146,7 @@ class OutputProcessor:
 
     def _generate_summary(self, data: Any) -> Dict[str, Any]:
         """生成输出摘要"""
-        return {"summary": str(data)[:200] + "..."}
+        return {"summary": str(data)}
 
     def _extract_partial_result(self, data: Any) -> Dict[str, Any]:
         """提取部分结果"""

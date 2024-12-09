@@ -68,7 +68,7 @@ async def test_workflow_timeout_handling():
                 name="Slow Agent",
                 type="test",
                 description="A slow test agent",
-                model=ModelConfig(name="slow-model", provider="test"),
+                model=ModelConfig(name="gpt-3.5-turbo", provider="openai"),
                 system_prompt="Process slowly"
             )
         ],

@@ -125,8 +125,8 @@ async def test_transform_processor_process_data():
     """Test TransformProcessor process_data method"""
     processor = TransformProcessor({
         "transformations": {
-            "doubled_value": "input.value * 2",
-            "name_upper": "input.name.upper()"
+            "doubled_value": "input['value'] * 2",
+            "name_upper": "input['name'].upper()"
         }
     })
     
