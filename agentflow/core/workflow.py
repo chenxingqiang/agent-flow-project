@@ -261,9 +261,44 @@ class WorkflowEngine(BaseWorkflow):
             return self._semantic_message_merge([results])
         elif protocol_type == 'RPC':
             return self._format_rpc_response(results)
+        elif protocol_type == 'FEDERATED':
+            # 联邦学习协议：对模型参数取平均
+            global_model = {}
+            model_params_count = 0
+            
+            # 遍历所有结果，收集模型参数
+            for result_key, result_value in results.items():
+                # 跳过非字典类型的结果
+                if not isinstance(result_value, dict):
+                    continue
+                
+                # 尝试获取模型参数
+                model_params = result_value.get('model_params', {})
+                if model_params:
+                    model_params_count += 1
+                    for key, value in model_params.items():
+                        global_model[key] = global_model.get(key, 0) + value
+            
+            # 对模型参数取平均
+            if model_params_count > 0:
+                for key in global_model:
+                    global_model[key] /= model_params_count
+            
+            return {"global_model": global_model}
+        elif protocol_type == 'HIERARCHICAL':
+            # 层级合并协议
+            result_levels = {}
+            for result_key, result_value in results.items():
+                if isinstance(result_value, dict):
+                    # 根据处理过的数据标记层级
+                    if result_key.endswith('_processed'):
+                        level_key = result_key.split('_')[0] + '_level_0'
+                        result_levels[level_key] = result_value
+            
+            return result_levels
         else:
             return results
-    
+
     def _semantic_message_merge(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         合并语义化消息
