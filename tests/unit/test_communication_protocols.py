@@ -45,10 +45,12 @@ async def test_gossip_protocol():
             "WORKFLOW": [
                 {
                     "name": "node_1",
+                    "agent_type": "test",
                     "knowledge": {"topic_a": "info_1", "topic_b": "data_1"}
                 },
                 {
                     "name": "node_2",
+                    "agent_type": "test",
                     "knowledge": {"topic_a": "info_2", "topic_c": "data_2"}
                 }
             ]
@@ -73,14 +75,20 @@ async def test_hierarchical_merge_protocol():
             },
             "WORKFLOW": {
                 "low_level_agent_1": {
+                    "name": "low_level_agent_1",
+                    "agent_type": "test",
                     "hierarchy_level": 0,
                     "data": "raw_data_1"
                 },
                 "low_level_agent_2": {
+                    "name": "low_level_agent_2",
+                    "agent_type": "test",
                     "hierarchy_level": 0, 
                     "data": "raw_data_2"
                 },
                 "mid_level_agent": {
+                    "name": "mid_level_agent",
+                    "agent_type": "test",
                     "hierarchy_level": 1,
                     "dependencies": ["low_level_agent_1_processed", "low_level_agent_2_processed"]
                 }

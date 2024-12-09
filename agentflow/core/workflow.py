@@ -283,9 +283,23 @@ class WorkflowEngine(BaseWorkflow):
         elif protocol_type == 'HIERARCHICAL':
             # 层级合并协议
             result_levels = {}
+            
+            # 检查工作流配置中的层级信息
+            workflow_dict = self.workflow if isinstance(self.workflow, dict) else {}
+            
+            # 遍历结果，根据层级标记结果
             for result_key, result_value in results.items():
+                # 检查是否有处理完成的结果
                 if result_key.endswith('_processed'):
-                    level_key = result_key.split('_')[0] + '_level_0'
+                    # 尝试从工作流配置中获取层级信息
+                    agent_name = result_key.replace('_processed', '')
+                    agent_config = workflow_dict.get(agent_name, {})
+                    
+                    # 获取层级，默认为0
+                    hierarchy_level = agent_config.get('hierarchy_level', 0)
+                    
+                    # 创建层级标记的结果
+                    level_key = f"level_{hierarchy_level}"
                     result_levels[level_key] = result_value
             
             return result_levels
