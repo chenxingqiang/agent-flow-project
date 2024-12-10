@@ -63,9 +63,11 @@ curl -X GET http://localhost:8000/workflow/result/{result_ref}
 ## Postman Collection
 
 ### Sync Workflow Request
+
 - Method: POST
 - URL: `http://localhost:8000/workflow/execute`
 - Body (raw JSON):
+
 ```json
 {
     "workflow": {
@@ -91,11 +93,14 @@ curl -X GET http://localhost:8000/workflow/result/{result_ref}
 ```
 
 ### Async Workflow Request
+
 - Method: POST
 - URL: `http://localhost:8000/workflow/execute_async`
 - Body (same format as sync request)
 
 ### Retrieve Async Result
+
 - Method: GET
 - URL: `http://localhost:8000/workflow/result/{result_ref}`
+
 ```

@@ -18,7 +18,7 @@ AgentFlow is a powerful and flexible AI Agent Workflow Management System that en
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/agentflow.git
+git clone https://github.com/chenxingqiang/agentflow.git
 
 # Install dependencies
 cd agentflow

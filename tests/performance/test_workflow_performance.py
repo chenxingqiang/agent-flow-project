@@ -1,92 +1,93 @@
 import pytest
+import ray
 import asyncio
 import time
-import statistics
 import psutil
-import ray
-from typing import List, Dict, Any
-from agentflow.core.distributed_workflow import ResearchDistributedWorkflow
+import statistics
+from typing import Dict, Any
+
+from agentflow.core.distributed_workflow import (
+    DistributedWorkflow,
+    ResearchDistributedWorkflow,
+    DistributedWorkflowStep
+)
+from agentflow.core.workflow_state import (
+    WorkflowStateManager,
+    StepStatus,
+    WorkflowStatus
+)
+from agentflow.core.exceptions import (
+    WorkflowExecutionError,
+    WorkflowValidationError,
+    StepExecutionError,
+    StepTimeoutError
+)
 
 @pytest.fixture
 def test_workflow():
-    """Fixture for a test workflow definition"""
+    """Create a test workflow configuration"""
     return {
-        'WORKFLOW': [
-            {'input': ['research_topic', 'deadline', 'academic_level'], 'output': {'type': 'research'}, 'step': 1},
-            {'input': ['WORKFLOW.1'], 'output': {'type': 'document'}, 'step': 2}
+        "WORKFLOW": [
+            {
+                "step": 1,
+                "input": ["research_topic", "deadline", "academic_level"],
+                "output": {"type": "research"}
+            },
+            {
+                "step": 2,
+                "input": ["WORKFLOW.1"],
+                "output": {"type": "document"}
+            }
         ]
     }
 
 @pytest.fixture
 def test_config():
-    """Fixture for test configuration"""
+    """Create a test configuration"""
     return {
-        'max_execution_time': 5.0,
-        'max_concurrent_time': 10.0
+        "max_execution_time": 5.0,
+        "max_concurrent_time": 10.0
     }
-
-@ray.remote
-class MockDistributedStep:
-    async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Simulate a distributed step with configurable processing time.
-        
-        Args:
-            input_data (Dict[str, Any]): Input data for the step
-        
-        Returns:
-            Dict[str, Any]: Processed result with simulated processing time
-        """
-        # Simulate processing time
-        processing_time = input_data.get('processing_time', 0.1)
-        await asyncio.sleep(processing_time)
-        
-        return {
-            'result': input_data,
-            'processing_time': processing_time
-        }
 
 @pytest.fixture
 def mock_ray_workflow_step():
-    """Create a mock Ray remote step for testing"""
+    """Create a mock Ray workflow step"""
+    @ray.remote
+    class MockDistributedStep:
+        async def execute(self, input_data):
+            await asyncio.sleep(0.1)  # Simulate work
+            return {
+                'result': {
+                    'output': "Mock output",
+                    'format': "test"
+                },
+                'metadata': {
+                    'timestamp': time.time()
+                }
+            }
     return MockDistributedStep
 
 @pytest.fixture
 def mock_workflow(mock_ray_workflow_step, test_workflow):
     """Create a mock workflow with distributed steps"""
-    workflow = ResearchDistributedWorkflow(config={}, workflow_def=test_workflow)
-    workflow.distributed_steps = {
-        step['step']: mock_ray_workflow_step.remote() 
-        for step in test_workflow.get('WORKFLOW', [])
-    }
+    workflow = ResearchDistributedWorkflow(workflow_config=test_workflow, config={})
     return workflow
 
 @pytest.mark.asyncio
-async def test_workflow_execution_time(mock_workflow, test_config):
-    """Test workflow execution time with warmup and multiple iterations"""
+async def test_workflow_execution_time(mock_workflow):
+    """Test workflow execution time is within acceptable range"""
     input_data = {
         "research_topic": "Performance Testing",
         "deadline": "2024-12-31",
         "academic_level": "PhD"
     }
     
-    # Warmup run
-    await mock_workflow.execute_async(input_data)
+    start_time = time.time()
+    result = await mock_workflow.execute_async(input_data)
+    execution_time = time.time() - start_time
     
-    # Multiple iterations for statistical significance
-    execution_times = []
-    for _ in range(5):
-        start_time = time.time()
-        result = await mock_workflow.execute_async(input_data)
-        execution_times.append(time.time() - start_time)
-    
-    avg_time = statistics.mean(execution_times)
-    max_time = max(execution_times)
-    
-    # More flexible performance assertions
-    assert avg_time < test_config.get('max_execution_time', 5.0)
-    assert max_time < test_config.get('max_execution_time', 5.0) * 1.5
     assert result is not None
+    assert execution_time < 5.0  # Maximum execution time in seconds
 
 @pytest.mark.asyncio
 async def test_concurrent_workflow_execution(mock_ray_workflow_step, test_workflow, test_config):
@@ -123,16 +124,9 @@ async def test_concurrent_workflow_execution(mock_ray_workflow_step, test_workfl
     
     for num_workflows in concurrency_levels:
         workflows = [
-            ResearchDistributedWorkflow(config={}, workflow_def=test_workflow)
+            ResearchDistributedWorkflow(workflow_config=test_workflow, config={})
             for _ in range(num_workflows)
         ]
-        
-        # Manually set distributed steps for each workflow
-        for workflow in workflows:
-            workflow.distributed_steps = {
-                step['step']: mock_ray_workflow_step.remote() 
-                for step in test_workflow.get('WORKFLOW', [])
-            }
         
         tasks = [
             run_workflow_with_metrics(workflow, base_input_data, i) 

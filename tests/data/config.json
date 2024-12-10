@@ -1,7 +1,8 @@
 {
   "variables": {
-    "invalid_type": {
-      "type": "invalid"
+    "test_var": {
+      "type": "string",
+      "value": "test_value"
     }
   },
   "agent_type": "research",

@@ -1,5 +1,5 @@
 """Configuration classes for AgentFlow."""
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, FrozenSet, Union
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pathlib import Path
 import logging
@@ -220,25 +220,25 @@ class AgentConfig(BaseModel):
     
     def __init__(self, **data):
         """
-        初始化方法，确保默认值和工作流配置被正确设置
+        Initialize method to ensure default values and workflow configuration are set correctly
         """
-        # 处理类型映射
+        # Handle type mapping
         if 'type' not in data and 'agent_type' in data:
             data['type'] = data['agent_type']
         elif 'agent_type' not in data and 'type' in data:
             data['agent_type'] = data['type']
-        
-        # 处理默认值
+
+        # Handle default values
         data.setdefault('id', str(uuid.uuid4()))
         data.setdefault('type', 'default')
         data.setdefault('agent_type', 'default')
-        
-        # 处理执行策略
+
+        # Handle execution policies
         execution_policies = data.get('execution_policies', {})
         if execution_policies is None:
             execution_policies = {}
-        
-        # 合并默认值和提供的执行策略
+
+        # Merge default values and provided execution policies
         default_policies = {
             'max_iterations': 10,
             'logging_level': 'INFO',
@@ -246,31 +246,32 @@ class AgentConfig(BaseModel):
         }
         execution_policies = {**default_policies, **execution_policies}
         data['execution_policies'] = execution_policies
-        
-        # 处理工作流配置
+
+        # Handle workflow configuration
         if 'workflow' in data:
             workflow_data = data['workflow']
             if isinstance(workflow_data, dict):
-                # 合并执行策略到工作流配置
+                # Merge execution policies into workflow configuration
                 workflow_data.setdefault('max_iterations', execution_policies['max_iterations'])
                 workflow_data.setdefault('logging_level', execution_policies['logging_level'])
                 workflow_data.setdefault('distributed', execution_policies['distributed'])
                 data['workflow'] = WorkflowConfig(**workflow_data)
         else:
-            # 创建默认工作流配置
+            # Create default workflow configuration
             data['workflow'] = WorkflowConfig(
                 max_iterations=execution_policies['max_iterations'],
                 logging_level=execution_policies['logging_level'],
                 distributed=execution_policies['distributed']
             )
-        
-        # 处理输入输出规范
-        if 'input_specification' in data and not isinstance(data['input_specification'], InputSpec):
-            data['input_specification'] = InputSpec(**data['input_specification'])
-        
-        if 'output_specification' in data and not isinstance(data['output_specification'], OutputSpec):
-            data['output_specification'] = OutputSpec(**data['output_specification'])
-        
+
+        # Handle input specification
+        if 'input_specification' in data:
+            # If input_specification is None or an empty dict, create a default InputSpec
+            if data['input_specification'] is None or (isinstance(data['input_specification'], dict) and not data['input_specification']):
+                data['input_specification'] = InputSpec()
+            elif not isinstance(data['input_specification'], InputSpec):
+                data['input_specification'] = InputSpec(**data['input_specification'])
+
         super().__init__(**data)
     
     @classmethod
@@ -310,7 +311,20 @@ class StepConfig(BaseModel):
     output_type: str = Field(..., description="Output type for the step")
     input: List[str] = Field(default_factory=list, description="Required input fields")
     output: Dict[str, Any] = Field(default_factory=dict, description="Output configuration")
+    depends_on: Optional[FrozenSet[int]] = Field(default_factory=frozenset, description="Set of step numbers this step depends on")
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    
+    @field_validator('depends_on', mode='before')
+    @classmethod
+    def convert_depends_on(cls, v: Optional[Union[List[int], FrozenSet[int]]]) -> Optional[FrozenSet[int]]:
+        """Convert depends_on to frozenset if it's a list"""
+        if v is None:
+            return frozenset()
+        if isinstance(v, (list, tuple)):
+            return frozenset(int(x) for x in v if str(x).isdigit())
+        if isinstance(v, (set, frozenset)):
+            return frozenset(v)
+        return frozenset()
 
 class ConfigManager:
     """Configuration manager for handling config files and validation"""
@@ -389,7 +403,21 @@ class ConfigManager:
             if key == 'variables':
                 if not isinstance(value, dict):
                     raise ValueError("Variables must be a dictionary")
+                
+                # Validate each variable
+                for var_name, var_config in value.items():
+                    if not isinstance(var_config, dict):
+                        raise ValueError(f"Variable {var_name} must be a dictionary")
                     
+                    # Check for required keys
+                    if 'type' not in var_config:
+                        raise ValueError(f"Variable {var_name} must have a 'type' key")
+                    
+                    # Validate type
+                    valid_types = ['string', 'integer', 'float', 'boolean', 'list', 'dict']
+                    if var_config['type'] not in valid_types:
+                        raise ValueError(f"Invalid type for variable {var_name}. Must be one of {valid_types}")
+        
         # Apply updates
         self.config.update(updates)
         

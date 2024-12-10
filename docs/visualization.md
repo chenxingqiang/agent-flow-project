@@ -45,6 +45,7 @@ graph.add_edge(VisualEdge(
 ### Node Types
 
 Available node types:
+
 - `AGENT`: Represents an agent instance
 - `WORKFLOW`: Represents a workflow
 - `INPUT`: Input processor node
@@ -55,6 +56,7 @@ Available node types:
 ### Edge Types
 
 Available edge types:
+
 - `DATA_FLOW`: Represents data flow between nodes
 - `CONTROL_FLOW`: Represents control flow
 - `MESSAGE`: Represents message passing
@@ -258,6 +260,7 @@ handler.register_handler("node_click", on_node_click)
 Common issues and solutions:
 
 1. **Connection Issues**
+
    ```python
    try:
        await websocket.connect()
@@ -267,6 +270,7 @@ Common issues and solutions:
    ```
 
 2. **Layout Problems**
+
    ```python
    # Reset layout
    graph = VisualLayout.auto_layout(graph, {
@@ -276,6 +280,7 @@ Common issues and solutions:
    ```
 
 3. **Performance Issues**
+
    ```python
    # Optimize updates
    service.config.update({

@@ -56,7 +56,7 @@ geometry: margin=1in
 \vspace*{\fill}
 
 % Replace with your actual photo path
-\includegraphics[width=0.5\textwidth]{zhihu-logo.png} 
+\includegraphics[width=0.5\textwidth]{zhihu-logo.png}
 
 \vspace{2cm}
 
@@ -91,7 +91,6 @@ I am currently a Senior AI Compiler Developer at a leading computing and storage
 - **Deep Learning**: Transformer, BERT, CNN, RL, GNN
 - **Specialization**: Privacy Computing, Federated Learning, MPC, Machine Learning Optimization
 
- 
 \newpage
 
 # ${title}

@@ -54,36 +54,20 @@ class ResearchWorkflow(BaseWorkflow):
         """
         # Convert dict to WorkflowConfig if needed
         if isinstance(workflow_def, dict):
-            # Prepare execution policies
-            execution_policies = {
-                'required_fields': workflow_def.get('required_inputs', []),
-                'default_status': workflow_def.get('default_status', 'initialized'),
-                'error_handling': workflow_def.get('error_handling', {}),
-                'steps': workflow_def.get('steps', [
-                    {
-                        'step': workflow_def.get('step', 1),
-                        'type': workflow_def.get('type', 'research'),
-                        'name': workflow_def.get('name', 'Research Workflow'),
-                        'description': workflow_def.get('description', ''),
-                        'input_type': 'dict',
-                        'output_type': 'dict',
-                        'agents': [],
-                        'outputs': workflow_def.get('outputs', [])
-                    }
-                ])
-            }
-
             workflow_def = WorkflowConfig(
                 id=workflow_def.get('name', 'research_workflow'),
                 name=workflow_def.get('name', 'Research Workflow'),
                 description=workflow_def.get('description', ''),
-                agents=[],  # No agents by default
-                execution_policies=ExecutionPolicies(**execution_policies)
+                agents=workflow_def.get('agents', []),
+                execution_policies=ExecutionPolicies(**workflow_def.get('execution_policies', {}))
             )
 
         super().__init__(workflow_def)
         self.research_steps: List[DistributedStep] = []
         self.agents: List[Agent] = []
+        
+        # Set error_handling to an empty dictionary
+        self.error_handling = {}
 
         # Initialize agents from config
         if workflow_def.agents:
@@ -92,20 +76,19 @@ class ResearchWorkflow(BaseWorkflow):
                 self.agents.append(agent)
 
         # Initialize research steps from config
-        for step in workflow_def.execution_policies.steps:
-            self.add_research_step(DistributedStep(
-                id=str(step.get('step', 1)),  # Convert step to string
-                name=step.get('name', f'Step {step.get("step", 1)}'),
-                input_type=step.get('input_type', 'dict'),
-                output_type=step.get('output_type', 'dict'),
-                agents=step.get('agents', [])
-            ))
+        if workflow_def.execution_policies and workflow_def.execution_policies.steps:
+            for step in workflow_def.execution_policies.steps:
+                self.add_research_step(DistributedStep(
+                    id=str(step.get('step', 1)),
+                    name=step.get('name', f'Step {step.get("step", 1)}'),
+                    input_type=step.get('input_type', 'dict'),
+                    output_type=step.get('output_type', 'dict'),
+                    agents=step.get('agents', [])
+                ))
 
-    def initialize_state(self):
-        """Initialize workflow state"""
-        super().initialize_state()
-        for step in self.research_steps:
-            step.completed = False
+    def add_research_step(self, step: DistributedStep):
+        """Add a research step to the workflow"""
+        self.research_steps.append(step)
 
     async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -115,80 +98,115 @@ class ResearchWorkflow(BaseWorkflow):
             input_data: Input data for the workflow
         
         Returns:
-            Workflow execution results
+            Dict containing the workflow results
         """
         results = {}
-        
-        # Validate required inputs
-        required_inputs = self.config.execution_policies.required_fields
-        for required in required_inputs:
-            if required not in input_data:
-                raise ValueError(f"Missing required input: {required}")
-        
-        # Execute research steps in sequence
+        current_input = input_data.copy()
+
+        # Use a semaphore to control concurrency
+        semaphore = asyncio.Semaphore(min(len(self.research_steps), 4))
+
+        # Prepare tasks for each step
+        step_tasks = []
         for step in self.research_steps:
-            step_results = {}
+            # Create agents for this step if needed
+            if not step.agents:
+                step.agents = self.agents
+
+            # Create a task for each step
+            task = self._execute_step_with_semaphore(semaphore, step, current_input)
+            step_tasks.append(task)
+
+        # Execute steps concurrently
+        step_results = await asyncio.gather(*step_tasks)
+
+        # Process results
+        for step, step_result in zip(self.research_steps, step_results):
+            # Store the result
+            results[f'step_{step.id}_result'] = step_result
             
-            # Execute each agent in the step
-            for agent_id in step.agents:
-                agent = self.get_agent(agent_id)
-                if agent:
-                    try:
-                        agent_result = await agent.process(input_data)
-                        step_results[agent_id] = agent_result
-                    except Exception as e:
-                        step_results[agent_id] = {"error": str(e)}
-                        
-            results[step.id] = step_results
+            # Update current input for next step
+            if isinstance(step_result, dict):
+                current_input.update(step_result)
+            else:
+                current_input[f'step_{step.id}_output'] = step_result
+
             step.mark_completed()
-            
+
         return results
-    
-    def get_agent(self, agent_id: str) -> Optional[Agent]:
+
+    async def _execute_step_with_semaphore(self, semaphore: asyncio.Semaphore, 
+                                           step: DistributedStep, 
+                                           input_data: Dict[str, Any]) -> Any:
         """
-        Get agent by ID
+        Execute a step with concurrency control
         
         Args:
-            agent_id: ID of the agent
-            
+            semaphore: Concurrency control semaphore
+            step: The step to execute
+            input_data: Input data for the step
+        
         Returns:
-            Agent if found, None otherwise
+            Result of the step execution
         """
-        return next((agent for agent in self.agents if agent.id == agent_id), None)
-    
-    def add_research_step(self, step: Union[DistributedStep, Dict[str, Any]]):
+        async with semaphore:
+            try:
+                # Add a small delay to prevent overwhelming the system
+                await asyncio.sleep(0.01)
+                
+                # Execute the step
+                return await self._execute_step(step, input_data)
+            except Exception as e:
+                # Log the error and re-raise
+                print(f"Error in step {step.id}: {str(e)}")
+                raise
+
+    async def _execute_step(self, step: DistributedStep, input_data: Dict[str, Any]) -> Any:
         """
-        Add a research workflow step
+        Execute a single step in the workflow
         
         Args:
-            step: Configuration for the research step
-        """
-        if isinstance(step, dict):
-            step = DistributedStep(**step)
-        self.research_steps.append(step)
-    
-    def get_workflow_status(self) -> Dict[str, Any]:
-        """
-        Get current workflow status
-        
-        Returns:
-            Workflow status dictionary
-        """
-        return {
-            "total_steps": len(self.research_steps),
-            "completed_steps": len([step for step in self.research_steps if step.completed]),
-            "agents": [agent.id for agent in self.agents]
-        }
-    
-    def stop(self):
-        """
-        Stop the research workflow
-        """
-        # Placeholder implementation for stopping workflow
-        for agent in self.agents:
-            agent.stop()
+            step: The step to execute
+            input_data: Input data for the step
             
-    def execute_step(self, step: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
+        Returns:
+            Result of the step execution
+        """
+        # Execute the step using the first available agent
+        if not step.agents:
+            raise Exception(f"No agents available for step {step.id}")
+
+        # Normalize agent to be an Agent object
+        agent = step.agents[0]
+        if isinstance(agent, str):
+            # Find agent by ID in self.agents
+            matching_agents = [a for a in self.agents if a.config.id == agent]
+            if matching_agents:
+                agent = matching_agents[0]
+            else:
+                # Create a default agent if no matching agent found
+                agent = Agent(config=AgentConfig(id=agent, type='default'))
+        elif isinstance(agent, dict):
+            # Create agent from config if needed
+            agent = Agent(config=AgentConfig(**agent))
+        
+        # Ensure agent is an Agent object
+        if not hasattr(agent, 'execute'):
+            raise TypeError(f"Invalid agent type for step {step.id}: {type(agent)}")
+
+        # Check if execute is a coroutine method
+        if asyncio.iscoroutinefunction(agent.execute):
+            return await agent.execute(input_data)
+        else:
+            return agent.execute(input_data)
+
+    def initialize_state(self):
+        """Initialize workflow state"""
+        super().initialize_state()
+        for step in self.research_steps:
+            step.completed = False
+
+    async def execute_step(self, step: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a single step in the research workflow
         
         Args:
@@ -221,3 +239,36 @@ class ResearchWorkflow(BaseWorkflow):
             # Handle step execution errors
             error_handler = self.error_handling.get('handler', self._default_error_handler)
             return error_handler(e, inputs)
+
+    def get_agent(self, agent_id: str) -> Optional[Agent]:
+        """
+        Get agent by ID
+        
+        Args:
+            agent_id: ID of the agent
+            
+        Returns:
+            Agent if found, None otherwise
+        """
+        return next((agent for agent in self.agents if agent.id == agent_id), None)
+    
+    def get_workflow_status(self) -> Dict[str, Any]:
+        """
+        Get current workflow status
+        
+        Returns:
+            Workflow status dictionary
+        """
+        return {
+            "total_steps": len(self.research_steps),
+            "completed_steps": len([step for step in self.research_steps if step.completed]),
+            "agents": [agent.id for agent in self.agents]
+        }
+    
+    def stop(self):
+        """
+        Stop the research workflow
+        """
+        # Placeholder implementation for stopping workflow
+        for agent in self.agents:
+            agent.stop()
