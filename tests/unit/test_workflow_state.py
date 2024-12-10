@@ -3,43 +3,67 @@ from datetime import datetime
 from agentflow.core.workflow_state import (
     WorkflowStateManager,
     StepStatus,
-    StepState
+    StepState,
+    WorkflowStatus
 )
 
 def test_workflow_state_initialization():
     """Test workflow state initialization"""
     manager = WorkflowStateManager()
-    manager.initialize_step(1)
+    step_id = "step_1"
     
-    assert 1 in manager.states
-    assert manager.states[1].status == StepStatus.PENDING
-    assert manager.states[1].retry_count == 0
+    # Initialize step
+    manager.initialize_step(step_id)
+    
+    # Check initial state
+    assert step_id in manager.step_states
+    assert manager.get_step_status(step_id) == StepStatus.PENDING
+    assert manager.get_step_retry_count(step_id) == 0
+    
+    # Check metadata initialization
+    metadata = manager.get_step_metadata(step_id)
+    assert metadata['start_time'] is None
+    assert metadata['end_time'] is None
+    assert metadata['error'] is None
 
 def test_workflow_state_transitions():
     """Test workflow state transitions"""
     manager = WorkflowStateManager()
-    manager.initialize_step(1)
+    step_id = "step_1"
     
-    # Test start
-    manager.start_step(1)
-    assert manager.states[1].status == StepStatus.RUNNING
-    assert isinstance(manager.states[1].start_time, datetime)
+    # Initialize and start step
+    manager.initialize_step(step_id)
+    manager.start_step(step_id)
     
-    # Test completion
+    # Check running state
+    assert manager.get_step_status(step_id) == StepStatus.RUNNING
+    metadata = manager.get_step_metadata(step_id)
+    assert metadata['start_time'] is not None
+    
+    # Test step success
     result = {"test": "result"}
-    manager.complete_step(1, result)
-    assert manager.states[1].status == StepStatus.COMPLETED
-    assert manager.states[1].result == result
-    assert isinstance(manager.states[1].end_time, datetime)
+    manager.set_step_status(step_id, StepStatus.SUCCESS)
+    manager.set_step_result(step_id, result)
     
-    # Test failure
-    manager.initialize_step(2)
-    manager.start_step(2)
-    manager.fail_step(2, "Test error")
-    assert manager.states[2].status == StepStatus.FAILED
-    assert manager.states[2].error == "Test error"
+    assert manager.get_step_status(step_id) == StepStatus.SUCCESS
+    assert manager.get_step_result(step_id) == result
+    assert manager.get_step_success_count(step_id) == 1
     
-    # Test retry
-    manager.retry_step(2)
-    assert manager.states[2].status == StepStatus.RETRYING
-    assert manager.states[2].retry_count == 1 
+    # Test step failure
+    failure_step_id = "step_2"
+    manager.initialize_step(failure_step_id)
+    manager.start_step(failure_step_id)
+    manager.set_step_status(failure_step_id, StepStatus.FAILED)
+    
+    assert manager.get_step_status(failure_step_id) == StepStatus.FAILED
+    
+    # Test retry mechanism
+    manager.increment_retry_count(failure_step_id)
+    assert manager.get_step_retry_count(failure_step_id) == 1
+    
+    # Test workflow status
+    manager.initialize_workflow()
+    assert manager.get_workflow_status() == WorkflowStatus.RUNNING
+    
+    manager.set_workflow_status(WorkflowStatus.COMPLETED)
+    assert manager.get_workflow_status() == WorkflowStatus.COMPLETED

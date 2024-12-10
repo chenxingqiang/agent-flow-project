@@ -3,8 +3,8 @@
     "CONTEXT": "An advanced AI agent designed to provide comprehensive customer support across multiple channels and complex scenarios.",
     "OBJECTIVE": "Resolve customer inquiries efficiently, provide personalized solutions, and ensure high customer satisfaction.",
     "STATE": "Customer has submitted a support request that requires detailed analysis and multi-step resolution.",
-    "WORKFLOW": [
-        {
+    "WORKFLOW": {
+        "step_1": {
             "step": 1,
             "title": "Query Classification",
             "description": "Analyze and categorize the customer's support request",
@@ -16,11 +16,11 @@
                 "categories": ["Technical", "Billing", "Product", "Refund", "Other"]
             }
         },
-        {
+        "step_2": {
             "step": 2,
             "title": "Solution Generation",
             "description": "Generate tailored solutions based on query classification",
-            "input": ["WORKFLOW.1.output", "PRODUCT_CATALOG"],
+            "input": ["WORKFLOW.step_1.output", "PRODUCT_CATALOG"],
             "output": {
                 "type": "solution",
                 "details": "Proposed resolution steps",
@@ -28,11 +28,11 @@
                 "resolution_options": 3
             }
         },
-        {
+        "step_3": {
             "step": 3,
             "title": "Response Formatting",
             "description": "Create a professional and empathetic response",
-            "input": ["WORKFLOW.2.output", "COMMUNICATION_CHANNEL"],
+            "input": ["WORKFLOW.step_2.output", "COMMUNICATION_CHANNEL"],
             "output": {
                 "type": "response",
                 "details": "Formatted customer communication",
@@ -40,7 +40,7 @@
                 "tone": ["Professional", "Empathetic"]
             }
         }
-    ],
+    },
     "POLICY": "Prioritize customer satisfaction, provide accurate information, escalate complex issues when necessary.",
     "ENVIRONMENT": {
         "INPUT": ["CUSTOMER_QUERY", "CUSTOMER_HISTORY", "PRODUCT_CATALOG"],

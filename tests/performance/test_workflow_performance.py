@@ -30,13 +30,21 @@ def test_workflow():
         "WORKFLOW": [
             {
                 "step": 1,
+                "type": "research",
+                "name": "Step 1",
+                "description": "Research step",
                 "input": ["research_topic", "deadline", "academic_level"],
-                "output": {"type": "research"}
+                "output": {"type": "research"},
+                "agent_config": {}
             },
             {
                 "step": 2,
+                "type": "document",
+                "name": "Step 2", 
+                "description": "Document generation step",
                 "input": ["WORKFLOW.1"],
-                "output": {"type": "document"}
+                "output": {"type": "document"},
+                "agent_config": {}
             }
         ]
     }
@@ -46,7 +54,30 @@ def test_config():
     """Create a test configuration"""
     return {
         "max_execution_time": 5.0,
-        "max_concurrent_time": 10.0
+        "max_concurrent_time": 10.0,
+        "max_retries": 3,
+        "step_1_config": {
+            "step_id": "step_1",
+            "step": 1,
+            "type": "research",
+            "timeout": 30,
+            "max_retries": 3,
+            "preprocessors": [],
+            "postprocessors": [],
+            "input": ["research_topic", "deadline", "academic_level"],
+            "output": {"type": "research"}
+        },
+        "step_2_config": {
+            "step_id": "step_2",
+            "step": 2,
+            "type": "document", 
+            "timeout": 30,
+            "max_retries": 3,
+            "preprocessors": [],
+            "postprocessors": [],
+            "input": ["WORKFLOW.1"],
+            "output": {"type": "document"}
+        }
     }
 
 @pytest.fixture
@@ -54,6 +85,14 @@ def mock_ray_workflow_step():
     """Create a mock Ray workflow step"""
     @ray.remote
     class MockDistributedStep:
+        def __init__(self, step_id: str, config: Dict[str, Any]):
+            """Initialize the mock distributed step."""
+            self.step_id = step_id
+            self.config = config
+            self.step_number = config.get('step', 1)
+            self.input_keys = config.get('input', [])
+            self.output_type = config.get('output', {})
+            
         async def execute(self, input_data):
             await asyncio.sleep(0.1)  # Simulate work
             return {
@@ -68,9 +107,9 @@ def mock_ray_workflow_step():
     return MockDistributedStep
 
 @pytest.fixture
-def mock_workflow(mock_ray_workflow_step, test_workflow):
+def mock_workflow(mock_ray_workflow_step, test_workflow, test_config):
     """Create a mock workflow with distributed steps"""
-    workflow = ResearchDistributedWorkflow(workflow_config=test_workflow, config={})
+    workflow = ResearchDistributedWorkflow(workflow_config=test_workflow, config=test_config)
     return workflow
 
 @pytest.mark.asyncio
@@ -124,7 +163,7 @@ async def test_concurrent_workflow_execution(mock_ray_workflow_step, test_workfl
     
     for num_workflows in concurrency_levels:
         workflows = [
-            ResearchDistributedWorkflow(workflow_config=test_workflow, config={})
+            ResearchDistributedWorkflow(workflow_config=test_workflow, config=test_config)
             for _ in range(num_workflows)
         ]
         

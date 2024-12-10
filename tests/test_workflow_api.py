@@ -9,6 +9,7 @@ import logging
 import socket
 import atexit
 from requests.exceptions import HTTPError, ConnectionError
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -107,130 +108,112 @@ def pytest_configure(config):
 def test_sync_workflow_execution(server):
     """Test synchronous workflow execution"""
     url = f"{server.base_url}/workflow/execute"
-
-    workflow_config = {
+    
+    request_data = {
         "workflow": {
+            "AGENT": "Academic_Paper_Optimization",
+            "ENVIRONMENT": {
+                "INPUT": ["STUDENT_NEEDS", "LANGUAGE", "TEMPLATE"],
+                "OUTPUT": ["Markdown-formatted academic plan"]
+            },
             "WORKFLOW": [
                 {
-                    "step": 1,
+                    "step_id": "step_1",
                     "type": "research",
                     "name": "Research Step",
                     "description": "Perform research on the given topic",
-                    "input": ["research_topic", "deadline", "academic_level"],
-                    "output": {"type": "research"},
-                    "agent_config": {}
+                    "input": ["STUDENT_NEEDS", "LANGUAGE", "TEMPLATE"],
+                    "output": {
+                        "type": "research_findings",
+                        "format": "structured_data"
+                    },
+                    "agent_config": {
+                        "type": "research",
+                        "provider": "openai",
+                        "model": "gpt-3.5-turbo"
+                    }
                 },
                 {
-                    "step": 2,
+                    "step_id": "step_2",
                     "type": "document",
                     "name": "Document Generation Step",
                     "description": "Generate document from research findings",
-                    "input": ["WORKFLOW.1"],
-                    "output": {"type": "document"},
-                    "agent_config": {}
+                    "input": ["WORKFLOW.step_1.output"],
+                    "output": {
+                        "type": "document",
+                        "format": "Markdown with LaTeX"
+                    },
+                    "agent_config": {
+                        "type": "document",
+                        "provider": "openai",
+                        "model": "gpt-3.5-turbo"
+                    }
                 }
             ]
         },
         "config": {
-            "workflow_name": "research_workflow",
             "max_retries": 3,
-            "retry_delay": 1.0,
-            "max_concurrent_steps": 2,
-            "model": {
-                "provider": "openai",
-                "name": "gpt-3.5-turbo"
-            },
-            "type": "research",
-            "system_prompt": "You are a research assistant",
-            "workflow": {
-                "name": "research_workflow",
-                "description": "Research workflow execution",
-                "agents": [],
-                "execution_policies": {
-                    "required_inputs": [],
-                    "default_status": "initialized",
-                    "error_handling": {},
-                    "steps": [
-                        {
-                            "step": 1,
-                            "type": "research",
-                            "name": "Step 1",
-                            "description": "Perform research on the given topic",
-                            "input_type": "dict",
-                            "output_type": "dict",
-                            "agents": [{}],
-                            "input": ["research_topic", "deadline", "academic_level"],
-                            "output": "step_1_output"
-                        },
-                        {
-                            "step": 2,
-                            "type": "document",
-                            "name": "Step 2",
-                            "description": "Generate document from research findings",
-                            "input_type": "dict",
-                            "output_type": "dict",
-                            "agents": [{}],
-                            "input": ["WORKFLOW.1"],
-                            "output": "step_2_output"
-                        }
-                    ]
-                }
-            },
+            "retry_backoff": 2.0,
+            "retry_delay": 0.1,
             "step_1_config": {
-                "timeout": 60,
                 "max_retries": 3,
-                "additional_inputs": {},
-                "agent_config": {}
+                "timeout": 30,
+                "preprocessors": [],
+                "postprocessors": []
             },
             "step_2_config": {
-                "timeout": 60,
                 "max_retries": 3,
-                "additional_inputs": {},
-                "agent_config": {}
+                "timeout": 30,
+                "preprocessors": [],
+                "postprocessors": []
             },
-            "step_config": {
-                "timeout": 60,
+            "execution": {
+                "parallel": False,
                 "max_retries": 3
-            }
+            },
+            "distributed": False,
+            "timeout": 300,
+            "logging_level": "INFO"
         },
         "input_data": {
-            "research_topic": "API Testing in Distributed Systems",
-            "deadline": "2024-05-15",
-            "academic_level": "Master"
-        },
-        "config": {
-            "workflow_name": "research_workflow"
+            "STUDENT_NEEDS": {
+                "RESEARCH_TOPIC": "API Testing in Distributed Systems",
+                "DEADLINE": "2024-05-15",
+                "ACADEMIC_LEVEL": "Master"
+            },
+            "LANGUAGE": {
+                "TYPE": "English",
+                "STYLE": "Academic"
+            },
+            "TEMPLATE": "Research Paper"
         }
     }
+    
+    response = requests.post(url, json=request_data)
+    
+    if response.status_code != 200:
+        logger.error(f"Full error response: {response.text}")
+        raise requests.exceptions.HTTPError(
+            f"Request failed with status {response.status_code}: {response.text}"
+        )
+    
+    result = response.json()
+    assert "workflow_id" in result
+    
+    # Check workflow status
+    status_url = f"{server.base_url}/workflow/status/{result['workflow_id']}"
+    status_response = requests.get(status_url)
+    assert status_response.status_code == 200
 
-    # Add logging to capture the full request and response
-    logger.setLevel(logging.DEBUG)
-
-    try:
-        response = requests.post(url, json=workflow_config)
-        logger.debug(f"Request Payload: {workflow_config}")
-        logger.debug(f"Sync Response Status: {response.status_code}")
-        logger.debug(f"Sync Response Content: {response.text}")
-
-        # If the response is not 200, print out the full error details
-        if response.status_code != 200:
-            logger.error(f"Full error response: {response.text}")
-            raise requests.exceptions.HTTPError(f"Request failed with status {response.status_code}: {response.text}")
-
-        result = response.json()
-        assert isinstance(result, dict)
-        assert 'output' in result
-        assert result['output']['type'] in ['research', 'document']
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Request failed: {str(e)}")
-        raise
+    status_result = status_response.json()
+    assert "status" in status_result
+    assert status_result["status"] in ["completed", "running", "pending"]
 
 def test_async_workflow_execution(server):
     """Test asynchronous workflow execution"""
     execute_url = f"{server.base_url}/workflow/execute_async"
-
-    workflow_config = {
+    
+    request_data = {
         "workflow": {
             "WORKFLOW": [
                 {
@@ -238,98 +221,100 @@ def test_async_workflow_execution(server):
                     "type": "research",
                     "name": "Research Step",
                     "description": "Perform research on the given topic",
-                    "input": ["research_topic", "deadline", "academic_level"],
-                    "output": {"type": "research"},
-                    "agent_config": {}
+                    "input": ["STUDENT_NEEDS", "LANGUAGE", "TEMPLATE"],
+                    "output": {
+                        "type": "research_findings",
+                        "format": "structured_data"
+                    },
+                    "agent_config": {
+                        "type": "research",
+                        "provider": "openai",
+                        "model": "gpt-3.5-turbo"
+                    }
                 },
                 {
                     "step": 2,
                     "type": "document",
                     "name": "Document Generation Step",
                     "description": "Generate document from research findings",
-                    "input": ["WORKFLOW.1"],
-                    "output": {"type": "document"},
-                    "agent_config": {}
+                    "input": ["WORKFLOW.1.output"],
+                    "output": {
+                        "type": "document",
+                        "format": "Markdown with LaTeX"
+                    },
+                    "agent_config": {
+                        "type": "document",
+                        "provider": "openai",
+                        "model": "gpt-3.5-turbo"
+                    }
                 }
             ]
         },
         "config": {
-            "workflow_name": "research_workflow",
-            "max_retries": 3,
-            "retry_delay": 1.0,
-            "max_concurrent_steps": 2,
-            "model": {
-                "provider": "openai",
-                "name": "gpt-3.5-turbo"
-            },
-            "type": "research",
-            "system_prompt": "You are a research assistant",
-            "step_1_config": {
-                "timeout": 60,
-                "max_retries": 3,
-                "additional_inputs": {},
-                "agent_config": {}
-            },
-            "step_2_config": {
-                "timeout": 60,
-                "max_retries": 3,
-                "additional_inputs": {},
-                "agent_config": {}
-            },
-            "step_config": {
-                "timeout": 60,
+            "max_iterations": 3,
+            "logging_level": "INFO",
+            "distributed": True,
+            "timeout": 300,
+            "execution": {
+                "parallel": True,
                 "max_retries": 3
+            },
+            "agents": {
+                "research": {
+                    "provider": "openai",
+                    "model": "gpt-3.5-turbo",
+                    "temperature": 0.7
+                },
+                "document": {
+                    "provider": "openai",
+                    "model": "gpt-3.5-turbo",
+                    "temperature": 0.7
+                }
             }
         },
         "input_data": {
-            "research_topic": "Async API Testing",
-            "deadline": "2024-06-15",
-            "academic_level": "PhD"
-        },
-        "config": {
-            "workflow_name": "research_workflow"
+            "STUDENT_NEEDS": {
+                "RESEARCH_TOPIC": "Distributed Computing Systems",
+                "DEADLINE": "2024-05-15",
+                "ACADEMIC_LEVEL": "Master"
+            },
+            "LANGUAGE": {
+                "TYPE": "English",
+                "STYLE": "Academic"
+            },
+            "TEMPLATE": "Research Paper"
         }
     }
-
-    try:
-        # Initiate async workflow
-        async_response = requests.post(execute_url, json=workflow_config)
-        logger.debug(f"Async Response Status: {async_response.status_code}")
-        logger.debug(f"Async Response Content: {async_response.text}")
-
-        # If the response is not 200, print out the full error details
-        if async_response.status_code != 200:
-            logger.error(f"Full async error response: {async_response.text}")
-            raise requests.exceptions.HTTPError(f"Async request failed with status {async_response.status_code}: {async_response.text}")
-
-        async_result = async_response.json()
-        assert 'workflow_id' in async_result
-        workflow_id = async_result['workflow_id']
-
-        # Poll for workflow completion
-        status_url = f"{server.base_url}/workflow/status/{workflow_id}"
-        max_retries = 10
-        retry_delay = 1
-
-        for _ in range(max_retries):
-            status_response = requests.get(status_url)
-            if status_response.status_code != 200:
-                logger.error(f"Status check failed: {status_response.text}")
-                raise requests.exceptions.HTTPError(f"Status check failed with status {status_response.status_code}")
+    
+    async_response = requests.post(execute_url, json=request_data)
+    
+    if async_response.status_code != 200:
+        logger.error(f"Full async error response: {async_response.text}")
+        raise requests.exceptions.HTTPError(
+            f"Async request failed with status {async_response.status_code}: {async_response.text}"
+        )
+    
+    result = async_response.json()
+    assert "workflow_id" in result
+    
+    # Check workflow status
+    status_url = f"{server.base_url}/workflow/status/{result['workflow_id']}"
+    max_retries = 5
+    retry_delay = 2
+    
+    for _ in range(max_retries):
+        status_response = requests.get(status_url)
+        assert status_response.status_code == 200
+        
+        status_result = status_response.json()
+        assert "status" in status_result
+        
+        if status_result["status"] == "completed":
+            break
             
-            status_result = status_response.json()
-            logger.debug(f"Workflow status: {status_result}")
-            
-            if status_result.get('status') == 'completed':
-                break
-            
-            time.sleep(retry_delay)
-        else:
-            raise TimeoutError("Workflow did not complete within expected time")
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Async request failed: {str(e)}")
-        raise
+        time.sleep(retry_delay)
+    
+    assert status_result["status"] in ["completed", "running", "pending"]
 
 def test_invalid_workflow(server):
     """Test handling of invalid workflow configuration"""

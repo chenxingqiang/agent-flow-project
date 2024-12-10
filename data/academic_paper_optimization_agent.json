@@ -3,8 +3,8 @@
     "CONTEXT": "This agent generates tailored academic solutions for students based on specific research needs and requirements. It integrates structured workflows, dynamic variables, and precise formatting to optimize academic outputs.",
     "OBJECTIVE": "Provide a comprehensive research optimization plan with detailed steps, ensuring alignment with the student's goals, timeline, and formatting needs.",
     "STATE": "The student requires assistance in developing innovative research ideas, structuring a paper, and optimizing it for publication. The output should be language-specific and adhere to the provided template.",
-    "WORKFLOW": [
-      {
+    "WORKFLOW": {
+      "step_1": {
         "step": 1,
         "title": "Extract Details from Student Inputs",
         "description": "Analyze the STUDENT_NEEDS, LANGUAGE, and TEMPLATE variables to understand the student's background, goals, and constraints.",
@@ -16,7 +16,7 @@
           "word_count": 200
         }
       },
-      {
+      "step_2": {
         "step": 2,
         "title": "Propose Innovative Ideas",
         "description": "Generate 3-5 innovative ideas tailored to the student's research topic, each with an evaluation of innovation, feasibility, and academic value.",
@@ -28,11 +28,11 @@
           "word_count": 1000
         }
       },
-      {
+      "step_3": {
         "step": 3,
         "title": "Create Implementation Plans",
         "description": "Develop detailed implementation plans for the prioritized ideas, using the TEMPLATE for formatting and integrating LaTeX for technical content.",
-        "input": ["TEMPLATE", "WORKFLOW[1].output"],
+        "input": ["TEMPLATE", "WORKFLOW.step_1.output"],
         "output": {
           "type": "plan",
           "details": "Step-by-step implementation for 1-2 prioritized ideas",
@@ -40,11 +40,11 @@
           "word_count": 1200
         }
       },
-      {
+      "step_4": {
         "step": 4,
         "title": "Develop Weekly Timeline",
         "description": "Construct a detailed weekly timeline for experiments, analysis, and writing, aligned with the student's DEADLINE.",
-        "input": ["STUDENT_NEEDS.DEADLINE", "WORKFLOW[2].output"],
+        "input": ["STUDENT_NEEDS.DEADLINE", "WORKFLOW.step_2.output"],
         "output": {
           "type": "timeline",
           "details": "Weekly schedule of tasks and milestones",
@@ -52,11 +52,11 @@
           "word_count": 300
         }
       },
-      {
+      "step_5": {
         "step": 5,
         "title": "Provide Recommendations",
         "description": "Conclude with recommendations for tools, references, and resources to enhance the research and writing process.",
-        "input": ["WORKFLOW[2].output", "WORKFLOW[3].output"],
+        "input": ["WORKFLOW.step_2.output", "WORKFLOW.step_3.output"],
         "output": {
           "type": "recommendations",
           "details": "List of tools, references, and optimization suggestions",
@@ -64,7 +64,7 @@
           "word_count": 500
         }
       }
-    ],
+    },
     "POLICY": "Ensure all outputs are tailored to the LANGUAGE and TEMPLATE variables, and maintain academic rigor. Each step should independently deliver clear, actionable content.",
     "ENVIRONMENT": {
       "INPUT": ["STUDENT_NEEDS", "LANGUAGE", "TEMPLATE"],

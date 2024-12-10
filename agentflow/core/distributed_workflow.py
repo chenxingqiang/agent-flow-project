@@ -626,17 +626,9 @@ class DistributedWorkflow(BaseWorkflow, ABC):
                     'status': 'success'
                 }
                 
-                # Postprocess result
-                postprocessed_result = await self._postprocess_result(result, step_id)
-
-                # Reset retry count on success
-                self.state_manager.reset_step_retry_count(step_id)
-                
-                # Update step status to success
-                self.state_manager.update_step_status(step_id, StepStatus.SUCCESS)
-                
-                return postprocessed_result
-
+                # If successful, return the result
+                return result
+            
             except Exception as e:
                 current_retry = attempt + 1
                 # If it's the last attempt, raise a persistent failure
@@ -655,6 +647,9 @@ class DistributedWorkflow(BaseWorkflow, ABC):
                     'timestamp': time.time()
                 }
                 self.state_manager.update_step_metadata(step_id, {'last_error': error_metadata})
+
+                # Increment retry count
+                self.state_manager.increment_retry_count(step_id)
 
                 # Exponential backoff with jitter
                 delay = jitter(retry_delay * (retry_backoff ** attempt))
@@ -731,7 +726,8 @@ class DistributedWorkflow(BaseWorkflow, ABC):
             for field in step.get('input', []):
                 # Handle nested field references
                 if field.startswith('WORKFLOW.'):
-                    workflow_refs.append(field)
+                    # Ignore workflow references during initial validation
+                    continue
                 elif '.' in field:
                     base_field = field.split('.')[0]
                     if base_field not in required_fields:
@@ -752,32 +748,6 @@ class DistributedWorkflow(BaseWorkflow, ABC):
                 missing_inputs.append(req_input)
             elif input_data[req_input] is None or str(input_data[req_input]).strip() == '':
                 empty_inputs.append(req_input)
-        
-        # Validate workflow references
-        for ref in workflow_refs:
-            # Extract step number from reference
-            try:
-                step_num = int(ref.split('.')[1])
-                # Check if the workflow reference can be satisfied
-                # Allow workflow references to be satisfied by either 
-                # WORKFLOW.{step_num} or the step number itself
-                if (f"WORKFLOW.{step_num}" not in input_data and 
-                    str(step_num) not in input_data and 
-                    f"{step_num}" not in input_data):
-                    # Skip this validation if it's the first step
-                    if step_num > 1:
-                        # Add a more permissive validation
-                        # If the first step's inputs are present, we'll allow this
-                        first_step_inputs_present = all(
-                            field in input_data 
-                            for field in self.workflow_config['WORKFLOW'][0].get('input', [])
-                            if not field.startswith('WORKFLOW.')
-                        )
-                        if not first_step_inputs_present:
-                            missing_inputs.append(ref)
-            except (IndexError, ValueError):
-                # Malformed workflow reference
-                missing_inputs.append(ref)
         
         # Build error message if validation fails
         error_msgs = []
@@ -909,7 +879,7 @@ class DistributedWorkflow:
         current_delay = retry_delay
         last_exception = None
 
-        while current_retry <= max_retries:
+        while current_retry < max_retries + 1:
             try:
                 # Execute the step function
                 if input_data is not None:
@@ -930,7 +900,7 @@ class DistributedWorkflow:
             except Exception as e:
                 current_retry += 1
                 last_exception = e
-                logger.warning(f"Step {step_id} failed (attempt {current_retry}/{max_retries}): {str(e)}")
+                logger.warning(f"Step {step_id} failed (attempt {current_retry}/{max_retries + 1}): {str(e)}")
 
                 # Update retry status
                 self.state_manager.retry_step(step_id)
@@ -947,7 +917,7 @@ class DistributedWorkflow:
                 self.state_manager.increment_retry_count(step_id)
 
                 # If all retries exhausted, raise the final error
-                if current_retry > max_retries:
+                if current_retry == max_retries + 1:
                     logger.error(f"Step {step_id} failed after {max_retries} retries: {str(last_exception)}")
                     self.state_manager.update_step_status(step_id, StepStatus.FAILED)
                     raise WorkflowExecutionError(f"Persistent failure in step {step_id}: {str(last_exception)}")
@@ -1031,7 +1001,8 @@ class DistributedWorkflow:
             for field in step.get('input', []):
                 # Handle nested field references
                 if field.startswith('WORKFLOW.'):
-                    workflow_refs.append(field)
+                    # Ignore workflow references during initial validation
+                    continue
                 elif '.' in field:
                     base_field = field.split('.')[0]
                     if base_field not in required_fields:
@@ -1052,32 +1023,6 @@ class DistributedWorkflow:
                 missing_inputs.append(req_input)
             elif input_data[req_input] is None or str(input_data[req_input]).strip() == '':
                 empty_inputs.append(req_input)
-        
-        # Validate workflow references
-        for ref in workflow_refs:
-            # Extract step number from reference
-            try:
-                step_num = int(ref.split('.')[1])
-                # Check if the workflow reference can be satisfied
-                # Allow workflow references to be satisfied by either 
-                # WORKFLOW.{step_num} or the step number itself
-                if (f"WORKFLOW.{step_num}" not in input_data and 
-                    str(step_num) not in input_data and 
-                    f"{step_num}" not in input_data):
-                    # Skip this validation if it's the first step
-                    if step_num > 1:
-                        # Add a more permissive validation
-                        # If the first step's inputs are present, we'll allow this
-                        first_step_inputs_present = all(
-                            field in input_data 
-                            for field in self.workflow_config['WORKFLOW'][0].get('input', [])
-                            if not field.startswith('WORKFLOW.')
-                        )
-                        if not first_step_inputs_present:
-                            missing_inputs.append(ref)
-            except (IndexError, ValueError):
-                # Malformed workflow reference
-                missing_inputs.append(ref)
         
         # Build error message if validation fails
         error_msgs = []
@@ -1303,12 +1248,17 @@ class ResearchDistributedWorkflow(DistributedWorkflow):
                 step_class = ResearchStep
                 if not hasattr(step_class, '_remote'):
                     step_class = ray.remote(step_class)
-                self.distributed_steps[step_id] = step_class.remote({
-                    'step': step['step'],
-                    'input': step.get('input', []),
-                    'output': step.get('output', {}),
-                    'config': step_config
-                })
+                
+                # Pass step_id and config separately
+                self.distributed_steps[step_id] = step_class.remote(
+                    step_id=step_id, 
+                    config={
+                        'step': step['step'],
+                        'input': step.get('input', []),
+                        'output': step.get('output', {}),
+                        **step_config
+                    }
+                )
 
     async def execute_async(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute workflow asynchronously.
@@ -1448,9 +1398,7 @@ class ResearchDistributedWorkflow(DistributedWorkflow):
             self.state_manager.reset_step_retry_count(step_id)
 
             # Ensure 3 total attempts (initial + retries)
-            total_attempts = max_retries + 1
-
-            while current_retry < total_attempts:
+            while current_retry < max_retries + 1:
                 try:
                     # Check if the step is a Ray actor or a regular object
                     if hasattr(step, 'execute') and hasattr(step.execute, 'remote'):
@@ -1471,29 +1419,35 @@ class ResearchDistributedWorkflow(DistributedWorkflow):
                     return result
 
                 except Exception as e:
-                    # Log the error
-                    logger.warning(f"Step {step_id} attempt {current_retry + 1} failed: {e}")
+                    current_retry += 1
                     last_exception = e
-                    
-                    # If this is the last attempt, raise a WorkflowExecutionError
-                    if current_retry == max_retries - 1:
-                        # Construct a detailed error message
-                        error_message = f"Persistent failure in step {step_id}: {str(last_exception)}"
-                        self.state_manager.set_step_status(step_id, StepStatus.FAILED)
-                        raise WorkflowExecutionError(error_message)
                     
                     # Update retry status
                     self.state_manager.retry_step(step_id)
                     
+                    # Update step metadata with last error
+                    error_metadata = {
+                        'error_type': type(e).__name__,
+                        'error_message': str(e),
+                        'timestamp': time.time()
+                    }
+                    self.state_manager.update_step_metadata(step_id, {'last_error': error_metadata})
+
                     # Increment retry count
-                    current_retry += 1
+                    self.state_manager.increment_retry_count(step_id)
+
+                    # Log retry attempt
+                    logger.warning(f"Step {step_id} failed (attempt {current_retry}/{max_retries + 1}): {str(e)}")
+
+                    # If all retries exhausted, raise the final error
+                    if current_retry == max_retries + 1:
+                        logger.error(f"Step {step_id} failed after {max_retries} retries: {str(last_exception)}")
+                        self.state_manager.update_step_status(step_id, StepStatus.FAILED)
+                        raise WorkflowExecutionError(f"Persistent failure in step {step_id}: {str(last_exception)}")
                     
-                    # Exponential backoff
+                    # Wait before retrying with exponential backoff
                     await asyncio.sleep(current_delay)
                     current_delay *= retry_backoff
-
-            # This should never be reached due to the while loop condition
-            raise WorkflowExecutionError(f"Unexpected error in retry mechanism for step {step_id}")
 
 def initialize_ray():
     """Initialize Ray with basic configuration."""

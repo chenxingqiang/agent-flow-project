@@ -3,8 +3,8 @@
     "CONTEXT": "A sophisticated AI agent specializing in comprehensive data analysis, visualization, and insight generation.",
     "OBJECTIVE": "Transform raw data into actionable insights through systematic analysis and advanced visualization techniques.",
     "STATE": "Raw dataset requires in-depth analysis, statistical processing, and meaningful interpretation.",
-    "WORKFLOW": [
-        {
+    "WORKFLOW": {
+        "step_1": {
             "step": 1,
             "title": "Data Preprocessing",
             "description": "Clean, normalize, and prepare data for analysis",
@@ -16,11 +16,11 @@
                 "preprocessing_steps": ["Missing Value Handling", "Outlier Detection"]
             }
         },
-        {
+        "step_2": {
             "step": 2,
             "title": "Statistical Analysis",
             "description": "Perform advanced statistical tests and generate descriptive statistics",
-            "input": ["WORKFLOW.1.output", "STATISTICAL_METHODS"],
+            "input": ["WORKFLOW.step_1.output", "STATISTICAL_METHODS"],
             "output": {
                 "type": "statistical_report",
                 "details": "Comprehensive statistical analysis",
@@ -28,11 +28,11 @@
                 "analysis_types": ["Regression", "Correlation", "Hypothesis Testing"]
             }
         },
-        {
+        "step_3": {
             "step": 3,
             "title": "Visualization Generation",
             "description": "Create insightful and aesthetically pleasing data visualizations",
-            "input": ["WORKFLOW.2.output", "VISUALIZATION_PREFERENCES"],
+            "input": ["WORKFLOW.step_2.output", "VISUALIZATION_PREFERENCES"],
             "output": {
                 "type": "visualization_report",
                 "details": "Interactive and static visualizations",
@@ -40,11 +40,11 @@
                 "chart_types": ["Line", "Bar", "Scatter", "Heatmap"]
             }
         },
-        {
+        "step_4": {
             "step": 4,
             "title": "Insight Generation",
             "description": "Derive meaningful business or research insights",
-            "input": ["WORKFLOW.2.output", "WORKFLOW.3.output"],
+            "input": ["WORKFLOW.step_2.output", "WORKFLOW.step_3.output"],
             "output": {
                 "type": "executive_summary",
                 "details": "Key findings and recommendations",
@@ -52,7 +52,7 @@
                 "insight_depth": "Strategic"
             }
         }
-    ],
+    },
     "POLICY": "Ensure rigorous statistical methodology, maintain data integrity, and provide clear, actionable insights.",
     "ENVIRONMENT": {
         "INPUT": ["DATASET_PATH", "ANALYSIS_TYPE", "STATISTICAL_METHODS", "VISUALIZATION_PREFERENCES"],

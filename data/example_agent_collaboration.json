@@ -1,53 +1,98 @@
 {
-    "AGENT": {
-        "NAME": "Research Project Collaboration System",
-        "VERSION": "1.0.0"
-    },
-    "COLLABORATION": {
-        "MODE": "DYNAMIC_ROUTING",
-        "WORKFLOW": {
-            "topic_selection_agent": {
-                "dependencies": [],
-                "output_topics": ["research_direction"]
-            },
-            "literature_review_agent": {
-                "dependencies": ["topic_selection_agent"],
-                "output_topics": ["literature_summary"]
-            },
-            "data_collection_agent": {
-                "dependencies": ["literature_review_agent"],
-                "output_topics": ["research_data"]
-            },
-            "analysis_agent": {
-                "dependencies": ["data_collection_agent"],
-                "output_topics": ["analysis_results"]
-            },
-            "writing_agent": {
-                "dependencies": ["analysis_agent"],
-                "output_topics": ["draft_paper"]
-            },
-            "optimization_agent": {
-                "dependencies": ["writing_agent"],
-                "output_topics": ["final_paper"]
+    "AGENT": "Research_Project_Collaboration",
+    "CONTEXT": "A collaborative system designed to coordinate multiple specialized agents for comprehensive research project execution.",
+    "OBJECTIVE": "Orchestrate the seamless collaboration of specialized agents to produce high-quality research papers.",
+    "STATE": "Project requires coordinated effort from multiple specialized agents for research, analysis, and writing.",
+    "WORKFLOW": {
+        "step_1": {
+            "step": 1,
+            "title": "Topic Selection",
+            "description": "Select and refine research direction",
+            "input": ["RESEARCH_DOMAIN", "CURRENT_TRENDS"],
+            "output": {
+                "type": "research_direction",
+                "details": "Refined research topic and scope",
+                "format": "Markdown"
             }
         },
-        "COMMUNICATION_PROTOCOL": {
-            "TYPE": "SEMANTIC_MESSAGE",
-            "CONSTRAINTS": {
-                "MAX_DEPTH": 5,
-                "TIMEOUT": 300,
-                "RETRY_STRATEGY": {
-                    "MAX_RETRIES": 3,
-                    "BACKOFF_FACTOR": 2
-                }
+        "step_2": {
+            "step": 2,
+            "title": "Literature Review",
+            "description": "Analyze and summarize relevant literature",
+            "input": ["WORKFLOW.step_1.output", "LITERATURE_DATABASE"],
+            "output": {
+                "type": "literature_summary",
+                "details": "Comprehensive literature review",
+                "format": "Markdown with Citations"
             }
         },
-        "PERFORMANCE_TRACKING": {
-            "METRICS": [
-                "EXECUTION_TIME", 
-                "RESOURCE_UTILIZATION", 
-                "TASK_COMPLETION_RATE"
-            ]
+        "step_3": {
+            "step": 3,
+            "title": "Data Collection",
+            "description": "Gather and organize research data",
+            "input": ["WORKFLOW.step_2.output", "DATA_SOURCES"],
+            "output": {
+                "type": "research_data",
+                "details": "Structured research dataset",
+                "format": "CSV/JSON"
+            }
+        },
+        "step_4": {
+            "step": 4,
+            "title": "Analysis",
+            "description": "Analyze collected data and generate insights",
+            "input": ["WORKFLOW.step_3.output", "ANALYSIS_METHODS"],
+            "output": {
+                "type": "analysis_results",
+                "details": "Data analysis and findings",
+                "format": "Markdown with LaTeX"
+            }
+        },
+        "step_5": {
+            "step": 5,
+            "title": "Paper Writing",
+            "description": "Create initial draft of research paper",
+            "input": ["WORKFLOW.step_4.output", "WRITING_GUIDELINES"],
+            "output": {
+                "type": "draft_paper",
+                "details": "Initial research paper draft",
+                "format": "LaTeX"
+            }
+        },
+        "step_6": {
+            "step": 6,
+            "title": "Paper Optimization",
+            "description": "Refine and optimize the research paper",
+            "input": ["WORKFLOW.step_5.output", "OPTIMIZATION_CRITERIA"],
+            "output": {
+                "type": "final_paper",
+                "details": "Polished research paper",
+                "format": "LaTeX"
+            }
         }
+    },
+    "POLICY": {
+        "EXECUTION": {
+            "MAX_RETRIES": 3,
+            "TIMEOUT": 300,
+            "BACKOFF_FACTOR": 2
+        },
+        "METRICS": [
+            "EXECUTION_TIME",
+            "RESOURCE_UTILIZATION",
+            "TASK_COMPLETION_RATE"
+        ]
+    },
+    "ENVIRONMENT": {
+        "INPUT": [
+            "RESEARCH_DOMAIN",
+            "CURRENT_TRENDS",
+            "LITERATURE_DATABASE",
+            "DATA_SOURCES",
+            "ANALYSIS_METHODS",
+            "WRITING_GUIDELINES",
+            "OPTIMIZATION_CRITERIA"
+        ],
+        "OUTPUT": "A high-quality research paper with comprehensive analysis and findings"
     }
 }
