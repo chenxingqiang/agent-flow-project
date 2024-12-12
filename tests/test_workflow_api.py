@@ -111,14 +111,9 @@ def test_sync_workflow_execution(server):
     
     request_data = {
         "workflow": {
-            "AGENT": "Academic_Paper_Optimization",
-            "ENVIRONMENT": {
-                "INPUT": ["STUDENT_NEEDS", "LANGUAGE", "TEMPLATE"],
-                "OUTPUT": ["Markdown-formatted academic plan"]
-            },
             "WORKFLOW": [
                 {
-                    "step_id": "step_1",
+                    "step": 1,
                     "type": "research",
                     "name": "Research Step",
                     "description": "Perform research on the given topic",
@@ -134,11 +129,11 @@ def test_sync_workflow_execution(server):
                     }
                 },
                 {
-                    "step_id": "step_2",
+                    "step": 2,
                     "type": "document",
                     "name": "Document Generation Step",
                     "description": "Generate document from research findings",
-                    "input": ["WORKFLOW.step_1.output"],
+                    "input": ["WORKFLOW.1.output"],
                     "output": {
                         "type": "document",
                         "format": "Markdown with LaTeX"

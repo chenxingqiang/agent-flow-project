@@ -130,7 +130,7 @@ class WorkflowConfig(BaseModel):
         Pydantic配置类，启用额外属性和不可变性
         """
         extra = 'allow'
-        allow_population_by_field_name = True
+        populate_by_name = True
         frozen = False
     
     @classmethod

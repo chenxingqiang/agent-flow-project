@@ -1,0 +1,109 @@
+{
+    "AGENT": {
+        "NAME": "Research_Agent_Test_Run",
+        "VERSION": "1.0.0",
+        "TYPE": "research"
+    },
+    "INPUT_SPECIFICATION": {
+        "MODES": ["CONTEXT_INJECTION", "DIRECT_INPUT"],
+        "TYPES": {
+            "DIRECT": {
+                "research_topic": "AI Applications in Education",
+                "deadline": "2024-12-31",
+                "academic_level": "PhD",
+                "field": "Computer Science",
+                "special_requirements": "Focus on machine learning applications",
+                "author": "John Doe"
+            },
+            "CONTEXT": {
+                "sources": ["PREVIOUS_AGENT_OUTPUT", "GLOBAL_MEMORY"]
+            }
+        },
+        "VALIDATION": {
+            "STRICT_MODE": true,
+            "SCHEMA_VALIDATION": true,
+            "TRANSFORM_STRATEGIES": ["TYPE_COERCION", "DEFAULT_VALUE"]
+        }
+    },
+    "OUTPUT_SPECIFICATION": {
+        "MODES": ["FORWARD", "STORE"],
+        "STRATEGIES": {
+            "FORWARD": {
+                "routing_options": ["TRANSFORM", "SELECTIVE_FORWARD"]
+            },
+            "STORE": {
+                "storage_types": ["GLOBAL_MEMORY", "TEMPORARY_CACHE"]
+            }
+        },
+        "TRANSFORMATION": {
+            "ENABLED": true,
+            "METHODS": ["FILTER", "MAP"]
+        }
+    },
+    "WORKFLOW": {
+        "max_iterations": 5,
+        "logging_level": "INFO",
+        "steps": [
+            {
+                "step": 1,
+                "title": "Extract Research Details",
+                "description": "Analyze the research topic, academic requirements, and special considerations",
+                "action": "analyze_topic",
+                "input": ["research_topic", "academic_level", "field"],
+                "output": {
+                    "type": "analysis",
+                    "format": "markdown",
+                    "details": "Comprehensive research topic summary"
+                }
+            },
+            {
+                "step": 2,
+                "title": "Literature Review",
+                "description": "Conduct a systematic literature review focusing on machine learning applications in education",
+                "action": "conduct_literature_review",
+                "input": ["research_topic", "field"],
+                "output": {
+                    "type": "literature_review",
+                    "format": "markdown",
+                    "details": "Annotated bibliography and research gaps"
+                }
+            },
+            {
+                "step": 3,
+                "title": "Research Methodology Design",
+                "description": "Define research methodology, including research questions, hypotheses, and experimental design",
+                "action": "define_methodology",
+                "input": ["research_topic", "special_requirements"],
+                "output": {
+                    "type": "methodology",
+                    "format": "markdown",
+                    "details": "Comprehensive research methodology plan"
+                }
+            },
+            {
+                "step": 4,
+                "title": "Innovative Research Ideas",
+                "description": "Generate innovative research ideas and approaches for AI applications in education",
+                "action": "generate_research_ideas",
+                "input": ["research_topic", "field"],
+                "output": {
+                    "type": "ideas",
+                    "format": "markdown",
+                    "details": "List of innovative research approaches"
+                }
+            },
+            {
+                "step": 5,
+                "title": "Project Timeline and Milestones",
+                "description": "Create a detailed project timeline aligned with the research deadline",
+                "action": "create_project_timeline",
+                "input": ["deadline", "research_topic"],
+                "output": {
+                    "type": "timeline",
+                    "format": "markdown",
+                    "details": "Comprehensive project timeline with milestones"
+                }
+            }
+        ]
+    }
+}

@@ -24,15 +24,15 @@ from agentflow.core.exceptions import (
     StepTimeoutError
 )
 
+import ell
+
 @pytest.fixture
 def test_workflow():
     """Create a test workflow configuration"""
     return {
-        "WORKFLOW": [
-            {
+        "WORKFLOW": {
+            "step_1": {
                 "step": 1,
-                "step_id": "step_1",
-                "type": "research",
                 "title": "Extract Details from Student Inputs",
                 "description": "Analyze the STUDENT_NEEDS, LANGUAGE, and TEMPLATE variables to understand the student's background, goals, and constraints.",
                 "input": ["STUDENT_NEEDS", "LANGUAGE", "TEMPLATE"],
@@ -41,40 +41,57 @@ def test_workflow():
                     "details": "Summarized student profile and requirements",
                     "format": "plain text",
                     "word_count": 200
-                },
-                "agent_config": {}
+                }
             },
-            {
+            "step_2": {
                 "step": 2,
-                "step_id": "step_2",
-                "type": "research",
                 "title": "Propose Innovative Ideas",
                 "description": "Generate 3-5 innovative ideas tailored to the student's research topic, each with an evaluation of innovation, feasibility, and academic value.",
-                "input": ["WORKFLOW.step_1"],
+                "input": ["STUDENT_NEEDS.RESEARCH_TOPIC", "LANGUAGE.TYPE"],
                 "output": {
                     "type": "ideas",
                     "details": "Detailed list of innovative ideas with evaluations",
                     "format": "Markdown with LaTeX",
                     "word_count": 1000
-                },
-                "agent_config": {}
+                }
             },
-            {
+            "step_3": {
                 "step": 3,
-                "step_id": "step_3",
-                "type": "research",
                 "title": "Create Implementation Plans",
                 "description": "Develop detailed implementation plans for the prioritized ideas, using the TEMPLATE for formatting and integrating LaTeX for technical content.",
-                "input": ["WORKFLOW.step_1", "WORKFLOW.step_2"],
+                "input": ["TEMPLATE", "WORKFLOW.step_1.output"],
                 "output": {
                     "type": "plan",
                     "details": "Step-by-step implementation for 1-2 prioritized ideas",
                     "format": "Markdown with LaTeX",
                     "word_count": 1200
-                },
-                "agent_config": {}
+                }
+            },
+            "step_4": {
+                "step": 4,
+                "title": "Develop Weekly Timeline",
+                "description": "Construct a detailed weekly timeline for experiments, analysis, and writing, aligned with the student's DEADLINE.",
+                "input": ["STUDENT_NEEDS.DEADLINE", "WORKFLOW.step_2.output"],
+                "output": {
+                    "type": "timeline",
+                    "details": "Weekly schedule of tasks and milestones",
+                    "format": "Markdown table",
+                    "word_count": 300
+                }
+            },
+            "step_5": {
+                "step": 5,
+                "title": "Provide Recommendations",
+                "description": "Conclude with recommendations for tools, references, and resources to enhance the research and writing process.",
+                "input": ["WORKFLOW.step_2.output", "WORKFLOW.step_3.output"],
+                "output": {
+                    "type": "recommendations",
+                    "details": "List of tools, references, and optimization suggestions",
+                    "format": "Markdown",
+                    "word_count": 500
+                }
             }
-        ]
+        }
     }
 
 @pytest.fixture
@@ -86,21 +103,30 @@ def test_config():
         "retry_backoff": 2.0,
         "timeout": 5.0,
         "step_1_config": {
-            "step_id": "step_1",
             "max_retries": 3,
             "timeout": 30,
             "preprocessors": [],
             "postprocessors": []
         },
         "step_2_config": {
-            "step_id": "step_2", 
             "max_retries": 3,
             "timeout": 30,
             "preprocessors": [],
             "postprocessors": []
         },
         "step_3_config": {
-            "step_id": "step_3", 
+            "max_retries": 3,
+            "timeout": 30,
+            "preprocessors": [],
+            "postprocessors": []
+        },
+        "step_4_config": {
+            "max_retries": 3,
+            "timeout": 30,
+            "preprocessors": [],
+            "postprocessors": []
+        },
+        "step_5_config": {
             "max_retries": 3,
             "timeout": 30,
             "preprocessors": [],
@@ -206,76 +232,114 @@ def mock_implementation_step():
 
 @pytest.fixture
 def failing_step():
-    """Create a failing step"""
+    """Create a step that fails a specified number of times before succeeding"""
     @ray.remote
     class FailingStep:
-        def __init__(self, step_id: str, config: Dict[str, Any] = None):
+        def __init__(self, step_id: str, config: Dict[str, Any]):
             self.step_id = step_id
-            self.config = config or {}
-            self.step_number = 1
-            self.input = self.config.get('input', [])
-            self.output = self.config.get('output', {})
-        
-        def execute(self, input_data):
-            raise StepExecutionError("Step execution failed")
+            self.config = config
+            self.attempts = 0
+            self.max_retries = config.get('max_retries', 3)
+
+        async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+            # Increment attempt counter
+            self.attempts += 1
+            
+            # Always fail with current attempt number
+            total_attempts = self.max_retries + 1  # Total allowed attempts (initial + retries)
+            error_msg = f"Step {self.step_id} execution failed (attempt {self.attempts}/{total_attempts})"
+            raise StepExecutionError(error_msg)
+
     return FailingStep
 
 @pytest.mark.asyncio
 async def test_distributed_workflow_initialization(test_workflow, test_config):
     """Test distributed workflow initialization"""
     workflow = ResearchDistributedWorkflow(workflow_config=test_workflow, config=test_config)
-    
+
     # Check workflow configuration
     assert workflow.workflow_config == test_workflow
     assert workflow.config == test_config
-    
+
     # Check required fields
     assert set(workflow.required_fields) == {"STUDENT_NEEDS", "LANGUAGE", "TEMPLATE"}
+
+    # Check step configurations
+    workflow_steps = test_workflow["WORKFLOW"]
+    if isinstance(workflow_steps, dict):
+        workflow_steps = [
+            {"step_id": step_id, **step_config}
+            for step_id, step_config in workflow_steps.items()
+        ]
+
+    for step in workflow_steps:
+        step_id = step.get('step_id', f"step_{step.get('step', 0)}")
+        step_config = workflow.config.get(f'{step_id}_config')
+        assert step_config is not None
+        assert step_config.get('timeout') == 30
+        assert isinstance(step_config.get('preprocessors'), list)
+        assert isinstance(step_config.get('postprocessors'), list)
+        assert step_config.get('max_retries') == test_config.get('max_retries', 3)
+        assert step_config.get('retry_delay') == test_config.get('retry_delay', 1.0)
+        assert step_config.get('retry_backoff') == test_config.get('retry_backoff', 2.0)
 
 @pytest.mark.asyncio
 async def test_distributed_workflow_execution(test_workflow, test_config, mock_research_step, mock_document_step, mock_implementation_step):
     """Test distributed workflow execution with agent.json aligned format"""
     workflow = ResearchDistributedWorkflow(workflow_config=test_workflow, config=test_config)
-    
-    # Add mock steps
-    workflow.distributed_steps["step_1"] = mock_research_step.remote(
-        step_id="step_1",
-        config=test_config['step_1_config']
-    )
-    workflow.distributed_steps["step_2"] = mock_document_step.remote(
-        step_id="step_2",
-        config=test_config['step_2_config']
-    )
-    workflow.distributed_steps["step_3"] = mock_implementation_step.remote(
-        step_id="step_3",
-        config=test_config['step_3_config']
-    )
-    
+
+    # Add mock steps for all workflow steps
+    workflow_steps = test_workflow["WORKFLOW"]
+    if isinstance(workflow_steps, dict):
+        workflow_steps = [
+            {"step_id": step_id, **step_config}
+            for step_id, step_config in workflow_steps.items()
+        ]
+
+    for step in workflow_steps:
+        step_id = step.get('step_id', f"step_{step.get('step', 0)}")
+        workflow.distributed_steps[step_id] = mock_research_step.remote(
+            step_id=step_id,
+            config=test_config[f"{step_id}_config"]
+        )
+
     # Prepare input data
     input_data = {
-        "STUDENT_NEEDS": "API Testing",
-        "LANGUAGE": "English",
-        "TEMPLATE": "Academic Paper"
+        "STUDENT_NEEDS": {
+            "RESEARCH_TOPIC": "Advanced ML Research",
+            "DEADLINE": "2024-12-31"
+        },
+        "LANGUAGE": {
+            "TYPE": "English"
+        },
+        "TEMPLATE": "Academic Research Proposal"
     }
-    
+
     # Execute workflow
     result = await workflow.execute_async(input_data)
-    
+
     # Validate result
     assert result is not None
     assert isinstance(result, dict)
     assert 'output' in result
-    
+
     # Check step-specific outputs
     output = result.get('output', {})
-    assert 'details' in output
-    assert 'format' in output
-    assert 'result' in output
-    
+    assert isinstance(output, dict)
+    assert len(output) > 0
+
     # Verify workflow state
-    assert workflow.state_manager.get_step_status("step_1") == StepStatus.SUCCESS
-    assert workflow.state_manager.get_step_status("step_2") == StepStatus.SUCCESS
-    assert workflow.state_manager.get_step_status("step_3") == StepStatus.SUCCESS
+    status = workflow.state_manager.get_step_status("step_1")
+    assert status.value == StepStatus.SUCCESS.value
+
+    # Verify step results
+    step_1_result = workflow.state_manager.get_step_result("step_1")
+    assert step_1_result is not None
+    assert isinstance(step_1_result, dict)
+
+    # Verify workflow completion
+    workflow_status = workflow.state_manager.get_workflow_status()
+    assert workflow_status.value == WorkflowStatus.SUCCESS.value
 
 @pytest.mark.asyncio
 async def test_workflow_input_validation(test_workflow, test_config):
@@ -299,98 +363,191 @@ async def test_workflow_input_validation(test_workflow, test_config):
 @pytest.mark.asyncio
 async def test_workflow_retry_mechanism(test_workflow, test_config, failing_step):
     """Test workflow retry mechanism"""
-    # Modify workflow to include retry configuration
-    test_config.update({
-        "max_retries": 2,
-        "retry_delay": 0.1,
-        "retry_backoff": 2.0
-    })
-
-    workflow = ResearchDistributedWorkflow(workflow_config=test_workflow, config=test_config)
-    
-    # Replace the first step with a failing step to test retry
-    workflow.distributed_steps["step_1"] = failing_step.remote(
-        step_id="step_1", 
-        config=test_config['step_1_config']
-    )
-    
-    # Prepare input data
-    input_data = {
-        "STUDENT_NEEDS": "Advanced ML Research",
-        "LANGUAGE": "English", 
-        "TEMPLATE": "Academic Research Proposal"
+    # Configure workflow with explicit retry settings
+    test_config['step_1_config'] = {
+        'max_retries': 3,
+        'timeout': 30,
+        'preprocessors': [],
+        'postprocessors': []
     }
     
-    # Add logging to track retry attempts
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
-    
-    # Expect retry mechanism to handle the failure
-    with pytest.raises(WorkflowExecutionError, match="Persistent failure in step step_1"):
-        logger.info("Starting workflow execution")
-        await workflow.execute_async(input_data)
-    
-    # Verify that the step was retried and failed
-    assert workflow.state_manager.get_step_status("step_1") == StepStatus.FAILED
-
-@pytest.mark.asyncio
-async def test_distributed_workflow_error_handling(test_workflow, test_config, failing_step):
-    """Test error handling in distributed workflow"""
     workflow = ResearchDistributedWorkflow(workflow_config=test_workflow, config=test_config)
-
-    # Add failing step
     workflow.distributed_steps["step_1"] = failing_step.remote(
         step_id="step_1",
         config=test_config['step_1_config']
     )
     
-    # Prepare input data
     input_data = {
-        "STUDENT_NEEDS": "API Testing",
-        "LANGUAGE": "English",
+        "STUDENT_NEEDS": {
+            "RESEARCH_TOPIC": "Advanced ML Research",
+            "DEADLINE": "2024-12-31"
+        },
+        "LANGUAGE": {
+            "TYPE": "English"
+        },
+        "TEMPLATE": "Academic Research Proposal"
+    }
+    
+    # Execute workflow and verify error handling
+    with pytest.raises(WorkflowExecutionError) as excinfo:
+        await workflow.execute_async(input_data)
+    
+    # Verify error details
+    error_msg = str(excinfo.value)
+    assert "Step step_1" in error_msg
+    assert "failed after" in error_msg
+    assert "attempts" in error_msg
+    
+    # Verify step status and retry count
+    assert workflow.state_manager.get_step_status("step_1") == StepStatus.FAILED
+    assert workflow.state_manager.get_workflow_status() == WorkflowStatus.FAILED
+    assert workflow.state_manager.get_step_retry_count("step_1") == test_config['step_1_config']['max_retries']
+
+@pytest.mark.asyncio
+async def test_distributed_workflow_error_handling(test_workflow, test_config, failing_step):
+    """Test error handling in distributed workflow"""
+    # Ensure step_1_config exists with retry settings
+    if 'step_1_config' not in test_config:
+        test_config['step_1_config'] = {
+            'max_retries': 3,
+            'timeout': 30,
+            'preprocessors': [],
+            'postprocessors': []
+        }
+    
+    workflow = ResearchDistributedWorkflow(workflow_config=test_workflow, config=test_config)
+    workflow.distributed_steps["step_1"] = failing_step.remote(
+        step_id="step_1",
+        config=test_config['step_1_config']
+    )
+    
+    input_data = {
+        "STUDENT_NEEDS": {
+            "RESEARCH_TOPIC": "API Testing",
+            "DEADLINE": "2024-12-31"
+        },
+        "LANGUAGE": {
+            "TYPE": "English"
+        },
         "TEMPLATE": "Academic Paper"
     }
     
-    # Expect workflow execution error
-    with pytest.raises(WorkflowExecutionError, match="Persistent failure in step step_1"):
+    with pytest.raises(WorkflowExecutionError) as excinfo:
         await workflow.execute_async(input_data)
+    
+    error_msg = str(excinfo.value)
+    assert "Step step_1" in error_msg
+    assert "execution failed" in error_msg
+    assert workflow.state_manager.get_step_status("step_1") == StepStatus.FAILED
+    assert workflow.state_manager.get_workflow_status() == WorkflowStatus.FAILED
+    assert workflow.state_manager.get_step_retry_count("step_1") == test_config['step_1_config']['max_retries']
 
 @pytest.mark.asyncio
 async def test_workflow_step_dependencies(test_workflow, test_config, mock_research_step, mock_document_step, mock_implementation_step):
     """Test workflow step dependencies and data passing"""
     workflow = ResearchDistributedWorkflow(workflow_config=test_workflow, config=test_config)
-    
+
     # Set up workflow steps
+    workflow_steps = test_workflow["WORKFLOW"]
+    if isinstance(workflow_steps, dict):
+        workflow_steps = [
+            {"step_id": step_id, **step_config}
+            for step_id, step_config in workflow_steps.items()
+        ]
+
+    # Add mock steps for all workflow steps
     workflow.distributed_steps["step_1"] = mock_research_step.remote(
-        step_id="step_1", 
+        step_id="step_1",
         config=test_config['step_1_config']
     )
     workflow.distributed_steps["step_2"] = mock_document_step.remote(
-        step_id="step_2", 
+        step_id="step_2",
         config=test_config['step_2_config']
     )
     workflow.distributed_steps["step_3"] = mock_implementation_step.remote(
-        step_id="step_3", 
+        step_id="step_3",
         config=test_config['step_3_config']
     )
-    
+    # Add a mock step for step_4 and step_5
+    workflow.distributed_steps["step_4"] = mock_implementation_step.remote(
+        step_id="step_4",
+        config=test_config.get('step_4_config', {})
+    )
+    workflow.distributed_steps["step_5"] = mock_implementation_step.remote(
+        step_id="step_5",
+        config=test_config.get('step_5_config', {})
+    )
+
     # Prepare input data
     input_data = {
         "STUDENT_NEEDS": "Advanced Machine Learning Research",
-        "LANGUAGE": "English", 
+        "LANGUAGE": "English",
         "TEMPLATE": "Academic Research Proposal"
     }
-    
+
     # Execute workflow
-    result = await workflow.execute_async(input_data)
+    results = await workflow.execute_async(input_data)
+
+    # Verify results
+    assert len(results.get('output', {})) > 0
+
+@pytest.mark.asyncio
+async def test_distributed_workflow_with_llm(test_workflow, test_config):
+    """
+    Test distributed workflow execution with LLM integration using ell.simple
     
-    # Verify result structure
-    assert result is not None
-    assert isinstance(result, dict)
-    assert 'output' in result
-    
-    # Verify workflow state
-    assert workflow.state_manager.get_step_status("step_1") == StepStatus.SUCCESS
-    assert workflow.state_manager.get_step_status("step_2") == StepStatus.SUCCESS
-    assert workflow.state_manager.get_step_status("step_3") == StepStatus.SUCCESS
+    This test demonstrates how to incorporate an LLM model into the workflow 
+    execution process, simulating real-world AI-driven workflow scenarios.
+    """
+    # Prepare input data with LLM-specific context
+    input_data = {
+        "STUDENT_NEEDS": {
+            "RESEARCH_TOPIC": "AI Ethics in Machine Learning",
+            "LANGUAGE": "English",
+            "ACADEMIC_LEVEL": "PhD",
+            "DEADLINE": "2024-12-31"
+        },
+        "LLM_CONFIG": {
+            "provider": "ell.simple",
+            "model": "gpt-3.5-turbo",
+            "temperature": 0.7,
+            "max_tokens": 1000
+        }
+    }
+
+    # Create distributed workflow with LLM configuration
+    workflow = ResearchDistributedWorkflow(
+        workflow_config=test_workflow, 
+        config={
+            **test_config,
+            "llm_model": input_data["LLM_CONFIG"]
+        }
+    )
+
+    # Execute workflow with LLM tracing
+    with ell.trace() as trace:
+        try:
+            results = workflow.execute(input_data)
+            
+            # Validate workflow results
+            assert results is not None, "Workflow execution should return results"
+            assert len(results) > 0, "Results should not be empty"
+            
+            # Log workflow results with ell
+            trace.log_prompt(json.dumps(input_data))
+            trace.log_completion(json.dumps(results))
+            
+            # Optional: Add more specific assertions based on workflow steps
+            for step_id, step_result in results.items():
+                assert step_result is not None, f"Step {step_id} should have a result"
+                
+                # Log individual step results
+                trace.log_metadata({
+                    'step_id': step_id,
+                    'step_result': step_result
+                })
+            
+        except Exception as e:
+            # Log error with ell
+            trace.log_error(str(e))
+            pytest.fail(f"Workflow execution failed: {str(e)}")

@@ -116,7 +116,7 @@ def mock_workflow(mock_ray_workflow_step, test_workflow, test_config):
     
     # Override the distributed steps with mock steps
     workflow.distributed_steps = {
-        f"step_{step['step']}": mock_ray_workflow_step(
+        f"step_{step['step']}": mock_ray_workflow_step.remote(
             step_id=f"step_{step['step']}", 
             config=test_config.get(f"step_{step['step']}_config", {})
         ) for step in test_workflow.get('WORKFLOW', [])
@@ -127,7 +127,7 @@ def mock_workflow(mock_ray_workflow_step, test_workflow, test_config):
         step._validate_input = lambda input_data: True
     
     # Override workflow-level input validation
-    workflow._validate_input = lambda input_data: True
+    workflow.validate_input = lambda input_data: None
     
     # Override step input preparation to ensure required fields
     def _prepare_step_input(self, step, input_data, previous_results=None):
@@ -155,7 +155,10 @@ async def test_workflow_execution_time(mock_workflow):
     input_data = {
         "research_topic": "Performance Testing",
         "deadline": "2024-12-31",
-        "academic_level": "PhD"
+        "academic_level": "PhD",
+        "STUDENT_NEEDS": "Performance Testing Needs",
+        "LANGUAGE": "English", 
+        "TEMPLATE": "Research Template"
     }
     
     start_time = time.time()
@@ -168,6 +171,42 @@ async def test_workflow_execution_time(mock_workflow):
 @pytest.mark.asyncio
 async def test_concurrent_workflow_execution(mock_ray_workflow_step, test_workflow, test_config):
     """Test concurrent workflow execution with varying concurrency levels"""
+    # Create a single workflow with mock distributed steps
+    workflow = ResearchDistributedWorkflow(workflow_config=test_workflow, config=test_config)
+    
+    # Override the distributed steps with mock steps
+    workflow.distributed_steps = {
+        f"step_{step['step']}": mock_ray_workflow_step.remote(
+            step_id=f"step_{step['step']}", 
+            config=test_config.get(f"step_{step['step']}_config", {})
+        ) for step in test_workflow.get('WORKFLOW', [])
+    }
+    
+    # Override the input validation method for each step
+    for step_id, step in workflow.distributed_steps.items():
+        step._validate_input = lambda input_data: True
+    
+    # Override workflow-level input validation
+    workflow.validate_input = lambda input_data: None
+    
+    # Override step input preparation to ensure required fields
+    def _prepare_step_input(self, step, input_data, previous_results=None):
+        # Ensure all required input fields are present
+        required_fields = step.get('input', [])
+        step_input = {field: input_data.get(field, f'Mock {field}') for field in required_fields}
+        
+        # Add any additional configuration or metadata
+        step_input.update({
+            'name': step.get('name', 'Mock Step'),
+            'description': step.get('description', 'Mock Step Description'),
+            'agent_config': step.get('agent_config', {}),
+            'input': required_fields
+        })
+        
+        return step_input
+    
+    workflow._prepare_step_input = _prepare_step_input
+
     async def run_workflow_with_metrics(workflow, input_data, iteration):
         process = psutil.Process()
         start_cpu = process.cpu_percent()
@@ -195,35 +234,42 @@ async def test_concurrent_workflow_execution(mock_ray_workflow_step, test_workfl
     base_input_data = {
         "research_topic": "Concurrent Testing",
         "deadline": "2024-12-31",
-        "academic_level": "PhD"
+        "academic_level": "PhD",
+        "STUDENT_NEEDS": "Performance Testing Needs",
+        "LANGUAGE": "English",
+        "TEMPLATE": "Research Template"
     }
     
     for num_workflows in concurrency_levels:
-        workflows = [
-            ResearchDistributedWorkflow(workflow_config=test_workflow, config=test_config)
-            for _ in range(num_workflows)
-        ]
-        
         tasks = [
-            run_workflow_with_metrics(workflow, base_input_data, i) 
-            for i, workflow in enumerate(workflows)
+            run_workflow_with_metrics(workflow, base_input_data, i)
+            for i in range(num_workflows)
         ]
         
         start_time = time.time()
         metrics_list = await asyncio.gather(*tasks)
-        total_time = time.time() - start_time
         
-        # Calculate aggregate metrics
-        avg_execution_time = statistics.mean(m['execution_time'] for m in metrics_list)
-        max_execution_time = max(m['execution_time'] for m in metrics_list)
-        avg_cpu_usage = statistics.mean(m['cpu_usage'] for m in metrics_list)
-        total_memory_delta = sum(m['memory_delta'] for m in metrics_list)
+        # Validate metrics
+        assert len(metrics_list) == num_workflows
         
-        # Flexible assertions based on configuration
-        max_concurrent_time = test_config.get('max_concurrent_time', 10.0)
-        assert avg_execution_time < max_concurrent_time
-        assert max_execution_time < max_concurrent_time * 1.5
-        assert all(m['result'] is not None for m in metrics_list)
+        # Check execution times
+        execution_times = [metrics['execution_time'] for metrics in metrics_list]
+        assert all(time < 5.0 for time in execution_times)
+        
+        # Optional: Check other metrics
+        cpu_usages = [metrics['cpu_usage'] for metrics in metrics_list]
+        memory_deltas = [metrics['memory_delta'] for metrics in metrics_list]
+        
+        # Optional additional assertions
+        def result_to_hashable(result):
+            # If result is a dict, convert it to a sorted tuple of items
+            if isinstance(result, dict):
+                return tuple(sorted((k, str(v)) for k, v in result.items()))
+            return result
+        
+        # Get unique results
+        unique_results = {result_to_hashable(metrics['result']) for metrics in metrics_list}
+        assert len(unique_results) == 1, f"Expected all results to be the same, got {unique_results}"
 
 if __name__ == "__main__":
     pytest.main([__file__])

@@ -1,147 +1,143 @@
-from enum import Enum
 from typing import Dict, Any, Optional
-from dataclasses import dataclass, field
+from enum import Enum
+from dataclasses import dataclass
 from datetime import datetime
 
-class StepStatus(Enum):
-    """Workflow step status"""
-    PENDING = "PENDING"
-    RUNNING = "RUNNING"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
-    RETRYING = "RETRYING"
-    SUCCESS = "SUCCESS"
-
 class WorkflowStatus(Enum):
+    """Workflow execution status"""
     PENDING = "pending"
     RUNNING = "running"
-    COMPLETED = "completed"
+    SUCCESS = "success"
     FAILED = "failed"
+    CANCELLED = "cancelled"
+    COMPLETED = "completed"
+
+class StepStatus(Enum):
+    """Step execution status"""
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 @dataclass
 class StepState:
-    status: StepStatus
+    """State of a workflow step"""
+    status: StepStatus = StepStatus.PENDING
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     retry_count: int = 0
     error: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
-    metadata: Optional[Dict[str, Any]] = field(default=None, init=False)
 
 class WorkflowStateManager:
-    """Manages the state of a workflow execution"""
+    """Manages workflow execution state"""
+
     def __init__(self):
-        self.step_states = {}
-        self.retry_counts = {}
-        self.success_counts = {}
-        self.step_metadata = {}
+        """Initialize workflow state manager"""
+        self.reset_state()
+
+    def reset_state(self):
+        """Reset workflow state to initial values"""
         self.workflow_status = WorkflowStatus.PENDING
-        
-    def initialize_step(self, step_id: str):
-        """Initialize state for a step"""
-        # Initialize state if not exists
+        self.step_states: Dict[str, StepState] = {}
+        self.step_results: Dict[str, Any] = {}
+        self.step_metadata: Dict[str, Dict[str, Any]] = {}
+
+    def initialize_workflow(self):
+        """Initialize workflow execution"""
+        self.reset_state()
+        self.workflow_status = WorkflowStatus.RUNNING
+
+    def set_workflow_status(self, status: WorkflowStatus):
+        """Set workflow status"""
+        self.workflow_status = status
+
+    def get_workflow_status(self) -> WorkflowStatus:
+        """Get current workflow status"""
+        return self.workflow_status
+
+    def set_step_status(self, step_id: str, status: StepStatus):
+        """Set status for a specific step"""
         if step_id not in self.step_states:
-            self.step_states[step_id] = StepStatus.PENDING
-            
-        # Initialize retry count if not exists
-        if step_id not in self.retry_counts:
-            self.retry_counts[step_id] = 0
-            
-        # Initialize success count if not exists
-        if step_id not in self.success_counts:
-            self.success_counts[step_id] = 0
-            
-        # Initialize metadata if not exists
-        if step_id not in self.step_metadata:
-            self.step_metadata[step_id] = {
-                'start_time': None,
-                'end_time': None,
-                'error': None,
-                'output_format': None
-            }
-    
-    def start_step(self, step_id: str):
-        """Mark a step as running"""
-        self.step_states[step_id] = StepStatus.RUNNING
-        self.step_metadata[step_id]['start_time'] = datetime.now()
-    
-    def retry_step(self, step_id: str):
-        """Mark a step for retry"""
-        self.step_states[step_id] = StepStatus.RETRYING
-    
-    def increment_retry_count(self, step_id: str):
-        """Increment the retry count for a step"""
-        if step_id not in self.retry_counts:
-            self.retry_counts[step_id] = 0
-        self.retry_counts[step_id] += 1
-    
-    def get_step_retry_count(self, step_id: str) -> int:
-        """Get the current retry count for a step"""
-        return self.retry_counts.get(step_id, 0)
-    
-    def reset_step_retry_count(self, step_id: str):
-        """Reset the retry count for a step"""
-        self.retry_counts[step_id] = 0
-    
-    def update_step_status(self, step_id: str, status: StepStatus):
-        """Update the status of a step"""
-        self.step_states[step_id] = status
-        if status in [StepStatus.COMPLETED, StepStatus.SUCCESS]:
-            self.step_metadata[step_id]['end_time'] = datetime.now()
-        
+            self.step_states[step_id] = StepState(status=status)
+        else:
+            self.step_states[step_id].status = status
+            if status == StepStatus.RUNNING:
+                self.step_states[step_id].start_time = datetime.now()
+            elif status in [StepStatus.SUCCESS, StepStatus.FAILED]:
+                self.step_states[step_id].end_time = datetime.now()
+
     def get_step_status(self, step_id: str) -> StepStatus:
-        """Get the current status of a step"""
-        return self.step_states.get(step_id, StepStatus.PENDING)
-    
-    def increment_step_success_count(self, step_id: str):
-        """Increment the success count for a step"""
-        if step_id not in self.success_counts:
-            self.success_counts[step_id] = 0
-        self.success_counts[step_id] += 1
-    
-    def get_step_success_count(self, step_id: str) -> int:
-        """Get the success count for a step"""
-        return self.success_counts.get(step_id, 0)
-        
-    def get_step_metadata(self, step_id: str) -> Dict[str, Any]:
-        """Get the metadata for a step"""
-        return self.step_metadata.get(step_id, {})
-    
+        """Get status of a specific step"""
+        return self.step_states.get(step_id, StepState()).status
+
+    def set_step_result(self, step_id: str, result: Dict[str, Any]):
+        """Store result for a specific step"""
+        if step_id not in self.step_states:
+            self.step_states[step_id] = StepState()
+        self.step_states[step_id].result = result
+        self.step_results[step_id] = result
+
+    def get_step_result(self, step_id: str) -> Dict[str, Any]:
+        """Get result of a specific step"""
+        return self.step_results.get(step_id, {})
+
+    def reset_step_retry_count(self, step_id: str):
+        """Reset retry count for a step"""
+        if step_id not in self.step_states:
+            self.step_states[step_id] = StepState()
+        self.step_states[step_id].retry_count = 0
+
+    def increment_retry_count(self, step_id: str):
+        """Increment retry count for a step"""
+        if step_id not in self.step_states:
+            self.step_states[step_id] = StepState()
+        self.step_states[step_id].retry_count += 1
+
+    def get_step_retry_count(self, step_id: str) -> int:
+        """Get current retry count for a step"""
+        return self.step_states.get(step_id, StepState()).retry_count
+
     def update_step_metadata(self, step_id: str, metadata: Dict[str, Any]):
         """Update metadata for a step"""
         if step_id not in self.step_metadata:
             self.step_metadata[step_id] = {}
         self.step_metadata[step_id].update(metadata)
+
+    def get_step_metadata(self, step_id: str) -> Dict[str, Any]:
+        """Get metadata for a step"""
+        return self.step_metadata.get(step_id, {})
+
+    def initialize_step(self, step_id: str):
+        """Initialize state for a step"""
+        if step_id not in self.step_states:
+            self.step_states[step_id] = StepState()
+            self.step_results[step_id] = {}
+            self.step_metadata[step_id] = {
+                'start_time': None,
+                'end_time': None,
+                'error': None
+            }
+        return self.step_states[step_id]
+
+    def start_step(self, step_id: str):
+        """Start a step by updating its status and start time"""
+        if step_id not in self.step_states:
+            self.initialize_step(step_id)
         
-    def initialize_workflow(self):
-        """Initialize the workflow state"""
-        self.workflow_status = WorkflowStatus.RUNNING
+        self.set_step_status(step_id, StepStatus.RUNNING)
         
-    def set_workflow_status(self, status: WorkflowStatus):
-        """Set the overall workflow status"""
-        self.workflow_status = status
-        
-    def get_workflow_status(self) -> WorkflowStatus:
-        """Get the current workflow status"""
-        return self.workflow_status
-    
-    def set_step_status(self, step_id: str, status: StepStatus):
-        """Set the status of a specific step"""
-        self.step_states[step_id] = status
-        
-        if status == StepStatus.SUCCESS:
-            self.increment_step_success_count(step_id)
-            self.step_metadata[step_id]['end_time'] = datetime.now()
-        elif status == StepStatus.FAILED:
-            self.step_metadata[step_id]['error'] = f"Step {step_id} failed"
-            self.step_metadata[step_id]['end_time'] = datetime.now()
-            
-    def set_step_result(self, step_id: str, result: Dict[str, Any]):
-        """Set the result for a specific step"""
+        # Update metadata with start time
         if step_id not in self.step_metadata:
             self.step_metadata[step_id] = {}
-        self.step_metadata[step_id]['result'] = result
+        self.step_metadata[step_id]['start_time'] = datetime.now()
         
-    def get_step_result(self, step_id: str) -> Optional[Dict[str, Any]]:
-        """Get the result for a specific step"""
-        return self.step_metadata.get(step_id, {}).get('result')
+        return self.step_states[step_id]
+
+    def get_step_success_count(self, step_id: str) -> int:
+        """Get the number of times a step has been successfully executed"""
+        step_state = self.step_states.get(step_id)
+        if step_state and step_state.status == StepStatus.SUCCESS:
+            return 1
+        return 0

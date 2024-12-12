@@ -130,94 +130,48 @@ async def execute_workflow(request: WorkflowRequest):
     try:
         logger.debug(f"Received workflow request: {request}")
         
-        # Prepare workflow configuration
-        workflow_steps = request.workflow.get('workflow_steps') or request.workflow.get('WORKFLOW')
-        if not workflow_steps:
-            raise HTTPException(status_code=400, detail="No workflow steps found in request")
+        # Validate input data
+        input_data = request.input_data or {}
         
-        # Prepare workflow definition with complete step information
-        workflow_def = {
-            "name": "research_workflow",
-            "description": "Research workflow execution",
-            "agents": [],
-            "execution_policies": {
-                "required_inputs": [],
-                "default_status": "initialized",
-                "error_handling": {},
-                "steps": [
-                    {
-                        "step": step.get('step', i+1),
-                        "type": step.get('type', 'research'),
-                        "name": f"Step {step.get('step', i+1)}",
-                        "description": step.get('description', ''),
-                        "input_type": "dict",
-                        "output_type": "dict",
-                        "agents": [step.get('agent_config', {})],
-                        "input": step.get('input', []),
-                        "output": step.get('output', f'step_{i+1}_output')
-                    } for i, step in enumerate(workflow_steps)
-                ]
-            }
-        }
-        
-        # Prepare config with agent configurations
-        config = {
-            "model": {
-                "provider": "openai",
-                "name": "gpt-3.5-turbo"
-            },
-            "type": "research",
-            "system_prompt": "You are a research assistant",
-            "workflow": workflow_def  # Add workflow definition to config
-        }
-        config.update(request.config)
-        
-        logger.debug(f"Prepared workflow configuration: {workflow_def}")
-        logger.debug(f"Prepared config: {config}")
-        logger.debug(f"Input data: {request.input_data}")
-        
-        # Initialize workflow
-        workflow = None
-        try:
-            workflow = ResearchDistributedWorkflow(
-                workflow_def=workflow_def,
-                config=config
-            )
-        except Exception as init_error:
-            logger.error(f"Failed to initialize workflow: {init_error}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            raise HTTPException(status_code=500, detail=f"Workflow initialization failed: {init_error}")
-        
-        # Execute workflow
-        try:
-            start_time = time.time()
-            result = workflow.execute(request.input_data)
-            
-            # If result is a coroutine, await it
-            if asyncio.iscoroutine(result):
-                result = await result
-                
-            execution_time = time.time() - start_time
-            
-            if result is None:
-                raise HTTPException(status_code=500, detail="Workflow execution returned no result")
-            
-            # Ensure result has a consistent structure
-            result = _format_workflow_result(result)
-            
-            logger.debug(f"Workflow execution result: {result}")
-            
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "status": "success",
-                    "output": result
+        # Transform workflow definition to match expected format
+        workflow_steps = {}
+        if isinstance(request.workflow.get('WORKFLOW'), list):
+            for step in request.workflow.get('WORKFLOW', []):
+                step_id = f"step_{step['step']}"
+                workflow_steps[step_id] = {
+                    'step_id': step_id,
+                    'type': step['type'],
+                    'name': step['name'],
+                    'description': step['description'],
+                    'input': step.get('input', []),
+                    'output': step.get('output', {}),
+                    'agent_config': step.get('agent_config', {})
                 }
-            )
-        except Exception as exec_error:
-            logger.error(f"Workflow execution failed: {exec_error}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            raise HTTPException(status_code=500, detail=f"Workflow execution failed: {exec_error}")
+        elif isinstance(request.workflow.get('WORKFLOW'), dict):
+            workflow_steps = request.workflow.get('WORKFLOW')
+
+        # Create a remote workflow instance
+        workflow_ref = ResearchDistributedWorkflow.create_remote_workflow(
+            workflow_config={'WORKFLOW': workflow_steps},
+            config=request.config or {}
+        )
+        
+        # Execute workflow with input data
+        result_ref = ray.get(workflow_ref).execute_remote.remote(input_data)
+        result = ray.get(result_ref)
+        
+        # Ensure result has a consistent structure
+        result = _format_workflow_result(result)
+        
+        logger.debug(f"Workflow execution result: {result}")
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "output": result
+            }
+        )
     except Exception as e:
         logger.error(f"Unexpected error in workflow execution: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
@@ -228,6 +182,9 @@ async def execute_workflow_async(request: WorkflowRequest):
     """Execute workflow asynchronously"""
     logger.info("Received async workflow execution request")
     try:
+        # Validate input data
+        input_data = request.input_data or {}
+        
         # Validate workflow steps
         workflow_steps = request.workflow.get('workflow_steps') or request.workflow.get('WORKFLOW')
         if not workflow_steps:
@@ -243,65 +200,42 @@ async def execute_workflow_async(request: WorkflowRequest):
         # Generate a unique workflow ID
         workflow_id = str(uuid.uuid4())
         
-        # Prepare workflow definition with complete step information
-        workflow_def = {
-            "name": request.workflow.get('AGENT', 'research_workflow'),
-            "description": request.workflow.get('CONTEXT', 'Research workflow execution'),
-            "agents": [],
-            "execution_policies": {
-                "required_inputs": [],
-                "default_status": "initialized",
-                "error_handling": {},
-                "steps": [
-                    {
-                        "step": step.get('step', i+1),
-                        "type": step.get('type', 'research'),
-                        "name": f"Step {step.get('step', i+1)}",
-                        "description": step.get('description', ''),
-                        "input_type": "dict",
-                        "output_type": "dict",
-                        "agents": [step.get('agent_config', {})],
-                        "input": step.get('input', []),
-                        "output": step.get('output', f'step_{i+1}_output')
-                    } for i, step in enumerate(workflow_steps)
-                ]
-            }
-        }
+        # Transform workflow definition to match expected format
+        workflow_steps = {}
+        if isinstance(request.workflow.get('WORKFLOW'), list):
+            for step in request.workflow.get('WORKFLOW', []):
+                step_id = f"step_{step['step']}"
+                workflow_steps[step_id] = {
+                    'step_id': step_id,
+                    'type': step['type'],
+                    'name': step['name'],
+                    'description': step['description'],
+                    'input': step.get('input', []),
+                    'output': step.get('output', {}),
+                    'agent_config': step.get('agent_config', {})
+                }
+        elif isinstance(request.workflow.get('WORKFLOW'), dict):
+            workflow_steps = request.workflow.get('WORKFLOW')
+
+        # Create a remote workflow instance
+        workflow_ref = ResearchDistributedWorkflow.create_remote_workflow(
+            workflow_config={'WORKFLOW': workflow_steps},
+            config=request.config or {}
+        )
         
-        # Prepare config with agent configurations
-        config = {
-            "model": {
-                "provider": "openai",
-                "name": "gpt-3.5-turbo"
-            },
-            "type": "research",
-            "system_prompt": "You are a research assistant"
-        }
-        config.update(request.config)
+        # Execute workflow asynchronously
+        workflow_async_ref = ray.get(workflow_ref).execute_async_remote.remote(input_data)
         
-        # Store task details for later retrieval
-        task_refs[workflow_id] = {
-            "workflow_def": workflow_def,
-            "config": config,
-            "input_data": request.input_data,
-            "status": "pending"
-        }
-        
-        # Return workflow ID for async tracking
         return JSONResponse(
             status_code=200,
             content={
+                "status": "success",
                 "workflow_id": workflow_id,
-                "status": "accepted",
-                "message": "Workflow submitted successfully for async execution"
+                "message": "Workflow execution started"
             }
         )
-    except HTTPException as http_exc:
-        # Log HTTP exceptions with more detail
-        logger.error(f"HTTP Exception: {http_exc.detail}")
-        raise
     except Exception as e:
-        logger.error(f"Error in async workflow execution: {e}")
+        logger.error(f"Unexpected error in async workflow execution: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -320,14 +254,14 @@ async def get_workflow_result(workflow_id: str):
             # Here you would typically check the actual status
             # For now, we'll simulate workflow execution
             try:
+                # Initialize workflow
                 workflow = ResearchDistributedWorkflow(
-                    workflow_def=workflow_info['workflow_def'],
+                    workflow_config=workflow_info['workflow_def'],
                     config=workflow_info['config']
                 )
-                result = workflow.execute(workflow_info['input_data'])
                 
-                if asyncio.iscoroutine(result):
-                    result = await result
+                # Execute workflow with input data
+                result = await workflow.execute_async(workflow_info['input_data'])
                 
                 # Update task status
                 workflow_info['status'] = 'completed'
