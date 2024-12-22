@@ -42,6 +42,27 @@ class WorkflowEngineError(Exception):
     """WorkflowEngine的自定义异常"""
     pass
 
+class WorkflowExecutionError(Exception):
+    """Error raised during workflow execution"""
+    pass
+
+class WorkflowStatus:
+    """Workflow execution status constants"""
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+class StepStatus:
+    """Individual step execution status constants"""
+    PENDING = "PENDING" 
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+    CANCELLED = "CANCELLED"
+
 class WorkflowExecutor:
     """Executes workflows with configurable timeout"""
     
@@ -169,32 +190,14 @@ class WorkflowEngine(BaseWorkflow):
             raise WorkflowEngineError(f"工作流执行失败: {e}") from e
     
     @memory_profiler
-    async def _execute_sequential_workflow(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        顺序执行工作流
-        
-        :param context: 上下文数据
-        :return: 执行结果
-        """
-        for agent_config in self.workflow:
-            try:
-                context = await self.execute_step(agent_config, context)
-                
-                # 及时清理不再需要的上下文数据
-                context = {k: v for k, v in context.items() if v is not None}
-            except Exception as e:
-                logger.error(f"顺序工作流执行错误: {e}")
-                raise WorkflowEngineError(f"Agent执行失败: {agent_config}") from e
-        
-        return context
-    
-    @memory_profiler
     async def _execute_parallel_workflow(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        并行执行工作流
+        """Execute workflow in parallel.
         
-        :param context: 上下文数据
-        :return: 执行结果
+        Args:
+            context: Context data
+            
+        Returns:
+            Execution results
         """
         tasks = []
         for agent_config in self.workflow:
@@ -202,108 +205,154 @@ class WorkflowEngine(BaseWorkflow):
         
         try:
             results = await asyncio.gather(*tasks)
+            # Combine results into a dictionary
             final_result = {}
-            for result in results:
-                final_result.update(result)
+            for i, result in enumerate(results):
+                agent_name = self.workflow[i].get('name', f'agent_{i}')
+                final_result[agent_name] = result
             return final_result
         except Exception as e:
-            logger.error(f"并行工作流执行错误: {e}")
-            raise WorkflowEngineError(f"并行执行失败: {e}") from e
-    
+            logger.error(f"Parallel workflow execution error: {e}")
+            raise WorkflowEngineError(f"Parallel execution failed: {e}") from e
+
+    @memory_profiler
+    async def _execute_sequential_workflow(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute workflow sequentially.
+        
+        Args:
+            context: Context data
+            
+        Returns:
+            Execution results
+        """
+        results = {}
+        for agent_config in self.workflow:
+            try:
+                result = await self.execute_step(agent_config, context.copy())
+                agent_name = agent_config.get('name', 'unnamed_agent')
+                results[agent_name] = result
+                context.update(result)
+            except Exception as e:
+                logger.error(f"Sequential workflow execution error: {e}")
+                raise WorkflowEngineError(f"Agent execution failed: {agent_config}") from e
+        return results
+
     @memory_profiler
     async def _execute_dynamic_routing(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        动态路由执行工作流
+        """Execute workflow with dynamic routing.
         
-        :param context: 上下文数据
-        :return: 执行结果
-        """
-        for agent_id, agent_config in self.workflow.items():
-            # 检查依赖和条件
-            if not self._check_agent_dependencies(agent_config.get('dependencies', []), context):
-                continue
+        Args:
+            context: Context data
             
-            try:
-                context = await self.execute_step(agent_config, context)
-            except Exception as e:
-                logger.error(f"动态路由执行错误: {e}")
-                raise WorkflowEngineError(f"Agent {agent_id} 执行失败") from e
-        
-        return context
-    
-    def _check_agent_dependencies(self, dependencies: Union[Dict[str, List[str]], List[str]], context: Dict[str, Any]) -> bool:
+        Returns:
+            Execution results
         """
-        检查Agent的依赖是否满足
+        results = {}
+        workflow_dict = self.workflow if isinstance(self.workflow, dict) else {}
         
-        :param dependencies: 依赖列表或包含依赖的字典
-        :param context: 当前上下文
-        :return: 依赖是否满足
-        """
-        # 处理不同输入类型的依赖
-        if isinstance(dependencies, dict):
-            deps = dependencies.get('dependencies', [])
-        elif isinstance(dependencies, list):
-            deps = dependencies
-        else:
-            return False
+        # Track completed agents and their processed outputs
+        completed_agents = set()
+        processed_outputs = set()
         
-        return all(dep in context and context[dep] for dep in deps)
+        while len(completed_agents) < len(workflow_dict):
+            progress_made = False
+            
+            for agent_name, agent_config in workflow_dict.items():
+                if agent_name in completed_agents:
+                    continue
+                    
+                # Check dependencies
+                dependencies = agent_config.get('dependencies', [])
+                if not dependencies or all(d in processed_outputs for d in dependencies):
+                    try:
+                        result = await self.execute_step(agent_config, context.copy())
+                        results[agent_name] = result
+                        completed_agents.add(agent_name)
+                        processed_outputs.add(f"{agent_name}_processed")
+                        context.update(result)
+                        progress_made = True
+                    except Exception as e:
+                        logger.error(f"Dynamic routing execution error: {e}")
+                        raise WorkflowEngineError(f"Agent execution failed: {agent_config}") from e
+            
+            # If no progress was made in this iteration, we have a deadlock
+            if not progress_made:
+                raise WorkflowEngineError("Deadlock detected in workflow")
+                
+        return results
 
     def _apply_communication_protocol(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        应用通信协议处理结果
+        """Apply communication protocol to process results.
         
-        :param results: 执行结果
-        :return: 处理后的结果
+        Args:
+            results: Execution results
+            
+        Returns:
+            Processed results according to protocol
         """
+        if not results:
+            return {}
+            
         protocol_type = self.communication_protocol.get('TYPE')
-        if protocol_type == 'SEMANTIC':
-            return self._semantic_message_merge([results])
-        elif protocol_type == 'RPC':
-            return self._format_rpc_response(results)
-        elif protocol_type == 'FEDERATED':
-            # 联邦学习协议：对模型参数取平均
+        
+        if protocol_type == 'FEDERATED':
+            # Average model parameters for federated learning
             global_model = {}
-            model_params_count = 0
+            num_models = 0
             
-            # 遍历工作流配置，找到模型参数
-            for workflow_item in self.workflow:
-                if isinstance(workflow_item, dict) and 'model_params' in workflow_item:
-                    model_params = workflow_item['model_params']
-                    model_params_count += 1
-                    for key, value in model_params.items():
-                        global_model[key] = global_model.get(key, 0) + value
+            for result in results.values():
+                if isinstance(result, dict) and 'model_params' in result:
+                    num_models += 1
+                    for param, value in result['model_params'].items():
+                        if param not in global_model:
+                            global_model[param] = 0
+                        global_model[param] += value
             
-            # 对模型参数取平均
-            if model_params_count > 0:
-                for key in global_model:
-                    global_model[key] /= model_params_count
+            # Calculate averages
+            if num_models > 0:
+                for param in global_model:
+                    global_model[param] /= num_models
+                    
+            return {'global_model': global_model}
             
-            return {"global_model": global_model}
+        elif protocol_type == 'GOSSIP':
+            # Share knowledge between nodes
+            shared_knowledge = {}
+            
+            for result in results.values():
+                if isinstance(result, dict) and 'knowledge' in result:
+                    for topic, info in result['knowledge'].items():
+                        key = f"shared_{topic}"
+                        if key not in shared_knowledge:
+                            shared_knowledge[key] = []
+                        shared_knowledge[key].append(info)
+                        
+            # If no knowledge was shared, return original results
+            if not shared_knowledge:
+                return results
+                
+            return shared_knowledge
+            
         elif protocol_type == 'HIERARCHICAL':
-            # 层级合并协议
-            result_levels = {}
+            # Merge data hierarchically
+            hierarchy_levels = {}
             
-            # 检查工作流配置中的层级信息
-            workflow_dict = self.workflow if isinstance(self.workflow, dict) else {}
-            
-            # 遍历结果，根据层级标记结果
-            for result_key, result_value in results.items():
-                # 检查是否有处理完成的结果
-                if result_key.endswith('_processed'):
-                    # 尝试从工作流配置中获取层级信息
-                    agent_name = result_key.replace('_processed', '')
-                    agent_config = workflow_dict.get(agent_name, {})
+            for result in results.values():
+                if isinstance(result, dict) and 'hierarchy_level' in result:
+                    level = result['hierarchy_level']
+                    level_key = f'level_{level}'
+                    if level_key not in hierarchy_levels:
+                        hierarchy_levels[level_key] = []
+                    hierarchy_levels[level_key].append(result.get('data', {}))
                     
-                    # 获取层级，默认为0
-                    hierarchy_level = agent_config.get('hierarchy_level', 0)
-                    
-                    # 创建层级标记的结果
-                    level_key = f"level_{hierarchy_level}"
-                    result_levels[level_key] = result_value
+            # If no hierarchical data was found, return original results
+            if not hierarchy_levels:
+                return results
+                
+            return hierarchy_levels
             
-            return result_levels
         else:
+            # For unknown protocols, return results as is
             return results
 
     def _semantic_message_merge(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -394,15 +443,34 @@ class WorkflowEngine(BaseWorkflow):
         return agent
 
     async def execute_step(self, agent_config: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行工作流的一个步骤
+        """Execute a workflow step.
         
-        :param agent_config: Agent配置
-        :param context: 当前上下文
-        :return: 执行结果
+        Args:
+            agent_config: Agent configuration
+            context: Current context
+            
+        Returns:
+            Execution results
         """
         agent = self._create_agent(agent_config)
-        return await agent.execute(context)
+        
+        # Add model_params and knowledge to context if present
+        if 'model_params' in agent_config:
+            context['model_params'] = agent_config['model_params']
+        if 'knowledge' in agent_config:
+            context['knowledge'] = agent_config['knowledge']
+        if 'data' in agent_config:
+            context['data'] = agent_config['data']
+        if 'hierarchy_level' in agent_config:
+            context['hierarchy_level'] = agent_config['hierarchy_level']
+            
+        # Execute agent
+        try:
+            result = await agent.execute(context)
+            return result
+        except Exception as e:
+            logger.error(f"Step execution failed: {e}")
+            raise WorkflowEngineError(f"Agent execution failed: {agent_config}") from e
 
 class Workflow:
     """Simple workflow class for executing agent and processor nodes"""

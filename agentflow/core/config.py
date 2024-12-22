@@ -84,6 +84,7 @@ class WorkflowConfig(BaseModel):
     max_iterations: int = 10  # 默认最大迭代次数为10
     timeout: Optional[int] = None
     logging_level: str = 'INFO'  # 默认日志级别为INFO
+    distributed: bool = False  # 是否为分布式工作流
     
     # 代理和连接配置
     agents: Optional[List['AgentConfig']] = None

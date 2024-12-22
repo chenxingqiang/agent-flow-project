@@ -1,4 +1,3 @@
-from .core.agent import Agent
 from .core.config import AgentConfig, ModelConfig, WorkflowConfig
 from .core.workflow import BaseWorkflow
 from .core.research_workflow import ResearchWorkflow
@@ -9,7 +8,6 @@ __author__ = 'Chen Xingqiang'
 __email__ = 'chenxingqiang@gmail.com'
 
 __all__ = [
-    'Agent',
     'AgentConfig',
     'ModelConfig',
     'WorkflowConfig',

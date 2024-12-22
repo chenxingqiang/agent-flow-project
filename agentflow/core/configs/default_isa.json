@@ -1,0 +1,49 @@
+{
+    "instructions": [
+        {
+            "name": "parse_input",
+            "type": "basic",
+            "description": "Parse and validate input data",
+            "dependencies": [],
+            "cost": 1.0,
+            "parallelizable": false,
+            "agent_requirements": ["input_validation"]
+        },
+        {
+            "name": "process_content",
+            "type": "composite",
+            "description": "Process content using multiple sub-instructions",
+            "dependencies": ["parse_input"],
+            "cost": 5.0,
+            "parallelizable": true,
+            "agent_requirements": ["content_processing"]
+        },
+        {
+            "name": "analyze_sentiment",
+            "type": "parallel",
+            "description": "Analyze sentiment of content",
+            "dependencies": ["parse_input"],
+            "cost": 3.0,
+            "parallelizable": true,
+            "agent_requirements": ["sentiment_analysis"]
+        },
+        {
+            "name": "extract_entities",
+            "type": "parallel",
+            "description": "Extract named entities from content",
+            "dependencies": ["parse_input"],
+            "cost": 3.0,
+            "parallelizable": true,
+            "agent_requirements": ["entity_extraction"]
+        },
+        {
+            "name": "generate_response",
+            "type": "optimized",
+            "description": "Generate optimized response based on processed content",
+            "dependencies": ["process_content", "analyze_sentiment", "extract_entities"],
+            "cost": 4.0,
+            "parallelizable": false,
+            "agent_requirements": ["response_generation"]
+        }
+    ]
+}

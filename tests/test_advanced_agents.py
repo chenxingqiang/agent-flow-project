@@ -6,9 +6,9 @@ from typing import Dict, Any
 from agentflow.core.agent import (
     ResearchAgent, 
     DataScienceAgent, 
-    AgentFactory, 
-    AgentConfiguration
+    AgentFactory
 )
+from agentflow.core.config_manager import AgentConfiguration
 from agentflow.transformations.advanced_strategies import (
     OutlierRemovalStrategy,
     FeatureEngineeringStrategy,

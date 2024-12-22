@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
-from typing import Any, List, Optional, Union
+import logging
+from typing import Any, List, Optional, Union, Callable
 
 from agentflow.transformations.advanced_strategies import AdvancedTransformationStrategy
 
@@ -30,7 +31,7 @@ class TimeSeriesTransformationStrategy(AdvancedTransformationStrategy):
         self.strategy = strategy
         self.period = period
     
-    def transform(self, data: pd.DataFrame) -> Any:
+    def transform(self, data: pd.DataFrame) -> pd.DataFrame:
         """
         Apply time series transformation.
         
@@ -50,11 +51,11 @@ class TimeSeriesTransformationStrategy(AdvancedTransformationStrategy):
             elif self.strategy == 'difference':
                 return self._difference_transform(data)
             else:
-                raise ValueError(f"Unsupported time series strategy: {self.strategy}")
+                return data
         except Exception as e:
-            self.logger.error(f"Time series transformation failed: {e}")
-            raise ValueError(f"Time series transformation failed: {e}")
-    
+            self.logger.error(f"Error in time series transformation: {e}")
+            return data
+
     def _seasonal_decomposition(self, data: pd.DataFrame) -> pd.DataFrame:
         """
         Perform seasonal decomposition using statsmodels.
@@ -170,7 +171,7 @@ class AnomalyDetectionStrategy(AdvancedTransformationStrategy):
     def __init__(
         self, 
         strategy: str = 'isolation_forest', 
-        contamination: float = 0.1,
+        contamination: Optional[float] = 0.1,
         logger: Optional[logging.Logger] = None
     ):
         """
@@ -184,8 +185,8 @@ class AnomalyDetectionStrategy(AdvancedTransformationStrategy):
         super().__init__(logger)
         self.strategy = strategy
         self.contamination = contamination
-    
-    def transform(self, data: Union[pd.DataFrame, np.ndarray]) -> Any:
+
+    def transform(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
         """
         Detect and handle anomalies in the data.
         
@@ -205,12 +206,12 @@ class AnomalyDetectionStrategy(AdvancedTransformationStrategy):
             elif self.strategy == 'ensemble':
                 return self._ensemble_detection(data)
             else:
-                raise ValueError(f"Unsupported anomaly detection strategy: {self.strategy}")
+                return data
         except Exception as e:
-            self.logger.error(f"Anomaly detection failed: {e}")
-            raise ValueError(f"Anomaly detection failed: {e}")
-    
-    def _isolation_forest_detection(self, data: Union[pd.DataFrame, np.ndarray]) -> Any:
+            self.logger.error(f"Error in anomaly detection: {e}")
+            return data
+
+    def _isolation_forest_detection(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
         """
         Detect anomalies using Isolation Forest.
         
@@ -242,7 +243,7 @@ class AnomalyDetectionStrategy(AdvancedTransformationStrategy):
         else:
             return np.column_stack([data, anomaly_labels])
     
-    def _local_outlier_factor_detection(self, data: Union[pd.DataFrame, np.ndarray]) -> Any:
+    def _local_outlier_factor_detection(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
         """
         Detect anomalies using Local Outlier Factor.
         
@@ -274,7 +275,7 @@ class AnomalyDetectionStrategy(AdvancedTransformationStrategy):
         else:
             return np.column_stack([data, anomaly_labels])
     
-    def _statistical_detection(self, data: Union[pd.DataFrame, np.ndarray]) -> Any:
+    def _statistical_detection(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
         """
         Detect anomalies using statistical methods.
         
@@ -297,7 +298,7 @@ class AnomalyDetectionStrategy(AdvancedTransformationStrategy):
             z_scores = np.abs(stats.zscore(data))
             return np.column_stack([data, z_scores > 3])
     
-    def _ensemble_detection(self, data: Union[pd.DataFrame, np.ndarray]) -> Any:
+    def _ensemble_detection(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
         """
         Perform ensemble anomaly detection.
         

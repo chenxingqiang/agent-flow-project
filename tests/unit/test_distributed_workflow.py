@@ -339,7 +339,7 @@ async def test_distributed_workflow_execution(test_workflow, test_config, mock_r
 
     # Verify workflow completion
     workflow_status = workflow.state_manager.get_workflow_status()
-    assert workflow_status.value == WorkflowStatus.SUCCESS.value
+    assert workflow_status.value == WorkflowStatus.COMPLETED.value
 
 @pytest.mark.asyncio
 async def test_workflow_input_validation(test_workflow, test_config):
@@ -495,10 +495,17 @@ async def test_workflow_step_dependencies(test_workflow, test_config, mock_resea
 async def test_distributed_workflow_with_llm(test_workflow, test_config):
     """
     Test distributed workflow execution with LLM integration using ell.simple
-    
-    This test demonstrates how to incorporate an LLM model into the workflow 
+
+    This test demonstrates how to incorporate an LLM model into the workflow
     execution process, simulating real-world AI-driven workflow scenarios.
     """
+    try:
+        import ell.store
+        has_ell = True
+    except ImportError:
+        has_ell = False
+        pytest.skip("ell.store not available - skipping LLM test")
+
     # Prepare input data with LLM-specific context
     input_data = {
         "STUDENT_NEEDS": {
@@ -524,30 +531,21 @@ async def test_distributed_workflow_with_llm(test_workflow, test_config):
         }
     )
 
-    # Execute workflow with LLM tracing
-    with ell.trace() as trace:
-        try:
-            results = workflow.execute(input_data)
-            
-            # Validate workflow results
-            assert results is not None, "Workflow execution should return results"
-            assert len(results) > 0, "Results should not be empty"
-            
-            # Log workflow results with ell
-            trace.log_prompt(json.dumps(input_data))
-            trace.log_completion(json.dumps(results))
-            
-            # Optional: Add more specific assertions based on workflow steps
-            for step_id, step_result in results.items():
-                assert step_result is not None, f"Step {step_id} should have a result"
-                
-                # Log individual step results
-                trace.log_metadata({
-                    'step_id': step_id,
-                    'step_result': step_result
-                })
-            
-        except Exception as e:
-            # Log error with ell
-            trace.log_error(str(e))
-            pytest.fail(f"Workflow execution failed: {str(e)}")
+    if has_ell:
+        # Execute workflow with LLM tracing
+        with ell.store.trace() as trace:
+            try:
+                result = await workflow.execute_async(input_data)
+                assert result is not None
+                assert isinstance(result, dict)
+                assert 'output' in result
+
+                # Verify trace contains LLM interactions
+                assert len(trace.invocations) > 0
+                for invocation in trace.invocations:
+                    assert invocation.version is not None
+                    assert invocation.inputs is not None
+                    assert invocation.outputs is not None
+
+            except Exception as e:
+                pytest.fail(f"Workflow execution failed: {str(e)}")

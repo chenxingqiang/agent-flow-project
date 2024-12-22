@@ -4,10 +4,24 @@ Configuration management for AgentFlow
 
 import json
 import os
-from typing import Dict, List, Optional, Union, Any, Type
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict, field_validator, ValidationError, validator
+from typing import Dict, Any, Optional, Union, List, Type
 from typing_extensions import Literal
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator, ValidationError, validator
+from pathlib import Path
+import logging
+
+# Forward references
+AgentConfig = None
+ProcessorConfig = None
+ConnectionConfig = None
+
+class ModelConfig(BaseModel):
+    """Model configuration for AI agents"""
+    provider: str
+    name: Optional[str] = None
+    parameters: Dict[str, Union[str, int, float, bool]] = Field(default_factory=dict)
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = 1000
 
 class ToolConfig(BaseModel):
     """Tool configuration"""
@@ -15,76 +29,132 @@ class ToolConfig(BaseModel):
     description: str
     parameters: Dict[str, dict]
     required: List[str]
+
+class ConfigurationSchema(BaseModel):
+    """
+    Flexible configuration schema for agents and workflows.
     
-class ModelConfig(BaseModel):
-    """Language model configuration"""
-    name: str
-    provider: str
-    parameters: Dict[str, Union[str, int, float, bool]] = Field(default_factory=dict)
+    Supports dynamic configuration with optional fields.
+    """
+    # Allow additional fields dynamically
+    model_config = ConfigDict(
+        extra='allow',  # Allow extra fields
+        validate_assignment=True  # Enable validation on attribute assignment
+    )
     
-class AgentConfig(BaseModel):
-    """Agent configuration"""
-    id: str
-    name: str
-    description: str
-    type: str
-    model: ModelConfig
-    system_prompt: str
+    # Optional base fields
+    id: Optional[str] = None
+    name: Optional[str] = None
+    version: Optional[str] = None
+    agent_type: Optional[str] = 'generic'
+    description: Optional[str] = None
+    
+    # Flexible configuration fields
+    model: Optional[ModelConfig] = None
+    input_specification: Optional[Dict[str, Any]] = None
+    
+    @field_validator('agent_type', mode='before')
+    @classmethod
+    def validate_agent_type(cls, v):
+        """
+        Validate and normalize agent type.
+        
+        Args:
+            v: Agent type input
+        
+        Returns:
+            Normalized agent type
+        """
+        if not v:
+            return 'generic'
+        
+        valid_types = ['generic', 'research', 'analysis', 'creative', 'technical']
+        normalized = str(v).lower()
+        
+        if normalized not in valid_types:
+            logging.warning(f"Unsupported agent type: {v}. Defaulting to 'generic'")
+            return 'generic'
+        
+        return normalized
+
+class AgentConfig(ConfigurationSchema):
+    """Agent configuration with additional fields"""
+    type: Optional[str] = None
+    config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    system_prompt: Optional[str] = None
     tools: List[ToolConfig] = Field(default_factory=list)
     memory_config: Dict[str, Union[str, int]] = Field(default_factory=dict)
-    metadata: Dict[str, str] = Field(default_factory=dict)
     execution_policies: Dict[str, Any] = Field(default_factory=dict)
+    processor: Optional[Union[str, Type]] = None
     
-    # Optional processor configuration
+    @model_validator(mode='before')
+    @classmethod
+    def transform_config(cls, data):
+        """
+        Transform legacy configuration formats.
+        
+        Handles different input configuration styles.
+        """
+        if isinstance(data, dict):
+            # Normalize agent type
+            if 'agent_type' in data:
+                data['agent_type'] = data['agent_type']
+            elif 'type' in data:
+                data['agent_type'] = data['type']
+            
+            # Merge config if present
+            if 'config' in data:
+                data.update(data['config'])
+        
+        return data
+
+# Alias for backward compatibility
+AgentConfiguration = AgentConfig
+
+class ProcessorConfig(BaseModel):
+    """Processor node configuration"""
+    id: str
+    name: Optional[str] = None
+    type: Optional[str] = None
     processor: Optional[Union[str, Type]] = None
     config: Optional[Dict[str, Any]] = Field(default_factory=dict)
     
     model_config = ConfigDict(
         arbitrary_types_allowed=True
     )
-    
-class ProcessorConfig(BaseModel):
-    """Processor node configuration"""
-    id: str
-    name: Optional[str] = None
-    type: Literal['processor', 'agent'] = 'processor'
-    processor: Union[str, Type]
-    input_format: Dict[str, str] = Field(default_factory=dict)
-    output_format: Dict[str, str] = Field(default_factory=dict)
-    processing_rules: List[Dict[str, str]] = Field(default_factory=list)
-    config: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True
-    )
-    
-    @validator('name', pre=True)
-    def set_default_name(cls, v, values):
-        """Set default name if not provided"""
-        return v or values.get('id', 'default_processor')
-    
+
 class ConnectionConfig(BaseModel):
     """Node connection configuration"""
     source_id: str
     target_id: str
     source_port: str = 'output'
     target_port: str = 'input'
-    
+
 class WorkflowConfig(BaseModel):
-    """Workflow configuration"""
-    id: str
-    name: Optional[str] = None
-    description: str = ''
-    agents: List[AgentConfig]
+    """Workflow configuration for agents"""
+    id: Optional[str] = 'default_workflow'
+    name: Optional[str] = 'Default Workflow'
+    description: str = 'A default workflow configuration'
+    agents: List[AgentConfig] = Field(default_factory=list)
     processors: List[ProcessorConfig] = Field(default_factory=list)
-    connections: List[ConnectionConfig]
+    connections: List[ConnectionConfig] = Field(default_factory=list)
+    max_iterations: int = 5
+    logging_level: str = 'INFO'
+    distributed: bool = False
     metadata: Dict[str, str] = Field(default_factory=dict)
-    
-    @validator('name', pre=True)
+
+    @field_validator('name', mode='before')
+    @classmethod
     def set_default_name(cls, v, values):
         """Set default name if not provided"""
         return v or values.get('id', 'default_workflow')
-        
+
+    @field_validator('description', mode='before')
+    @classmethod
+    def set_default_description(cls, v):
+        """Set default description if not provided"""
+        return v or 'A default workflow configuration'
+
 class ConfigManager:
     """Manager for agent and workflow configurations"""
     
@@ -278,3 +348,18 @@ class ConfigManager:
             pass
             
         raise ValueError("Invalid configuration format")
+
+class Workflow(BaseModel):
+    """Workflow configuration"""
+    id: str
+    name: Optional[str] = None
+    description: str = ''
+    agents: List[AgentConfig]
+    processors: List[ProcessorConfig] = Field(default_factory=list)
+    connections: List[ConnectionConfig]
+    metadata: Dict[str, str] = Field(default_factory=dict)
+    
+    @validator('name', pre=True)
+    def set_default_name(cls, v, values):
+        """Set default name if not provided"""
+        return v or values.get('id', 'default_workflow')

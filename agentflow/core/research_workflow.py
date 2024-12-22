@@ -2,12 +2,16 @@
 Research Workflow Module for AgentFlow
 """
 
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, Any, Optional, Union
 from dataclasses import dataclass, field
+import logging
+from functools import partial
+
 from .base_workflow import BaseWorkflow
 from .config import WorkflowConfig, AgentConfig, ExecutionPolicies
-from .agent import Agent
 import asyncio
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class DistributedStep:
@@ -18,8 +22,8 @@ class DistributedStep:
     name: str
     input_type: str
     output_type: str
-    agents: List[str] = field(default_factory=list)
-    dependencies: List[str] = field(default_factory=list)
+    agents: list = field(default_factory=list)
+    dependencies: list = field(default_factory=list)
     completed: bool = False
     
     def add_agent(self, agent_id: str):
@@ -63,14 +67,15 @@ class ResearchWorkflow(BaseWorkflow):
             )
 
         super().__init__(workflow_def)
-        self.research_steps: List[DistributedStep] = []
-        self.agents: List[Agent] = []
+        self.research_steps: list = []
+        self.agents: list = []
         
         # Set error_handling to an empty dictionary
         self.error_handling = {}
 
         # Initialize agents from config
         if workflow_def.agents:
+            from .agent import Agent
             for agent_config in workflow_def.agents:
                 agent = Agent(config=agent_config)
                 self.agents.append(agent)
@@ -185,9 +190,11 @@ class ResearchWorkflow(BaseWorkflow):
                 agent = matching_agents[0]
             else:
                 # Create a default agent if no matching agent found
+                from .agent import Agent
                 agent = Agent(config=AgentConfig(id=agent, type='default'))
         elif isinstance(agent, dict):
             # Create agent from config if needed
+            from .agent import Agent
             agent = Agent(config=AgentConfig(**agent))
         
         # Ensure agent is an Agent object
@@ -229,6 +236,7 @@ class ResearchWorkflow(BaseWorkflow):
         
         # Process the step with the selected agent
         try:
+            from .agent import Agent
             result = asyncio.run(agent.process(inputs))
             
             # Validate the step output
@@ -240,7 +248,7 @@ class ResearchWorkflow(BaseWorkflow):
             error_handler = self.error_handling.get('handler', self._default_error_handler)
             return error_handler(e, inputs)
 
-    def get_agent(self, agent_id: str) -> Optional[Agent]:
+    def get_agent(self, agent_id: str) -> Optional['Agent']:
         """
         Get agent by ID
         
