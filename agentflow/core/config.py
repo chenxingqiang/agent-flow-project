@@ -180,7 +180,7 @@ class AgentConfig(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     type: str = 'default'
     agent_type: str = 'default'
-    model: Optional[ModelConfig] = None
+    model: Optional[Union[ModelConfig, Dict[str, Any]]] = None
     name: Optional[str] = None
     description: Optional[str] = None
     system_prompt: Optional[str] = None
@@ -194,33 +194,12 @@ class AgentConfig(BaseModel):
             'distributed': False
         }
     )
-    workflow: Optional[WorkflowConfig] = None
+    workflow: Optional[Union[WorkflowConfig, Dict[str, Any]]] = None
     
-    class Config:
-        arbitrary_types_allowed = True
-        extra = 'allow'
-    
-    @field_validator('type', 'agent_type')
-    @classmethod
-    def validate_agent_type(cls, v: str) -> str:
-        """Validate agent type"""
-        valid_types = {'default', 'research', 'test'}
-        if v not in valid_types:
-            raise ValueError(f"Unsupported agent type: {v}")
-        return v
-    
-    @field_validator('model')
-    @classmethod
-    def validate_model(cls, v: Optional[ModelConfig]) -> Optional[ModelConfig]:
-        """Validate model configuration"""
-        if v and v.provider not in ['openai', 'anthropic', 'google', 'default', 'ray']:
-            raise ValueError(f"Unsupported model provider: {v.provider}")
-        return v
-    
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra='allow')
+
     def __init__(self, **data):
-        """
-        Initialize method to ensure default values and workflow configuration are set correctly
-        """
+        """Initialize method to ensure default values and workflow configuration are set correctly"""
         # Handle type mapping
         if 'type' not in data and 'agent_type' in data:
             data['type'] = data['agent_type']
@@ -231,6 +210,14 @@ class AgentConfig(BaseModel):
         data.setdefault('id', str(uuid.uuid4()))
         data.setdefault('type', 'default')
         data.setdefault('agent_type', 'default')
+
+        # Handle model configuration
+        if 'model' in data and isinstance(data['model'], dict):
+            data['model'] = ModelConfig(**data['model'])
+
+        # Handle workflow configuration
+        if 'workflow' in data and isinstance(data['workflow'], dict):
+            data['workflow'] = WorkflowConfig(**data['workflow'])
 
         # Handle execution policies
         execution_policies = data.get('execution_policies', {})
@@ -246,50 +233,46 @@ class AgentConfig(BaseModel):
         execution_policies = {**default_policies, **execution_policies}
         data['execution_policies'] = execution_policies
 
-        # Handle workflow configuration
-        if 'workflow' in data:
-            workflow_data = data['workflow']
-            if isinstance(workflow_data, dict):
-                # Merge execution policies into workflow configuration
-                workflow_data.setdefault('max_iterations', execution_policies['max_iterations'])
-                workflow_data.setdefault('logging_level', execution_policies['logging_level'])
-                workflow_data.setdefault('distributed', execution_policies['distributed'])
-                data['workflow'] = WorkflowConfig(**workflow_data)
-        else:
-            # Create default workflow configuration
-            data['workflow'] = WorkflowConfig(
-                max_iterations=execution_policies['max_iterations'],
-                logging_level=execution_policies['logging_level'],
-                distributed=execution_policies['distributed']
-            )
-
         # Handle input specification
         if 'input_specification' in data:
-            # If input_specification is None or an empty dict, create a default InputSpec
             if data['input_specification'] is None or (isinstance(data['input_specification'], dict) and not data['input_specification']):
                 data['input_specification'] = InputSpec()
             elif not isinstance(data['input_specification'], InputSpec):
                 data['input_specification'] = InputSpec(**data['input_specification'])
 
         super().__init__(**data)
-    
+
+    @field_validator('agent_type')
+    @classmethod
+    def validate_agent_type(cls, v: str) -> str:
+        """Validate agent type"""
+        valid_types = ['default', 'research', 'data_science', 'generic']
+        if v.lower() not in valid_types:
+            raise ValueError(f"Invalid agent type: {v}. Must be one of {valid_types}")
+        return v.lower()
+
+    @field_validator('model')
+    @classmethod
+    def validate_model(cls, v: Optional[Union[ModelConfig, Dict[str, Any]]]) -> Optional[ModelConfig]:
+        """Validate model configuration"""
+        if v is None:
+            return None
+        if isinstance(v, dict):
+            return ModelConfig(**v)
+        return v
+
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'AgentConfig':
-        """
-        从字典创建AgentConfig，支持多种配置格式
-        
-        :param config_dict: 配置字典
-        :return: AgentConfig实例
-        """
+        """从字典创建AgentConfig，支持多种配置格式"""
         return cls(**config_dict)
-    
+
     def model_dump(self, **kwargs) -> Dict[str, Any]:
-        """
-        序列化配置，包括工作流详情
-        """
+        """序列化配置，包括工作流详情"""
         data = super().model_dump(**kwargs)
         if self.workflow:
             data['workflow'] = self.workflow.model_dump()
+        if self.model:
+            data['model'] = self.model.model_dump()
         return data
 
 class ProcessorConfig(BaseModel):

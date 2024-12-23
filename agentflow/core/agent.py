@@ -213,22 +213,67 @@ class AgentBase:
 class Agent:
     """Base agent class."""
 
-    def __init__(self, config: Union[Dict[str, Any], AgentConfig]):
+    def __init__(self, config: Union[Dict[str, Any], str, AgentConfig], workflow_path: Optional[str] = None):
         """Initialize agent."""
-        if isinstance(config, dict):
-            self._config_obj = AgentConfig(**config)
+        # Handle file path input
+        if isinstance(config, str):
+            if not os.path.exists(config):
+                raise FileNotFoundError(f"Config file not found: {config}")
+            with open(config, 'r') as f:
+                config_dict = json.load(f)
+        elif isinstance(config, dict):
+            config_dict = config
         else:
-            self._config_obj = config
+            config_dict = config.model_dump()
+
+        # Load workflow config if provided
+        if workflow_path:
+            if not os.path.exists(workflow_path):
+                raise FileNotFoundError(f"Workflow file not found: {workflow_path}")
+            with open(workflow_path, 'r') as f:
+                workflow_dict = json.load(f)
+                config_dict['WORKFLOW'] = workflow_dict.get('WORKFLOW', {})
+
+        # Validate required sections
+        required_sections = ['AGENT', 'MODEL', 'WORKFLOW']
+        for section in required_sections:
+            if section not in config_dict:
+                raise ValueError(f"Missing required configuration section: {section}")
+
+        # Extract agent config
+        agent_config = config_dict['AGENT']
+        agent_config.setdefault('type', 'default')
+
+        # Validate workflow config
+        workflow_config = config_dict['WORKFLOW']
+        if 'max_iterations' in workflow_config and workflow_config['max_iterations'] <= 0:
+            raise ValueError("max_iterations must be greater than 0")
+
+        try:
+            # Create AgentConfig instance
+            self._config_obj = AgentConfig(
+                name=agent_config.get('name'),
+                agent_type=agent_config.get('type'),
+                description=agent_config.get('description'),
+                model=config_dict['MODEL'],
+                workflow=config_dict['WORKFLOW']
+            )
+        except Exception as e:
+            if 'provider' in str(e) and 'invalid_provider' in str(e):
+                raise ValueError(f"Invalid model provider: {config_dict['MODEL']['provider']}")
+            raise e
 
         # Initialize basic attributes
         self.name = self._config_obj.name
         self.type = self._config_obj.agent_type.upper() if self._config_obj.agent_type else None
         self.description = self._config_obj.description
-        self.max_iterations = self._config_obj.workflow.max_iterations if self._config_obj.workflow else None
+        self.version = agent_config.get('version')
         self.model = self._config_obj.model
         self.workflow = self._config_obj.workflow
+        self.is_distributed = self.workflow.distributed if self.workflow else False
 
         # Initialize state
+        self.state = {}
         self._initialized = False
         self.history = []
         self.errors = []

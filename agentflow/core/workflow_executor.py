@@ -639,39 +639,48 @@ class WorkflowManager:
         await executor.stop()
         del self.active_workflows[workflow_id]
 
-    async def get_workflow_status(self, workflow_id: str) -> Dict[str, Any]:
-        """Get workflow execution status asynchronously
-        
+    async def get_workflow_status(self, workflow_id: str) -> Dict[str, Dict[str, Any]]:
+        """Get workflow execution status asynchronously.
+
         Args:
-            workflow_id: Workflow ID
-            
+            workflow_id: Workflow ID to get status for
+
         Returns:
             Dict mapping node IDs to their current state and metrics
+
+        Raises:
+            KeyError: If workflow_id does not exist
+            ValueError: If workflow state is invalid
         """
         if workflow_id not in self.active_workflows:
-            raise ValueError(f"Workflow {workflow_id} not found")
-            
+            raise KeyError(f"No active workflow found with ID: {workflow_id}")
+
         executor = self.active_workflows[workflow_id]
         status = {}
+
         for node_id, node in executor.nodes.items():
             # Get metrics from node if available
             metrics = {
-                "tokens": 0,
-                "latency": 0,
-                "memory": 0
+                "tokens": getattr(node.metrics, "tokens", 0),
+                "latency": getattr(node.metrics, "latency", 0.0),
+                "memory": getattr(node.metrics, "memory", 0)
             }
-            if hasattr(node, 'metrics') and node.metrics:
-                metrics = {
-                    "tokens": node.metrics.tokens,
-                    "latency": node.metrics.latency,
-                    "memory": node.metrics.memory
-                }
             
+            try:
+                # Get state enum value and convert to lowercase string
+                node_state = str(node.state)
+                if '.' in node_state:  # Handle enum class prefixes
+                    node_state = node_state.split('.')[-1]
+                state = node_state.lower()
+            except (AttributeError, ValueError) as e:
+                raise ValueError(f"Invalid state for node {node_id}: {e}")
+
             # Update status for this node
             status[node_id] = {
-                "status": str(node.state).split('.')[-1].lower(),  # Convert NodeState.COMPLETED to "completed"
+                "status": state,
                 "metrics": metrics
             }
+
         return status
 
     async def send_workflow_input(self, workflow_id: str, node_id: str, message: dict):

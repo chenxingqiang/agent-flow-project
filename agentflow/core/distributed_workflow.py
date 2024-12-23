@@ -296,7 +296,7 @@ class DistributedWorkflow:
         """Execute workflow asynchronously"""
         try:
             # Validate input data
-            self.validate_input(input_data)
+            input_data = self.validate_input(input_data)
 
             # Initialize workflow state
             self.state_manager.initialize_workflow()
@@ -349,8 +349,12 @@ class DistributedWorkflow:
                         try:
                             step_result = await loop.run_in_executor(None, ray.get, step_result_ref)
                         except Exception as ray_error:
-                            # Wrap Ray-specific errors to ensure consistent error handling
-                            raise StepExecutionError(f"Step {step_id} execution failed: {str(ray_error)}") from ray_error
+                            # Extract the original error message from the Ray error
+                            error_msg = str(ray_error)
+                            if "StepExecutionError" in error_msg:
+                                # Extract the actual error message from the Ray error
+                                error_msg = error_msg.split("StepExecutionError: ")[-1].split("\n")[0]
+                            raise StepExecutionError(error_msg)
 
                         # Store results
                         results[step_id] = step_result
@@ -359,11 +363,9 @@ class DistributedWorkflow:
 
                         # Update final output
                         if isinstance(step_result, dict):
-                            final_output = {
-                                'output': step_result.get('result', step_result)
-                            }
+                            final_output = step_result.get('result', step_result)
                         else:
-                            final_output = {'output': step_result}
+                            final_output = step_result
 
                         # Success - break retry loop
                         break
@@ -390,8 +392,15 @@ class DistributedWorkflow:
 
             # Set final workflow status and return results
             self.state_manager.set_workflow_status(WorkflowStatus.COMPLETED)
-            return final_output if final_output is not None else {'output': results}
+            return {'output': final_output} if final_output is not None else {'output': results}
 
+        except WorkflowExecutionError as e:
+            self.state_manager.set_workflow_status(WorkflowStatus.FAILED)
+            error_msg = str(e)
+            if not error_msg.startswith("Workflow execution failed:") and getattr(e, "add_prefix", True):
+                error_msg = f"Workflow execution failed: {error_msg}"
+            logger.error(error_msg)
+            raise WorkflowExecutionError(error_msg)
         except Exception as e:
             self.state_manager.set_workflow_status(WorkflowStatus.FAILED)
             error_msg = f"Workflow execution failed: {str(e)}"
@@ -399,15 +408,25 @@ class DistributedWorkflow:
             raise WorkflowExecutionError(error_msg)
 
     def validate_input(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate workflow input data"""
+        """Validate workflow input data.
+        
+        Args:
+            input_data: Input data to validate
+            
+        Returns:
+            Validated and normalized input data
+            
+        Raises:
+            WorkflowExecutionError: If required fields are missing
+        """
         # If input_data is None, create an empty dictionary
         if input_data is None:
             input_data = {}
 
         # Debug print statements
-        print(f"Required fields: {self.required_fields}")
-        print(f"Input data: {input_data}")
-
+        logger.debug(f"Required fields: {self.required_fields}")
+        logger.debug(f"Input data: {input_data}")
+    
         # Normalize input data to ensure it's a dictionary
         if not isinstance(input_data, dict):
             try:
@@ -418,22 +437,16 @@ class DistributedWorkflow:
         # Validate each required field
         missing_fields = []
         for field in self.required_fields:
-            if field not in input_data or input_data[field] is None:
-                # Special handling for STUDENT_NEEDS
-                if field == 'STUDENT_NEEDS':
-                    input_data[field] = {
-                        "RESEARCH_TOPIC": "Default Research Topic",
-                        "DEADLINE": "2024-12-31"
-                    }
-                else:
-                    missing_fields.append(field)
+            if field not in input_data:
+                missing_fields.append(field)
 
-        print(f"Missing fields: {missing_fields}")
+        logger.debug(f"Missing fields: {missing_fields}")
 
-        # If any non-STUDENT_NEEDS fields are missing, raise an error
+        # If any fields are missing, raise an error
         if missing_fields:
-            error_msg = f"Workflow execution failed: Missing required input: {missing_fields[0]}. Please provide all required inputs: {missing_fields}"
-            raise WorkflowExecutionError(error_msg)
+            error_msg = f"Missing required input: {missing_fields[0]}"
+            logger.error(f"Workflow validation failed: {error_msg}")
+            raise WorkflowExecutionError(error_msg, add_prefix=False)
 
         return input_data
 
@@ -603,8 +616,12 @@ class ResearchDistributedWorkflow(DistributedWorkflow):
                     try:
                         step_result = await loop.run_in_executor(None, ray.get, step_result_ref)
                     except Exception as ray_error:
-                        # Wrap Ray-specific errors to ensure consistent error handling
-                        raise StepExecutionError(f"Step {step_id} execution failed: {str(ray_error)}") from ray_error
+                        # Extract the original error message from the Ray error
+                        error_msg = str(ray_error)
+                        if "StepExecutionError" in error_msg:
+                            # Extract the actual error message from the Ray error
+                            error_msg = error_msg.split("StepExecutionError: ")[-1].split("\n")[0]
+                        raise StepExecutionError(error_msg)
 
                     # Store results
                     results[step_id] = step_result
@@ -613,11 +630,9 @@ class ResearchDistributedWorkflow(DistributedWorkflow):
                     
                     # Update final output
                     if isinstance(step_result, dict):
-                        final_output = {
-                            'output': step_result.get('result', step_result)
-                        }
+                        final_output = step_result.get('result', step_result)
                     else:
-                        final_output = {'output': step_result}
+                        final_output = step_result
                     
                 except StepExecutionError as e:
                     self.state_manager.set_step_status(step_id, StepStatus.FAILED)
@@ -628,12 +643,12 @@ class ResearchDistributedWorkflow(DistributedWorkflow):
             
             # Set success status
             self.state_manager.set_workflow_status(WorkflowStatus.COMPLETED)
-            return final_output if final_output is not None else {'output': results}
+            return {'output': final_output} if final_output is not None else {'output': results}
             
         except Exception as e:
             self.state_manager.set_workflow_status(WorkflowStatus.FAILED)
-            error_msg = f"Workflow execution failed: {str(e)}"
-            logger.error(error_msg)
+            error_msg = str(e)
+            logger.error(f"Workflow execution failed: {error_msg}")
             raise WorkflowExecutionError(error_msg)
 
     async def execute_async(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -693,8 +708,12 @@ class ResearchDistributedWorkflow(DistributedWorkflow):
                         try:
                             step_result = await loop.run_in_executor(None, ray.get, step_result_ref)
                         except Exception as ray_error:
-                            # Wrap Ray-specific errors to ensure consistent error handling
-                            raise StepExecutionError(f"Step {step_id} execution failed: {str(ray_error)}") from ray_error
+                            # Extract the original error message from the Ray error
+                            error_msg = str(ray_error)
+                            if "StepExecutionError" in error_msg:
+                                # Extract the actual error message from the Ray error
+                                error_msg = error_msg.split("StepExecutionError: ")[-1].split("\n")[0]
+                            raise StepExecutionError(error_msg)
 
                         # Store results
                         results[step_id] = step_result
@@ -703,11 +722,9 @@ class ResearchDistributedWorkflow(DistributedWorkflow):
 
                         # Update final output
                         if isinstance(step_result, dict):
-                            final_output = {
-                                'output': step_result.get('result', step_result)
-                            }
+                            final_output = step_result.get('result', step_result)
                         else:
-                            final_output = {'output': step_result}
+                            final_output = step_result
 
                         # Success - break retry loop
                         break
@@ -734,8 +751,15 @@ class ResearchDistributedWorkflow(DistributedWorkflow):
 
             # Set final workflow status and return results
             self.state_manager.set_workflow_status(WorkflowStatus.COMPLETED)
-            return final_output if final_output is not None else {'output': results}
+            return {'output': final_output} if final_output is not None else {'output': results}
 
+        except WorkflowExecutionError as e:
+            self.state_manager.set_workflow_status(WorkflowStatus.FAILED)
+            error_msg = str(e)
+            if not error_msg.startswith("Workflow execution failed:") and getattr(e, "add_prefix", True):
+                error_msg = f"Workflow execution failed: {error_msg}"
+            logger.error(error_msg)
+            raise WorkflowExecutionError(error_msg)
         except Exception as e:
             self.state_manager.set_workflow_status(WorkflowStatus.FAILED)
             error_msg = f"Workflow execution failed: {str(e)}"
@@ -749,8 +773,8 @@ class ResearchDistributedWorkflow(DistributedWorkflow):
             input_data = {}
 
         # Debug print statements
-        print(f"Required fields: {self.required_fields}")
-        print(f"Input data: {input_data}")
+        logger.debug(f"Required fields: {self.required_fields}")
+        logger.debug(f"Input data: {input_data}")
     
         # Normalize input data to ensure it's a dictionary
         if not isinstance(input_data, dict):
@@ -762,22 +786,18 @@ class ResearchDistributedWorkflow(DistributedWorkflow):
         # Validate each required field
         missing_fields = []
         for field in self.required_fields:
-            if field not in input_data or input_data[field] is None:
-                # Special handling for STUDENT_NEEDS
-                if field == 'STUDENT_NEEDS':
-                    input_data[field] = {
-                        "RESEARCH_TOPIC": "Default Research Topic",
-                        "DEADLINE": "2024-12-31"
-                    }
-                else:
-                    missing_fields.append(field)
+            if field not in input_data:
+                missing_fields.append(field)
 
-        print(f"Missing fields: {missing_fields}")
+        logger.debug(f"Missing fields: {missing_fields}")
 
-        # If any non-STUDENT_NEEDS fields are missing, raise an error
+        # If any fields are missing, raise an error
         if missing_fields:
-            error_msg = f"Workflow execution failed: Missing required input: {missing_fields[0]}. Please provide all required inputs: {missing_fields}"
-            raise WorkflowExecutionError(error_msg)
+            error_msg = f"Missing required input: {missing_fields[0]}"
+            logger.error(f"Workflow validation failed: {error_msg}")
+            raise WorkflowExecutionError(error_msg, add_prefix=False)
+
+        return input_data
 
     def _prepare_step_input(
         self,
@@ -874,6 +894,12 @@ def _execute_step_with_retry(
     # This is a placeholder implementation. You may need to modify it based on your specific requirements.
     # For now, it simply returns the input data as a demonstration.
     return input_data
+
+class WorkflowExecutionError(Exception):
+    """Custom exception for workflow execution errors"""
+    def __init__(self, message, add_prefix=True):
+        self.message = message
+        self.add_prefix = add_prefix
 
 class StepExecutionError(Exception):
     """Custom exception for step execution errors"""

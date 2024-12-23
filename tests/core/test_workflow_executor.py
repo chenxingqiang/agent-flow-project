@@ -202,10 +202,8 @@ class TestProcessor:
             input_data = {"value": input_data}
 
         # Simulate processing
-        processed_data = {
-            "processed": input_data,
-            "result": f"Processed {input_data}"
-        }
+        processed_data = input_data.copy()
+        processed_data['result'] = f"Processed {input_data}"
         return processed_data
 
     async def cleanup(self):

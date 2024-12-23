@@ -186,8 +186,8 @@ def test_agent_invalid_model_provider():
         }
     }
 
-    agent = Agent(config_data)
-    assert agent.model.provider == "invalid_provider"
+    with pytest.raises(ValueError, match="Invalid model provider: invalid_provider"):
+        Agent(config_data)
 
 def test_agent_invalid_workflow_config():
     """Test agent initialization with invalid workflow config"""
