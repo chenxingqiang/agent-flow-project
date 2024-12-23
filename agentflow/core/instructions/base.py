@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 import time
 import asyncio
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +40,20 @@ class InstructionResult(BaseModel):
     status: InstructionStatus
     data: Dict[str, Any] = Field(default_factory=dict)
     error: Optional[str] = None
-    metrics: Optional[InstructionMetrics] = None
+    execution_time: Optional[float] = None
+    
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        extra='allow'
+    )
 
-    class Config:
-        arbitrary_types_allowed = True
+@dataclass
+class ValidationResult:
+    """Result of instruction validation."""
+    is_valid: bool
+    score: float
+    metrics: Dict[str, Any]
+    violations: List[str]
 
 class BaseInstruction(ABC):
     """Base class for all instructions"""
@@ -92,12 +102,10 @@ class BaseInstruction(ABC):
 
     async def execute(self, context: Dict[str, Any]) -> InstructionResult:
         """Execute the instruction"""
+        start_time = time.time()
         try:
             # Run pre-execution hooks
             await self._run_hooks(self._pre_hooks, context)
-            
-            # Start metrics tracking
-            start_time = time.time()
             
             # Change status to running
             self.status = InstructionStatus.RUNNING
@@ -133,8 +141,16 @@ class BaseInstruction(ABC):
                 # Specific handling for ValueError
                 logger.error(f"Instruction {self.name} failed: {str(ve)}")
                 
-                # Update status to failed
+                # Update status to failed and record metrics
                 self.status = InstructionStatus.FAILED
+                await self._end_metrics(
+                    start_time=start_time,
+                    tokens=0,
+                    memory=0,
+                    cache_hit=False,
+                    optimized=False,
+                    parallel=False
+                )
                 
                 # Return failed result
                 return InstructionResult(
@@ -147,8 +163,16 @@ class BaseInstruction(ABC):
                 # Generic error handling
                 logger.error(f"Instruction {self.name} failed: {str(e)}")
                 
-                # Update status to failed
+                # Update status to failed and record metrics
                 self.status = InstructionStatus.FAILED
+                await self._end_metrics(
+                    start_time=start_time,
+                    tokens=0,
+                    memory=0,
+                    cache_hit=False,
+                    optimized=False,
+                    parallel=False
+                )
                 
                 # Return failed result
                 return InstructionResult(
@@ -161,8 +185,16 @@ class BaseInstruction(ABC):
             # Unexpected error during execution
             logger.error(f"Unexpected error in instruction {self.name}: {str(e)}")
             
-            # Update status to failed
+            # Update status to failed and record metrics
             self.status = InstructionStatus.FAILED
+            await self._end_metrics(
+                start_time=start_time,
+                tokens=0,
+                memory=0,
+                cache_hit=False,
+                optimized=False,
+                parallel=False
+            )
             
             # Return failed result
             return InstructionResult(
@@ -200,7 +232,7 @@ class CacheableInstruction(BaseInstruction):
                 if time.time() - cached_result["timestamp"] < self.cache_ttl:
                     logger.debug(f"Cache hit for instruction {self.name}")
                     self.status = InstructionStatus.CACHED
-                    self._end_metrics(
+                    await self._end_metrics(
                         start_time=start_time,
                         tokens=len(str(cached_result["result"])),
                         memory=len(str(self.cache)),
@@ -222,7 +254,7 @@ class CacheableInstruction(BaseInstruction):
                 "timestamp": time.time()
             }
             
-            self._end_metrics(
+            await self._end_metrics(
                 start_time=start_time,
                 tokens=len(str(result)),
                 memory=len(str(self.cache)),
@@ -281,7 +313,7 @@ class OptimizableInstruction(BaseInstruction):
             # Execute with optimized context
             result = await self._execute_impl(optimized_context)
             
-            self._end_metrics(
+            await self._end_metrics(
                 start_time=start_time,
                 tokens=len(str(result)),
                 memory=len(str(optimized_context)),
@@ -336,7 +368,7 @@ class CompositeInstruction(BaseInstruction):
             
             final_result = self._combine_results(results)
             
-            self._end_metrics(
+            await self._end_metrics(
                 start_time=start_time,
                 tokens=sum(len(str(r)) for r in results),
                 memory=len(str(context)),
@@ -405,7 +437,7 @@ class ParallelInstruction(CompositeInstruction):
             
             final_result = self._combine_results(valid_results)
             
-            self._end_metrics(
+            await self._end_metrics(
                 start_time=start_time,
                 tokens=sum(len(str(r)) for r in valid_results),
                 memory=len(str(context)),

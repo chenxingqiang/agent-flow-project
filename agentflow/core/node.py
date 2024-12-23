@@ -24,6 +24,11 @@ class Node(BaseModel):
         'latency': 0.0,
         'memory': 0
     })
+    status: Optional[Dict[str, Any]] = None  # For storing status information
+
+    class Config:
+        arbitrary_types_allowed = True
+        extra = "allow"
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -64,6 +69,7 @@ class AgentNode(Node):
         'latency': 0.0,
         'memory': 0
     })
+    status: Optional[Dict[str, Any]] = None  # For storing status information
 
     def __init__(self, **data):
         super().__init__(**data)

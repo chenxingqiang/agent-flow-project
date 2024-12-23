@@ -177,76 +177,33 @@ class ResearchWorkflow(BaseWorkflow):
         Returns:
             Result of the step execution
         """
-        # Execute the step using the first available agent
-        if not step.agents:
-            raise Exception(f"No agents available for step {step.id}")
+        # Execute the step using the execute_step method
+        try:
+            result = await self.execute_step(step.id, input_data)
+            step.completed = True
+            return result
+        except Exception as e:
+            logger.error(f"Error in step {step.id}: {str(e)}")
+            raise
 
-        # Normalize agent to be an Agent object
-        agent = step.agents[0]
-        if isinstance(agent, str):
-            # Find agent by ID in self.agents
-            matching_agents = [a for a in self.agents if a.config.id == agent]
-            if matching_agents:
-                agent = matching_agents[0]
-            else:
-                # Create a default agent if no matching agent found
-                from .agent import Agent
-                agent = Agent(config=AgentConfig(id=agent, type='default'))
-        elif isinstance(agent, dict):
-            # Create agent from config if needed
-            from .agent import Agent
-            agent = Agent(config=AgentConfig(**agent))
-        
-        # Ensure agent is an Agent object
-        if not hasattr(agent, 'execute'):
-            raise TypeError(f"Invalid agent type for step {step.id}: {type(agent)}")
+    async def execute_step(self, step_id: str, input_data: Dict[str, Any]) -> Any:
+        """
+        Execute a single step in the workflow. This method should be overridden by subclasses.
 
-        # Check if execute is a coroutine method
-        if asyncio.iscoroutinefunction(agent.execute):
-            return await agent.execute(input_data)
-        else:
-            return agent.execute(input_data)
+        Args:
+            step_id: ID of the step to execute
+            input_data: Input data for the step
+
+        Returns:
+            Result of the step execution
+        """
+        raise NotImplementedError("execute_step must be implemented by subclass")
 
     def initialize_state(self):
         """Initialize workflow state"""
         super().initialize_state()
         for step in self.research_steps:
             step.completed = False
-
-    async def execute_step(self, step: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a single step in the research workflow
-        
-        Args:
-            step: Current step definition
-            inputs: Input data for the step
-            
-        Returns:
-            Dict containing step results
-        """
-        # If no agents are defined, return inputs
-        if not step.get('agents', []):
-            return inputs
-        
-        # Find an agent for this step
-        agent_id = step['agents'][0]  # Take the first agent
-        agent = self.get_agent(agent_id)
-        
-        if not agent:
-            raise ValueError(f"No agent found for step: {step}")
-        
-        # Process the step with the selected agent
-        try:
-            from .agent import Agent
-            result = asyncio.run(agent.process(inputs))
-            
-            # Validate the step output
-            self.validate_step_output(step.get('step', 1), result)
-            
-            return result
-        except Exception as e:
-            # Handle step execution errors
-            error_handler = self.error_handling.get('handler', self._default_error_handler)
-            return error_handler(e, inputs)
 
     def get_agent(self, agent_id: str) -> Optional['Agent']:
         """

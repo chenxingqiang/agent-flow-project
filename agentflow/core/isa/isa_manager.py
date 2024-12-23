@@ -31,6 +31,19 @@ class ISAManager:
         """Initialize ISA manager."""
         self.instructions: Dict[str, Instruction] = {}
         self.execution_history: List[Dict[str, Any]] = []
+        self._initialized = False
+        
+    async def initialize(self):
+        """Initialize ISA manager asynchronously."""
+        if self._initialized:
+            return self
+            
+        # Initialize instruction store
+        self.instructions = {}
+        self.execution_history = []
+        
+        self._initialized = True
+        return self
         
     def load_instructions(self, config_path: str):
         """Load instructions from configuration file."""
@@ -86,50 +99,76 @@ class ISAManager:
         self.execution_history.append(execution_record)
         
         return result
-        
+
     def _execute_by_type(self, instruction: Instruction) -> Dict[str, Any]:
         """Execute instruction based on its type."""
-        if instruction.type == InstructionType.CONTROL:
-            return self._execute_control(instruction)
-        elif instruction.type == InstructionType.DATA:
-            return self._execute_data(instruction)
-        elif instruction.type == InstructionType.COMPUTATION:
-            return self._execute_computation(instruction)
-        elif instruction.type == InstructionType.IO:
-            return self._execute_io(instruction)
-        elif instruction.type == InstructionType.VALIDATION:
-            return self._execute_validation(instruction)
-        else:
-            raise ValueError(f"Unsupported instruction type: {instruction.type}")
-            
-    def _execute_control(self, instruction: Instruction) -> Dict[str, Any]:
-        """Execute control instruction."""
-        # Implement control flow logic
-        return {"status": "success", "type": "control"}
-        
-    def _execute_data(self, instruction: Instruction) -> Dict[str, Any]:
+        try:
+            if instruction.type == InstructionType.CONTROL:
+                return self._execute_control_instruction(instruction)
+            elif instruction.type == InstructionType.DATA:
+                return self._execute_data_instruction(instruction)
+            elif instruction.type == InstructionType.COMPUTATION:
+                return self._execute_computation_instruction(instruction)
+            elif instruction.type == InstructionType.IO:
+                return self._execute_io_instruction(instruction)
+            elif instruction.type == InstructionType.VALIDATION:
+                return self._execute_validation_instruction(instruction)
+            else:
+                raise ValueError(f"Unsupported instruction type: {instruction.type}")
+        except Exception as e:
+            raise RuntimeError(f"Instruction execution failed: {str(e)}")
+
+    def _execute_control_instruction(self, instruction: Instruction) -> Dict[str, Any]:
+        """Execute control flow instruction."""
+        params = instruction.params
+        if instruction.name == "branch":
+            condition = params.get("condition", False)
+            if condition:
+                return {"result": params.get("true_branch")}
+            return {"result": params.get("false_branch")}
+        elif instruction.name == "loop":
+            iterations = params.get("iterations", 1)
+            return {"result": f"Executed {iterations} iterations"}
+        return {"result": "Control instruction executed"}
+
+    def _execute_data_instruction(self, instruction: Instruction) -> Dict[str, Any]:
         """Execute data manipulation instruction."""
-        # Implement data manipulation logic
-        return {"status": "success", "type": "data"}
-        
-    def _execute_computation(self, instruction: Instruction) -> Dict[str, Any]:
+        params = instruction.params
+        if instruction.name == "transform":
+            data = params.get("data")
+            transform_type = params.get("transform_type")
+            return {"result": f"Transformed data using {transform_type}"}
+        elif instruction.name == "filter":
+            return {"result": "Data filtered"}
+        return {"result": "Data instruction executed"}
+
+    def _execute_computation_instruction(self, instruction: Instruction) -> Dict[str, Any]:
         """Execute computation instruction."""
-        # Implement computation logic
-        return {"status": "success", "type": "computation"}
-        
-    def _execute_io(self, instruction: Instruction) -> Dict[str, Any]:
+        params = instruction.params
+        if instruction.name == "calculate":
+            operation = params.get("operation")
+            return {"result": f"Calculated using {operation}"}
+        return {"result": "Computation instruction executed"}
+
+    def _execute_io_instruction(self, instruction: Instruction) -> Dict[str, Any]:
         """Execute I/O instruction."""
-        # Implement I/O logic
-        return {"status": "success", "type": "io"}
-        
-    def _execute_validation(self, instruction: Instruction) -> Dict[str, Any]:
+        params = instruction.params
+        if instruction.name == "read":
+            source = params.get("source")
+            return {"result": f"Read from {source}"}
+        elif instruction.name == "write":
+            target = params.get("target")
+            return {"result": f"Wrote to {target}"}
+        return {"result": "I/O instruction executed"}
+
+    def _execute_validation_instruction(self, instruction: Instruction) -> Dict[str, Any]:
         """Execute validation instruction."""
-        # Implement validation logic
-        return {"status": "success", "type": "validation"}
-        
-    def _is_dependency_satisfied(self, dependency_id: str) -> bool:
-        """Check if a dependency has been satisfied."""
-        return any(
-            record["instruction_id"] == dependency_id
-            for record in self.execution_history
-        )
+        params = instruction.params
+        if instruction.name == "validate":
+            rules = params.get("rules", [])
+            return {"result": f"Validated against {len(rules)} rules"}
+        return {"result": "Validation instruction executed"}
+
+    def _is_dependency_satisfied(self, dep_id: str) -> bool:
+        """Check if a dependency has been executed."""
+        return any(record["instruction_id"] == dep_id for record in self.execution_history)

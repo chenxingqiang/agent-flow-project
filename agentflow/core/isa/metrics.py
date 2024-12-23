@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Set, Tuple, Any
 from dataclasses import dataclass
 from enum import Enum
 import numpy as np
+from pydantic import BaseModel, Field, ConfigDict
 from .formal import FormalInstruction
 from .analyzer import AnalysisResult
 
@@ -30,14 +31,15 @@ class MetricThresholds:
     max_resource_usage: float = 0.8
     min_behavioral_score: float = 0.75
 
-@dataclass
-class ValidationResult:
+class ValidationResult(BaseModel):
     """Result of instruction validation."""
-    is_valid: bool
-    score: float
-    metrics: Dict[str, float]
-    violations: List[str]
-    recommendations: List[str]
+    model_config = ConfigDict(frozen=True)
+
+    is_valid: bool = Field(description="Whether validation passed")
+    score: float = Field(description="Overall validation score")
+    metrics: Dict[str, float] = Field(default_factory=dict, description="Validation metrics")
+    violations: List[str] = Field(default_factory=list, description="List of violations found")
+    recommendations: List[str] = Field(default_factory=list, description="List of recommendations")
 
 class MetricsCollector:
     """Advanced metrics collection and analysis."""

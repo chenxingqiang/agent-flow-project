@@ -212,3 +212,32 @@ class FormalInstruction:
         return (self._check_preconditions(context) and
                 self._verify_security(context) and
                 self._check_resources(context))
+                
+    def get_inputs(self) -> Set[str]:
+        """Get input dependencies."""
+        return {dep for dep in self.dependencies if dep.startswith("input:")}
+        
+    def get_outputs(self) -> Set[str]:
+        """Get output dependencies."""
+        return {dep for dep in self.dependencies if dep.startswith("output:")}
+        
+    def get_resources(self) -> Set[str]:
+        """Get resource requirements."""
+        resources = set()
+        if self.resources.cpu > 0:
+            resources.add("cpu")
+        if self.resources.memory > 0:
+            resources.add("memory")
+        if self.resources.gpu > 0:
+            resources.add("gpu")
+        if self.resources.network > 0:
+            resources.add("network")
+        if self.resources.storage > 0:
+            resources.add("storage")
+        return resources
+        
+    def requires_ordering(self) -> bool:
+        """Check if instruction requires specific ordering."""
+        # Instructions that modify state or have side effects require ordering
+        return (self.type in {InstructionType.STATE, InstructionType.SECURITY} or
+                self.metadata.get("requires_ordering", False))

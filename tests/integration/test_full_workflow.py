@@ -12,8 +12,17 @@ def mock_openai(mocker):
     mock_response.choices = [mocker.Mock(message=mocker.Mock(content="test_output"))]
     mock_response.usage = mocker.Mock(total_tokens=100)
     
+    async def async_create(**kwargs):
+        return mock_response
+    
+    mock_completions = mocker.Mock()
+    mock_completions.create = async_create
+    
+    mock_chat = mocker.Mock()
+    mock_chat.completions = mock_completions
+    
     mock_client = mocker.Mock()
-    mock_client.chat.completions.create.return_value = mock_response
+    mock_client.chat = mock_chat
     
     mock_openai = mocker.patch('openai.OpenAI', return_value=mock_client)
     return mock_openai
@@ -222,9 +231,9 @@ def test_error_handling(tmp_path, mock_openai):
     
     with pytest.raises(ValueError) as exc_info:
         agent.execute_workflow(invalid_input)
-    assert "Missing or empty inputs" in str(exc_info.value)
+    assert "Missing required fields" in str(exc_info.value)
 
     # Test with empty input
     with pytest.raises(ValueError) as exc_info:
         agent.execute_workflow({})
-    assert "Missing or empty inputs" in str(exc_info.value)
+    assert "Input data must be a non-empty dictionary" in str(exc_info.value)

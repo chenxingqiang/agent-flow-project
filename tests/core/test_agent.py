@@ -3,38 +3,41 @@ Tests for Agent functionality
 """
 
 import pytest
-import asyncio
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from pytest_asyncio import fixture as async_fixture
-from pytest_mock import mocker
+from unittest.mock import MagicMock
+import logging
 
 from agentflow.core.agent import Agent
 from agentflow.core.config_manager import AgentConfig, ModelConfig, WorkflowConfig
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+@pytest.fixture(autouse=True)
+def mock_ray(mocker):
+    """Mock Ray to prevent initialization"""
+    mock_ray = mocker.MagicMock()
+    mocker.patch('ray.init', return_value=None)
+    return mock_ray
+
 @pytest.fixture(autouse=True)
 def mock_openai(mocker):
     """Mock OpenAI client"""
-    def mock_create(**kwargs):
-        mock_message = MagicMock()
-        mock_message.content = "Test response"
-        
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-        
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-        mock_response.usage = MagicMock(total_tokens=10)
-        return mock_response
+    mock_client = MagicMock()
     
-    mock_completion = MagicMock()
-    mock_completion.create = mock_create
-    mock_chat = MagicMock(completions=mock_completion)
-    mock_client = MagicMock(chat=mock_chat)
-    
+    # Create a mock response
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.content = "Test response"
+    mock_response.usage.total_tokens = 10
+
+    # Configure the mock to return the mock response
+    mock_client.chat.completions.create.return_value = mock_response
+
     mocker.patch('openai.OpenAI', return_value=mock_client)
     return mock_client
 
-@async_fixture
+@pytest.fixture
 async def agent_config():
     """Create test agent config"""
     return AgentConfig(
@@ -56,7 +59,7 @@ async def agent_config():
         }
     )
 
-@async_fixture(scope="function")
+@pytest.fixture
 async def agent(mock_openai):
     """Create test agent instance"""
     config = AgentConfig(
@@ -79,16 +82,19 @@ async def agent(mock_openai):
     )
     agent = Agent(config)
     await agent.initialize()
-    yield agent
-    await agent.cleanup()
+    return agent
 
 @pytest.mark.asyncio
 async def test_agent_initialization(agent):
     """Test agent initialization"""
-    assert agent._config_obj.id == "test-agent"
-    assert agent.name == "Test Agent"
-    assert agent.type == "GENERIC"
-    assert agent.max_iterations == 10
+    agent_instance = await agent
+    assert agent_instance._config_obj.id == "test-agent"
+    assert agent_instance._config_obj.name == "Test Agent"
+    assert agent_instance._config_obj.agent_type == "generic"
+    assert agent_instance._config_obj.system_prompt == "You are a test agent"
+    assert agent_instance._config_obj.model.name == "gpt-3.5-turbo"
+    assert agent_instance._config_obj.workflow.max_iterations == 10
+    assert agent_instance._config_obj.config["algorithm"] == "PPO"
 
 @pytest.mark.asyncio
 async def test_agent_process_message():
@@ -114,9 +120,37 @@ async def test_agent_process_message():
     agent = Agent(config)
     await agent.initialize()
 
+    # Create a mock response
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.content = "Test response"
+    mock_response.usage.total_tokens = 10
+
+    # Create a mock client
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+
+    # Set the mock client
+    agent.client = mock_client
+
     message = "Test message"
     response = agent.process_message(message)
+    
+    # Debug logging
+    logger.debug(f"Response type: {type(response)}")
+    logger.debug(f"Response value: {repr(response)}")
+    
+    assert isinstance(response, str)
     assert response == "Test response"
+
+    # Check workflow history
+    history = agent.get_workflow_history()
+    assert len(history) == 1
+    assert history[0]['step'] == 'process_message'
+    assert history[0]['status'] == 'success'
+    assert history[0]['details']['message'] == message
+    assert history[0]['details']['response'] == "Test response"
+    assert history[0]['details']['tokens'] == 10
 
 @pytest.mark.asyncio
 async def test_agent_error_handling():

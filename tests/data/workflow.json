@@ -1,18 +1,21 @@
 {
-    "WORKFLOW": [
-        {
-            "step": 1,
-            "input": ["research_topic", "deadline", "academic_level"],
-            "output": {
-                "type": "research"
+    "WORKFLOW": {
+        "max_iterations": 10,
+        "logging_level": "INFO",
+        "distributed": false,
+        "steps": [
+            {
+                "type": "research_planning",
+                "config": {
+                    "depth": "comprehensive"
+                }
+            },
+            {
+                "type": "document_generation",
+                "config": {
+                    "format": "academic"
+                }
             }
-        },
-        {
-            "step": 2,
-            "input": ["WORKFLOW.1"],
-            "output": {
-                "type": "document"
-            }
-        }
-    ]
+        ]
+    }
 }

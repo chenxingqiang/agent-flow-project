@@ -110,15 +110,21 @@ class AdvancedInstruction(OptimizableInstruction, CacheableInstruction):
             # Validate context
             validation_result = await self._validate(context)
             if not validation_result.is_valid:
-                raise ValueError("Context validation failed")
+                self.status = InstructionStatus.FAILED
+                return InstructionResult(
+                    status=InstructionStatus.FAILED,
+                    error=f"Context validation failed: {', '.join(validation_result.violations)}",
+                    metrics=self.metrics
+                )
             
             # Execute with optimization and caching
             return await super().execute(context)
             
         except Exception as e:
             logger.error(f"Advanced instruction {self.name} failed: {str(e)}")
+            self.status = InstructionStatus.FAILED
             return InstructionResult(
-                status=self.status,
+                status=InstructionStatus.FAILED,
                 error=str(e),
                 metrics=self.metrics
             )
@@ -250,20 +256,10 @@ class DataProcessingInstruction(AdvancedInstruction):
         self.scaler = StandardScaler()
         self.pca = PCA(n_components=0.95)
         self.clusterer = KMeans(n_clusters=3)
-        
+    
     async def _preprocess(self, data: pd.DataFrame) -> pd.DataFrame:
         """Preprocess data"""
-        if not isinstance(data, pd.DataFrame):
-            raise ValueError("Invalid data type. Expected pandas DataFrame")
-        
-        # Check for empty data
-        if data.empty:
-            raise ValueError("No data provided")
-        
-        # Normalize numeric columns
-        numeric_cols = data.select_dtypes(include=[np.number]).columns
-        data[numeric_cols] = self.scaler.fit_transform(data[numeric_cols])
-        return data
+        return pd.DataFrame(self.scaler.fit_transform(data), columns=data.columns)
     
     async def _reduce_dimensions(self, data: pd.DataFrame) -> pd.DataFrame:
         """Reduce dimensionality (alias for _dimension_reduction)"""
@@ -271,27 +267,19 @@ class DataProcessingInstruction(AdvancedInstruction):
     
     async def _dimension_reduction(self, data: pd.DataFrame) -> pd.DataFrame:
         """Reduce dimensionality"""
-        if len(data.columns) > 1:
-            reduced_data = self.pca.fit_transform(data)
-            return pd.DataFrame(reduced_data, columns=[f'PC{i+1}' for i in range(reduced_data.shape[1])])
-        return data
+        reduced_data = self.pca.fit_transform(data)
+        return pd.DataFrame(reduced_data, columns=[f"PC{i+1}" for i in range(reduced_data.shape[1])])
     
-    async def _cluster(self, data: pd.DataFrame) -> Dict[str, Any]:
+    async def _cluster(self, data: pd.DataFrame) -> np.ndarray:
         """Perform clustering"""
-        if len(data) > self.clusterer.n_clusters:
-            clusters = self.clusterer.fit_predict(data)
-            return {
-                "clusters": clusters.tolist(),
-                "centroids": self.clusterer.cluster_centers_.tolist()
-            }
-        return {"clusters": [], "centroids": []}
+        return self.clusterer.fit_predict(data)
     
     async def _execute_impl(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Execute data processing pipeline"""
         try:
             # Validate and extract data
             data = context.get('data')
-            if not data:
+            if data is None:
                 raise ValueError("No data provided")
             
             # Convert to DataFrame if not already
@@ -300,23 +288,29 @@ class DataProcessingInstruction(AdvancedInstruction):
             
             # Validate data
             if data.empty:
-                raise ValueError("No data provided")
+                raise ValueError("Empty DataFrame provided")
             
             # Execute processing pipeline
             preprocessed_data = await self._preprocess(data)
             reduced_data = await self._dimension_reduction(preprocessed_data)
             clusters = await self._cluster(reduced_data)
             
+            # Update status and return results
+            self.status = InstructionStatus.COMPLETED
             return {
                 'processed_data': reduced_data.to_dict(orient='records'),
-                'clusters': clusters,
+                'clusters': clusters.tolist(),
                 'metrics': {
-                    'original_shape': data.shape,
-                    'processed_shape': reduced_data.shape
+                    'n_samples': len(data),
+                    'n_features': data.shape[1],
+                    'n_components': reduced_data.shape[1],
+                    'explained_variance': float(self.pca.explained_variance_ratio_.sum())
                 }
             }
+            
         except Exception as e:
             logger.error(f"Data processing failed: {str(e)}")
+            self.status = InstructionStatus.FAILED
             raise
 
 @ray.remote

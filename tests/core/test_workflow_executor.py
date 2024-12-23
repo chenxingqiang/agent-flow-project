@@ -155,54 +155,32 @@ def test_agent():
     return _create_agent
 
 class TestAgent:
-    """Test agent implementation"""
+    """Test agent class"""
     def __init__(self, config):
         self.config = config
         self.token_count = 0
         self.last_latency = 0
         self.memory_usage = 0
-        
-    def _make_hashable(self, obj):
-        """Convert complex objects to hashable format while preserving structure"""
-        if isinstance(obj, dict):
-            return {k: self._make_hashable(v) for k, v in obj.items()}
-        elif isinstance(obj, (list, set)):
-            return tuple(self._make_hashable(x) for x in obj)
-        elif isinstance(obj, (int, float, str, bool, tuple)):
-            return obj
-        else:
-            return str(obj)
-            
-    async def _call_llm(self, input_data):
-        """Mock LLM call"""
-        # Convert input data to string if needed
-        input_str = str(input_data)
-        return {"response": input_str, "type": "research"}
-        
-    async def execute(self, input_data):
-        """Execute agent workflow"""
-        # Convert input data to hashable format
-        processed_input = self._make_hashable(input_data)
+        self.history = []
 
-        # Get LLM response
-        result = await self._call_llm(processed_input)
-        
-        # Update metrics
-        self.token_count += 10
-        self.last_latency = 0.5
-        self.memory_usage = 1024
-        
-        return result
-        
     async def process(self, input_data):
-        """Process input data - calls execute for compatibility"""
-        return await self.execute(input_data)
-        
+        """Process input data"""
+        if isinstance(input_data, dict) and "message" in input_data:
+            return await self.process_message(input_data["message"])
+        return {"processed": True, "input": input_data}
+
+    async def process_message(self, message):
+        """Process a message"""
+        self.history.append(message)
+        return {"response": f"Processed: {message}"}
+
+    async def initialize(self):
+        """Initialize agent"""
+        pass
+
     async def cleanup(self):
-        """Cleanup resources"""
-        self.token_count = 0
-        self.last_latency = 0
-        self.memory_usage = 0
+        """Cleanup agent"""
+        self.history = []
 
 @pytest.fixture
 def test_processor():
@@ -213,24 +191,26 @@ def test_processor():
     return _create_processor
 
 class TestProcessor:
-    """Test processor with process_data method"""
+    """Test processor for workflow executor tests"""
     def __init__(self, config):
         self.config = config
-        self.token_count = 0
-        self.last_latency = 0
-        self.memory_usage = 0
+        self.processed_data = []
 
     async def process_data(self, input_data):
-        """Process input data"""
-        return {"result": f"Processed {input_data}"}
+        # Ensure the input is a dictionary
+        if not isinstance(input_data, dict):
+            input_data = {"value": input_data}
 
-    async def process(self, input_data):
-        """Fallback process method"""
-        return await self.process_data(input_data)
+        # Simulate processing
+        processed_data = {
+            "processed": input_data,
+            "result": f"Processed {input_data}"
+        }
+        return processed_data
 
     async def cleanup(self):
-        """Cleanup resources"""
-        pass
+        """Cleanup processor"""
+        self.processed_data = []
 
 @pytest.mark.asyncio
 async def test_workflow_executor_initialization(sample_workflow_config):

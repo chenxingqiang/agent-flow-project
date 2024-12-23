@@ -7,6 +7,7 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from .adaptive_weights import AdaptiveWeights, WeightConfig
+from .isa.isa_manager import Instruction
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +45,11 @@ class InstructionSelector:
         """Enable A/B testing"""
         self.ab_testing_enabled = True
     
-    def register_variant(self, name: str, instructions: Dict[str, Dict[str, Any]]):
+    def register_variant(self, name: str, instructions: Dict[str, Instruction]):
         """Register a variant for A/B testing"""
         self.variants[name] = instructions
     
-    def train(self, instructions: Dict[str, Dict[str, Any]]):
+    def train(self, instructions: Dict[str, Instruction]):
         """Train the selector on available instructions"""
         if not instructions:
             # Initialize with a dummy document to avoid empty vocabulary error
@@ -57,7 +58,7 @@ class InstructionSelector:
             return
 
         # Create TF-IDF vectors for instruction descriptions
-        descriptions = [instr["description"] for instr in instructions.values()]
+        descriptions = [instr.description or "" for instr in instructions.values()]
         if not descriptions:
             descriptions = ['dummy']  # Use dummy doc if no descriptions
         self.instruction_vectors = self.vectorizer.fit_transform(descriptions)
@@ -134,18 +135,18 @@ class InstructionSelector:
             return 0.0
         return history["cache_hits"] / total
     
-    def _get_feature_scores(self, name: str, instr: Dict[str, Any],
+    def _get_feature_scores(self, name: str, instr: Instruction,
                           query: str) -> Dict[str, float]:
         """Get feature scores for instruction"""
         return {
-            "relevance": self._calculate_relevance(query, instr["description"]),
+            "relevance": self._calculate_relevance(query, instr.description or ""),
             "success_rate": self._calculate_success_rate(name),
-            "cost": 1.0 - (instr.get("cost", 1.0) / 10.0),
+            "cost": 1.0 - (getattr(instr, "cost", 1.0) / 10.0),
             "cache_hit_rate": self._calculate_cache_effectiveness(name)
         }
     
     def select_instructions(self, input_data: Dict[str, Any],
-                          available_instructions: Dict[str, Dict[str, Any]],
+                          available_instructions: Dict[str, Instruction],
                           max_instructions: int = 5) -> List[str]:
         """Select best instructions using adaptive weights"""
         query = input_data.get("text", "")
@@ -227,14 +228,14 @@ class InstructionSelector:
         return stats
     
     def optimize_sequence(self, selected_instructions: List[str],
-                         available_instructions: Dict[str, Dict[str, Any]]) -> List[str]:
+                         available_instructions: Dict[str, Instruction]) -> List[str]:
         """Optimize the sequence of selected instructions"""
         if not selected_instructions:
             return []
         
         # Build dependency graph
         dependencies = {
-            name: set(available_instructions[name].get("dependencies", []))
+            name: set(available_instructions[name].dependencies)
             for name in selected_instructions
         }
         

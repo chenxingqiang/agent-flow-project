@@ -23,21 +23,23 @@ class PatternMetrics:
     frequency: int
     confidence: float
     support: float
-    lift: float
-    conviction: float
-    leverage: float
-    coverage: float
-    stability: float
+    lift: float = 1.0
+    conviction: float = 1.0
+    leverage: float = 0.0
+    coverage: float = 1.0
+    stability: float = 1.0
+    exec_time_impact: float = 0.0  # Impact on execution time
+    resource_impact: float = 0.0  # Impact on resource usage
 
 @dataclass
 class Pattern:
     """Represents an instruction pattern."""
     type: PatternType
     instructions: List[FormalInstruction]
-    context: Dict[str, Any]
-    constraints: Dict[str, Any]
     metrics: PatternMetrics
-    metadata: Dict[str, Any]
+    context: Dict[str, Any] = None
+    constraints: Dict[str, Any] = None
+    metadata: Dict[str, Any] = None
 
 class PatternMiner:
     """Advanced pattern mining system."""
@@ -249,10 +251,10 @@ class PatternMiner:
         return Pattern(
             type=type,
             instructions=instructions,
-            context=context,
-            constraints=constraints,
+            context=context if context else None,
+            constraints=constraints if constraints else None,
             metrics=metrics,
-            metadata=metadata
+            metadata=metadata if metadata else None
         )
     
     def _calculate_metrics(self,
@@ -267,7 +269,9 @@ class PatternMiner:
             conviction=self._calculate_conviction(instructions),
             leverage=self._calculate_leverage(instructions),
             coverage=self._calculate_coverage(instructions),
-            stability=self._calculate_stability(instructions)
+            stability=self._calculate_stability(instructions),
+            exec_time_impact=self._calculate_exec_time_impact(instructions),
+            resource_impact=self._calculate_resource_impact(instructions)
         )
     
     def _filter_patterns(self, patterns: List[Pattern]) -> List[Pattern]:
@@ -291,5 +295,7 @@ class PatternMiner:
             pattern.metrics.support *
             pattern.metrics.confidence *
             pattern.metrics.lift *
-            pattern.metrics.stability
+            pattern.metrics.stability *
+            (1 - pattern.metrics.exec_time_impact) *
+            (1 - pattern.metrics.resource_impact)
         )

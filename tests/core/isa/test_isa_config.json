@@ -1,0 +1,31 @@
+{
+    "instructions": [
+        {
+            "id": "init",
+            "name": "initialize",
+            "type": "control",
+            "params": {
+                "init_param": "value"
+            },
+            "description": "Initialize system"
+        },
+        {
+            "id": "process",
+            "name": "process_data",
+            "type": "computation",
+            "params": {
+                "data_param": "value"
+            },
+            "description": "Process input data"
+        },
+        {
+            "id": "validate",
+            "name": "validate_result",
+            "type": "validation",
+            "params": {
+                "threshold": 0.9
+            },
+            "description": "Validate results"
+        }
+    ]
+}

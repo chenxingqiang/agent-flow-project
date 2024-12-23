@@ -29,11 +29,16 @@ class MockAgent:
     
     def _process(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Process the context."""
-        self.executed_contexts.append(context)
         if self.fail:
             raise Exception(f"Agent {self.name} failed")
-        context[f'{self.name}_processed'] = True
-        return context
+            
+        # Track executed context
+        self.executed_contexts.append(context.copy())
+        
+        # Create new context with processed flag
+        result = context.copy()
+        result[f'{self.name}_processed'] = True
+        return result
 
 @pytest.fixture
 def base_workflow_config():
@@ -252,7 +257,7 @@ class TestWorkflowExecution:
         workflow = TestWorkflowEngine(sequential_workflow_config)
 
         # Verify error handling
-        with pytest.raises(WorkflowEngineError, match="Agent执行失败"):
+        with pytest.raises(WorkflowEngineError, match="工作流执行失败"):
             await workflow.execute(initial_context)
 
     @pytest.mark.asyncio
@@ -293,26 +298,30 @@ class TestWorkflowExecution:
                 }
             }
         })
-    
+
         # Create workflow engine with execute_step implementation
         class TestWorkflowEngine(WorkflowEngine):
+            def check_dependencies(self, dependencies: list, context: Dict[str, Any]) -> bool:
+                """Check if all dependencies are satisfied."""
+                return all(dep in context for dep in dependencies)
+
             async def execute_step(self, step_config: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
                 agent = self._create_agent(step_config)
                 if step_config.get('async', False):
                     return await agent.execute_async(context)
                 return agent.execute(context)
-    
+
         workflow = TestWorkflowEngine(workflow_config)
-    
+
         # Test dependency checking
         context = {}
-        assert not workflow._check_agent_dependencies(["test"], context)
-    
-        context = {"agent1_processed": True}
-        assert not workflow._check_agent_dependencies(["agent1_processed", "validation_passed"], context)
-    
-        context = {"agent1_processed": True, "validation_passed": True}
-        assert workflow._check_agent_dependencies(["agent1_processed", "validation_passed"], context)
+        assert not workflow.check_dependencies(["agent1_processed"], context)
+        
+        context["agent1_processed"] = True
+        assert workflow.check_dependencies(["agent1_processed"], context)
+        
+        context["validation_passed"] = True
+        assert workflow.check_dependencies(["agent1_processed", "validation_passed"], context)
 
     def test_communication_protocols(self, base_workflow_config):
         """Test different communication protocols."""

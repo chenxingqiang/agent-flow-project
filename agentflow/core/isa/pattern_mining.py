@@ -80,6 +80,9 @@ class SequenceMiner:
     def _is_valid_candidate(self,
                           candidate: List[FormalInstruction]) -> bool:
         """Check if candidate sequence is valid."""
+        if not candidate or len(candidate) < 2:
+            raise ValueError("Sequence must have at least 2 instructions")
+            
         # Check for dependencies
         for i in range(len(candidate) - 1):
             if self._has_dependency(candidate[i], candidate[i+1]):
@@ -93,6 +96,48 @@ class SequenceMiner:
         # Implement dependency check
         return True  # Placeholder
 
+    def _calculate_support(self,
+                         candidate: List[FormalInstruction],
+                         instructions: List[FormalInstruction]) -> float:
+        """Calculate support for candidate sequence."""
+        occurrences = self._count_frequency(candidate, instructions)
+        return occurrences / len(instructions)
+
+    def _calculate_confidence(self,
+                            candidate: List[FormalInstruction],
+                            instructions: List[FormalInstruction]) -> float:
+        """Calculate confidence for candidate sequence."""
+        if len(candidate) < 2:
+            return 0.0
+            
+        antecedent = candidate[:-1]
+        antecedent_freq = self._count_frequency(antecedent, instructions)
+        
+        if antecedent_freq == 0:
+            return 0.0
+            
+        sequence_freq = self._count_frequency(candidate, instructions)
+        return sequence_freq / antecedent_freq
+
+    def _count_frequency(self,
+                        candidate: List[FormalInstruction],
+                        instructions: List[FormalInstruction]) -> int:
+        """Count frequency of candidate sequence in instructions."""
+        count = 0
+        n = len(instructions)
+        m = len(candidate)
+        
+        for i in range(n - m + 1):
+            match = True
+            for j in range(m):
+                if instructions[i + j].id != candidate[j].id:
+                    match = False
+                    break
+            if match:
+                count += 1
+                
+        return count
+    
 class ParallelMiner:
     """Advanced parallel pattern mining."""
     
@@ -568,6 +613,6 @@ class BehavioralMiner:
             frequency=1,  # This would be calculated from historical data
             confidence=analysis.confidence,
             support=1.0,  # This would be calculated from historical data
-            performance_impact=avg_exec_time,
+            exec_time_impact=avg_exec_time,
             resource_impact=avg_resource_usage
         )

@@ -105,6 +105,14 @@ class WorkflowConfig(BaseModel):
     # 协作配置
     collaboration: Dict[str, Any] = Field(default_factory=dict)
     
+    class Config:
+        """
+        Pydantic配置类，启用额外属性和不可变性
+        """
+        extra = 'allow'
+        populate_by_name = True
+        frozen = False
+    
     def __init__(self, **data):
         """
         初始化方法，确保默认值被正确设置
@@ -125,14 +133,6 @@ class WorkflowConfig(BaseModel):
             data['execution_policies'] = ExecutionPolicies(**data['execution_policies'])
         
         super().__init__(**data)
-    
-    class Config:
-        """
-        Pydantic配置类，启用额外属性和不可变性
-        """
-        extra = 'allow'
-        populate_by_name = True
-        frozen = False
     
     @classmethod
     def from_dict(cls, workflow_dict: Dict[str, Any]) -> 'WorkflowConfig':
@@ -196,11 +196,9 @@ class AgentConfig(BaseModel):
     )
     workflow: Optional[WorkflowConfig] = None
     
-    model_config = ConfigDict(
-        extra='allow',
-        populate_by_name=True,
-        validate_assignment=True
-    )
+    class Config:
+        arbitrary_types_allowed = True
+        extra = 'allow'
     
     @field_validator('type', 'agent_type')
     @classmethod
@@ -303,29 +301,221 @@ class ProcessorConfig(BaseModel):
     config: Dict[str, Any] = Field(default_factory=dict)
 
 class StepConfig(BaseModel):
-    """Configuration for workflow steps"""
-    id: str = Field(..., description="Step ID")
-    step: int = Field(..., description="Step number in workflow")
-    name: str = Field(..., description="Step name")
-    agents: List[str] = Field(default_factory=list, description="List of agent IDs")
-    input_type: str = Field(..., description="Input type for the step")
-    output_type: str = Field(..., description="Output type for the step")
+    """Configuration for workflow steps."""
+    name: str = Field(description="Name of the step")
+    description: Optional[str] = Field(default=None, description="Description of what the step does")
     input: List[str] = Field(default_factory=list, description="Required input fields")
     output: Dict[str, Any] = Field(default_factory=dict, description="Output configuration")
     depends_on: Optional[FrozenSet[int]] = Field(default_factory=frozenset, description="Set of step numbers this step depends on")
-    model_config = ConfigDict(arbitrary_types_allowed=True)
     
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True
+    )
+
     @field_validator('depends_on', mode='before')
     @classmethod
-    def convert_depends_on(cls, v: Optional[Union[List[int], FrozenSet[int]]]) -> Optional[FrozenSet[int]]:
-        """Convert depends_on to frozenset if it's a list"""
-        if v is None:
-            return frozenset()
-        if isinstance(v, (list, tuple)):
-            return frozenset(int(x) for x in v if str(x).isdigit())
-        if isinstance(v, (set, frozenset)):
+    def validate_depends_on(cls, v):
+        """Convert depends_on to frozenset if needed"""
+        if isinstance(v, (list, set)):
             return frozenset(v)
-        return frozenset()
+        return v
+
+class AgentMetadataConfig(BaseModel):
+    """Agent元数据配置"""
+    name: str
+    version: str
+    type: str
+    
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True
+    )
+
+class InputSpecConfig(BaseModel):
+    """输入规范定义"""
+    types: Dict[str, Any] = Field(default_factory=dict)
+    required: List[str] = Field(default_factory=list)
+    constraints: Dict[str, Any] = Field(default_factory=dict)
+    
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True
+    )
+
+class OutputSpecConfig(BaseModel):
+    """输出规范定义"""
+    types: Dict[str, Any] = Field(default_factory=dict)
+    format: Optional[str] = None
+    constraints: Dict[str, Any] = Field(default_factory=dict)
+    
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True
+    )
+
+class DataFlowControlConfig(BaseModel):
+    """数据流控制配置"""
+    routing_rules: Dict[str, Any] = Field(default_factory=dict)
+    error_handling: Dict[str, Any] = Field(default_factory=dict)
+    
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True
+    )
+
+class InterfaceContractConfig(BaseModel):
+    """接口契约配置"""
+    input_contract: Dict[str, List[str]] = Field(default_factory=dict)
+    output_contract: Dict[str, List[str]] = Field(default_factory=dict)
+    
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True
+    )
+
+class ModelConfigConfig(BaseModel):
+    """Configuration for AI model"""
+    provider: str
+    name: str
+    temperature: float = 0.5
+    max_tokens: Optional[int] = None
+    
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True
+    )
+
+    @field_validator('provider')
+    @classmethod
+    def validate_provider(cls, v: str) -> str:
+        """Validate model provider"""
+        valid_providers = ['openai', 'anthropic', 'google', 'default', 'ray']
+        if v.lower() not in valid_providers:
+            raise ValueError(f"Unsupported model provider: {v}. Must be one of {valid_providers}")
+        return v.lower()
+    
+    @field_validator('temperature')
+    @classmethod
+    def validate_temperature(cls, v: float) -> float:
+        """Validate temperature value"""
+        if v < 0 or v > 1:
+            raise ValueError("Temperature must be between 0 and 1")
+        return v
+
+class WorkflowStepConfig(BaseModel):
+    """工作流步骤配置"""
+    type: str
+    config: Optional[Dict[str, Any]] = None
+    
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True
+    )
+
+class ExecutionPoliciesConfig(BaseModel):
+    """Execution policies configuration"""
+    required_fields: List[str] = Field(default_factory=list)
+    default_status: Optional[str] = "initialized"
+    error_handling: Dict[str, str] = Field(default_factory=lambda: {
+        "missing_field_error": "Missing required fields: {}",
+        "missing_input_error": "Empty input data"
+    })
+    steps: List[Dict[str, Any]] = Field(default_factory=list)
+    
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True
+    )
+
+class WorkflowConfigConfig(BaseModel):
+    """
+    工作流配置类，定义工作流执行的关键参数
+    """
+    id: Optional[str] = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: Optional[str] = None
+    
+    # 工作流执行参数
+    max_iterations: int = 10  # 默认最大迭代次数为10
+    timeout: Optional[int] = None
+    logging_level: str = 'INFO'  # 默认日志级别为INFO
+    distributed: bool = False  # 是否为分布式工作流
+    
+    # 代理和连接配置
+    agents: Optional[List['AgentConfig']] = None
+    connections: Optional[List[Dict[str, Any]]] = None
+    
+    # 处理器配置
+    processors: Optional[List['ProcessorConfig']] = None
+    
+    # 执行策略
+    execution_policies: ExecutionPolicies = Field(default_factory=ExecutionPolicies)
+    
+    # 元数据
+    metadata: Optional[Dict[str, Any]] = None
+    
+    # 步骤配置
+    steps: Optional[List[WorkflowStep]] = None  # 工作流步骤，可选
+    
+    # 协作配置
+    collaboration: Dict[str, Any] = Field(default_factory=dict)
+    
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True
+    )
+
+    def __init__(self, **data):
+        """
+        初始化方法，确保默认值被正确设置
+        """
+        # 如果没有提供steps，设置为空列表
+        if 'steps' not in data or data['steps'] is None:
+            data['steps'] = []
+        
+        # 如果没有提供execution_policies，设置为空字典
+        if 'execution_policies' not in data or data['execution_policies'] is None:
+            data['execution_policies'] = ExecutionPolicies(
+                required_fields=[],
+                default_status=None,
+                error_handling={},
+                steps=[]
+            )
+        elif not isinstance(data['execution_policies'], ExecutionPolicies):
+            data['execution_policies'] = ExecutionPolicies(**data['execution_policies'])
+        
+        super().__init__(**data)
+    
+    @classmethod
+    def from_dict(cls, workflow_dict: Dict[str, Any]) -> 'WorkflowConfig':
+        """
+        从字典创建WorkflowConfig
+        
+        :param workflow_dict: 工作流配置字典
+        :return: WorkflowConfig实例
+        """
+        # 处理代理配置
+        if 'agents' in workflow_dict:
+            workflow_dict['agents'] = [
+                AgentConfig.from_dict(agent) if isinstance(agent, dict) else agent
+                for agent in workflow_dict['agents']
+            ]
+        
+        # 处理处理器配置
+        if 'processors' in workflow_dict:
+            workflow_dict['processors'] = [
+                ProcessorConfig.from_dict(processor) if isinstance(processor, dict) else processor
+                for processor in workflow_dict['processors']
+            ]
+        
+        # 处理执行策略
+        if 'execution_policies' in workflow_dict:
+            workflow_dict['execution_policies'] = ExecutionPolicies(**workflow_dict['execution_policies'])
+        
+        # 处理步骤配置
+        if 'steps' in workflow_dict:
+            workflow_dict['steps'] = [
+                WorkflowStep(**step) if isinstance(step, dict) else step
+                for step in workflow_dict['steps']
+            ]
+        
+        # 处理默认值
+        workflow_dict.setdefault('id', str(uuid.uuid4()))
+        workflow_dict.setdefault('max_iterations', 10)
+        workflow_dict.setdefault('logging_level', 'INFO')
+        workflow_dict.setdefault('steps', [])
+        
+        return cls(**workflow_dict)
 
 class ConfigManager:
     """Configuration manager for handling config files and validation"""
@@ -364,18 +554,18 @@ class ConfigManager:
         Raises:
             ValueError: If config is invalid
         """
-        required_sections = {'variables', 'agent_type', 'model', 'workflow'}
+        required_sections = {'AGENT', 'MODEL', 'WORKFLOW'}
         missing = required_sections - set(config.keys())
         if missing:
             raise ValueError(f"Missing required config sections: {missing}")
             
         # Validate model config
-        model_config = config.get('model', {})
+        model_config = config.get('MODEL', {})
         if not all(k in model_config for k in ['provider', 'name']):
             raise ValueError("Model config missing required fields")
             
         # Validate workflow config
-        workflow_config = config.get('workflow', {})
+        workflow_config = config.get('WORKFLOW', {})
         if not isinstance(workflow_config, dict):
             raise ValueError("Workflow config must be a dictionary")
             
