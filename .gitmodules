@@ -1,0 +1,3 @@
+[submodule "agentflow/ell2a"]
+	path = agentflow/ell2a
+	url = https://github.com/chenxingqiang/ell2a.git
