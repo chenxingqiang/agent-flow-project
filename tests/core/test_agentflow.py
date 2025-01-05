@@ -83,6 +83,7 @@ def mock_instruction_selector():
 def workflow_config():
     """Create test workflow config."""
     return WorkflowConfig(
+        id="test-workflow-id",
         name="test-workflow",
         max_iterations=10,
         timeout=3600

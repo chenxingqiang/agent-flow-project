@@ -485,13 +485,18 @@ class AdaptiveInstruction(AdvancedInstruction):
         self.history = []
         self.parameters = {}
     
-    def add_adaptation_rule(self, rule: Callable[[Dict[str, Any], Dict[str, Any]], None]):
+    def add_adaptation_rule(
+        self,
+        condition: Callable[[Dict[str, Any]], bool],
+        adaptation: Callable[[Dict[str, Any]], Dict[str, Any]]
+    ) -> None:
         """Add an adaptation rule.
         
         Args:
-            rule: Function that takes context and metrics and updates context
+            condition: Function that determines if adaptation should be applied
+            adaptation: Function that applies the adaptation
         """
-        self.adaptation_rules.append(rule)
+        self.adaptation_rules.append((condition, adaptation))
     
     def set_learning_rate(self, learning_rate: float):
         """Set the learning rate for parameter updates.
@@ -625,61 +630,43 @@ class ConditionalInstruction(AdvancedInstruction):
             description: Instruction description
         """
         super().__init__(name, description)
-        self.conditions = {}  # condition -> instruction mapping
-        self.default_instruction = None
-    
-    def add_condition(self, condition: Callable[[Dict[str, Any]], bool], instruction: AdvancedInstruction):
+        self.conditions = []  # List of (condition, instruction) tuples
+        
+    def add_condition(self, condition: Callable[[Dict[str, Any]], bool], instruction: 'AdvancedInstruction') -> None:
         """Add a condition and its corresponding instruction.
         
         Args:
-            condition: Function that determines if instruction should be executed
-            instruction: Instruction to execute if condition is met
+            condition: Function that evaluates context and returns bool
+            instruction: Instruction to execute if condition is True
         """
-        self.conditions[condition] = instruction
-    
-    def set_default(self, instruction: AdvancedInstruction):
-        """Set default instruction to execute when no conditions match.
+        self.conditions.append((condition, instruction))
         
-        Args:
-            instruction: Default instruction
-        """
-        self.default_instruction = instruction
-    
-    async def execute(self, context: Dict[str, Any]) -> InstructionResult:
-        """Execute the matching instruction based on conditions.
+    async def _execute_impl(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute the first instruction whose condition is met.
         
         Args:
             context: Execution context
             
         Returns:
-            Execution result
+            Result from executed instruction
         """
-        try:
-            # Check conditions
-            for condition, instruction in self.conditions.items():
-                if condition(context):
+        for condition, instruction in self.conditions:
+            try:
+                if await condition(context) if asyncio.iscoroutinefunction(condition) else condition(context):
                     result = await instruction.execute(context)
-                    return result
-            
-            # If no conditions match, use default instruction
-            if self.default_instruction is not None:
-                result = await self.default_instruction.execute(context)
-                return result
-            
-            # If no default instruction
-            return InstructionResult(
-                status="error",
-                output=None,
-                metadata={"error": "No matching condition found and no default instruction set"}
-            )
-            
-        except Exception as e:
-            logger.error(f"Conditional execution error: {e}")
-            return InstructionResult(
-                status="error",
-                output=None,
-                metadata={"error": str(e)}
-            )
+                    return {
+                        "result": result,
+                        "selected_instruction": instruction.name,
+                        "metrics": {
+                            "total_conditions": len(self.conditions),
+                            "selected_condition_index": self.conditions.index((condition, instruction))
+                        }
+                    }
+            except Exception as e:
+                logger.error(f"Error evaluating condition for instruction {instruction.name}: {e}")
+                raise
+                
+        raise ValueError("No matching condition found")
 
 class StateManagerInstruction(AdvancedInstruction):
     """State management instruction."""
@@ -885,12 +872,13 @@ class MockImageClassifier:
 class ImageProcessingInstruction(AdvancedInstruction):
     """Instruction for image processing tasks."""
     
-    def __init__(self, name: str, description: str):
+    def __init__(self, name: str = "process_image", description: str = "Process and analyze images", use_mock: bool = False):
         """Initialize image processing instruction.
         
         Args:
             name: Instruction name
             description: Instruction description
+            use_mock: Whether to use mock models for testing
         """
         super().__init__(name, description)
         self.transforms = []
@@ -898,103 +886,116 @@ class ImageProcessingInstruction(AdvancedInstruction):
         self.processor = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-    def add_transform(self, transform: Callable[[Image.Image], Image.Image]):
-        """Add an image transform.
+        if use_mock:
+            self.processor = MockImageProcessor()
+            self.model = MockImageClassifier()
+        else:
+            self.set_model()
         
-        Args:
-            transform: Function that takes a PIL Image and returns a transformed PIL Image
-        """
+    def add_transform(self, transform: Callable[[Image.Image], Image.Image]):
+        """Add an image transform."""
         self.transforms.append(transform)
         
     def set_model(self, model_name: str = "google/vit-base-patch16-224"):
-        """Set up the image processing model.
-        
-        Args:
-            model_name: Name of the pre-trained model to use
-        """
+        """Set up the image processing model."""
         self.processor = ViTImageProcessor.from_pretrained(model_name)
         self.model = ViTForImageClassification.from_pretrained(model_name).to(self.device)
-        
-    async def _process_image(self, image: Image.Image) -> Image.Image:
-        """Apply image transforms.
-        
-        Args:
-            image: Input PIL Image
-            
-        Returns:
-            Processed PIL Image
-        """
-        processed_image = image
-        for transform in self.transforms:
-            try:
-                processed_image = await transform(processed_image) if asyncio.iscoroutinefunction(transform) else transform(processed_image)
-            except Exception as e:
-                logger.error(f"Error in image transform: {e}")
-                raise
-        return processed_image
-        
-    async def _classify_image(self, image: Image.Image) -> Dict[str, float]:
-        """Classify image using the model.
-        
-        Args:
-            image: Input PIL Image
-            
-        Returns:
-            Dictionary of class probabilities
-        """
-        if self.model is None or self.processor is None:
-            raise ValueError("Model and processor must be set before classification")
-            
+    
+    async def get_name(self):
+        """Get instruction name."""
+        return self.name
+    
+    async def get_processor(self):
+        """Get image processor."""
+        return self.processor
+    
+    async def get_model(self):
+        """Get image model."""
+        return self.model
+    
+    async def should_resize_image(self, context: Dict[str, Any]) -> bool:
+        """Check if image needs resizing."""
+        image = context.get("image")
+        if isinstance(image, torch.Tensor):
+            return image.shape[-2] > 224 or image.shape[-1] > 224
+        return False
+    
+    async def should_batch_process(self, context: Dict[str, Any]) -> bool:
+        """Check if batch processing should be used."""
+        images = context.get("images", [])
+        return len(images) > 10
+    
+    async def optimize(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Optimize processing based on input."""
+        if await self.should_resize_image(context):
+            image = context.get("image")
+            context["image"] = await self.resize_image(image, (224, 224))
+        return context
+    
+    async def resize_image(self, image: torch.Tensor, size: Tuple[int, int]) -> torch.Tensor:
+        """Resize image to target size."""
+        if isinstance(image, torch.Tensor):
+            return torch.nn.functional.interpolate(
+                image.unsqueeze(0), 
+                size=size, 
+                mode='bilinear', 
+                align_corners=False
+            ).squeeze(0)
+        return image
+    
+    async def _process_single_image(self, image: torch.Tensor) -> Dict[str, Any]:
+        """Process a single image."""
         try:
-            # Prepare image for model
-            inputs = self.processor(images=image, return_tensors="pt").to(self.device)
+            # Prepare image
+            inputs = self.processor(images=image, return_tensors="pt")
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
             
-            # Get model predictions
+            # Get predictions
             with torch.no_grad():
                 outputs = self.model(**inputs)
                 probs = torch.nn.functional.softmax(outputs.logits, dim=-1)
-                
-            # Convert to dictionary
+            
+            # Get top prediction
+            top_prob, top_class = probs[0].max(dim=0)
+            
             return {
-                self.model.config.id2label[i]: float(prob)
-                for i, prob in enumerate(probs[0])
+                "class_id": top_class.item(),
+                "confidence": top_prob.item()
             }
         except Exception as e:
-            logger.error(f"Error in image classification: {e}")
+            logger.error(f"Error processing image: {e}")
             raise
-            
+    
+    async def _process_batch(self, images: List[torch.Tensor]) -> List[Dict[str, Any]]:
+        """Process a batch of images."""
+        results = []
+        for image in images:
+            result = await self._process_single_image(image)
+            results.append(result)
+        return results
+    
     async def _execute_impl(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute image processing instruction.
-        
-        Args:
-            context: Execution context with image
-            
-        Returns:
-            Processing results
-        """
+        """Execute image processing instruction."""
         try:
-            image = context.get("image")
-            if not isinstance(image, Image.Image):
-                raise ValueError("Input must be a PIL Image")
-                
-            # Process image
-            processed_image = await self._process_image(image)
+            # Check for batch processing
+            if "images" in context:
+                images = context["images"]
+                if await self.should_batch_process(context):
+                    results = await self._process_batch(images)
+                else:
+                    results = [await self._process_single_image(img) for img in images]
+                return {"results": results}
             
-            # Classify if model is set
-            classification = None
-            if self.model is not None and self.processor is not None:
-                classification = await self._classify_image(processed_image)
+            # Single image processing
+            elif "image" in context:
+                image = context["image"]
+                context = await self.optimize(context)
+                result = await self._process_single_image(context["image"])
+                return {"results": [result]}
+            
+            else:
+                raise ValueError("No image data provided in context")
                 
-            return {
-                "processed_image": processed_image,
-                "classification": classification,
-                "metrics": {
-                    "original_size": image.size,
-                    "processed_size": processed_image.size,
-                    "n_transforms": len(self.transforms),
-                    "device": str(self.device)
-                }
-            }
         except Exception as e:
             logger.error(f"Error in image processing: {e}")
             raise
@@ -1554,7 +1555,7 @@ class ConditionalInstruction(AdvancedInstruction):
         super().__init__(name, description)
         self.conditions = []  # List of (condition, instruction) tuples
         
-    def add_condition(self, condition: Callable[[Dict[str, Any]], bool], instruction: 'AdvancedInstruction'):
+    def add_condition(self, condition: Callable[[Dict[str, Any]], bool], instruction: 'AdvancedInstruction') -> None:
         """Add a condition and its corresponding instruction.
         
         Args:
@@ -1747,12 +1748,16 @@ class AdaptiveInstruction(AdvancedInstruction):
         self.performance_metrics = {}
         self.adaptation_history = []
         
-    def add_adaptation_rule(self, condition: Callable[[Dict[str, Any]], bool], adaptation: Callable[[Dict[str, Any]], Dict[str, Any]]):
+    def add_adaptation_rule(
+        self,
+        condition: Callable[[Dict[str, Any]], bool],
+        adaptation: Callable[[Dict[str, Any]], Dict[str, Any]]
+    ) -> None:
         """Add an adaptation rule.
         
         Args:
             condition: Function that determines if adaptation should be applied
-            adaptation: Function that modifies context based on adaptation
+            adaptation: Function that applies the adaptation
         """
         self.adaptation_rules.append((condition, adaptation))
         

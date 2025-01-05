@@ -7,7 +7,7 @@ from datetime import datetime
 import numpy as np
 from collections import defaultdict
 
-from agentflow.core.agentic_calling import AgentInstruction, FunctionContext
+from agentflow.core.agentic_calling import AgentInstruction, FunctionContext, ExecutionResult
 from agentflow.core.optimization import OptimizationMetrics
 
 @dataclass
@@ -88,13 +88,13 @@ class AdaptiveLearner:
     async def learn_from_execution(
         self,
         instruction: AgentInstruction,
-        result: Any,
+        result: ExecutionResult,
         context: FunctionContext
     ):
         """Learn from instruction execution."""
         # Extract execution information
         success = result.status == "success"
-        latency = result.metrics.get("execution_time", 0.0)
+        latency = result.metrics.get("execution_time", 0.0) if result.metrics else 0.0
         context_vars = set(context.variables.keys())
         
         # Add to pattern matcher
@@ -208,6 +208,7 @@ class AdaptiveOptimizer:
         self.learner = AdaptiveLearner()
         self.optimization_metrics = OptimizationMetrics()
         self.active_optimizations: Dict[str, AgentInstruction] = {}
+        self.optimization_history: List[Dict[str, Any]] = []
     
     async def optimize_instruction_sequence(
         self,
@@ -224,6 +225,14 @@ class AdaptiveOptimizer:
             if optimized:
                 optimized_instructions.append(optimized)
                 self.active_optimizations[instruction.name] = optimized
+                
+                # Record optimization
+                self.optimization_history.append({
+                    "timestamp": datetime.now(),
+                    "instruction": instruction.name,
+                    "optimized_name": optimized.name,
+                    "optimization_hints": optimized.optimization_hints
+                })
             else:
                 optimized_instructions.append(instruction)
         
@@ -238,7 +247,7 @@ class AdaptiveOptimizer:
     async def learn_from_sequence(
         self,
         instructions: List[AgentInstruction],
-        results: List[Any],
+        results: List[ExecutionResult],
         contexts: List[FunctionContext]
     ):
         """Learn from a sequence of instruction executions."""
@@ -251,13 +260,18 @@ class AdaptiveOptimizer:
             "total_patterns": len(self.learner.learned_patterns),
             "active_optimizations": len(self.active_optimizations),
             "learning_cycles": self.learner.metrics.learning_cycles,
-            "successful_adaptations": self.learner.metrics.successful_adaptations,
-            "failed_adaptations": self.learner.metrics.failed_adaptations,
-            "optimization_history": self.learner.optimization_history
+            "optimization_history": self.optimization_history,
+            "metrics": {
+                "pattern_discoveries": self.learner.metrics.pattern_discoveries,
+                "successful_adaptations": self.learner.metrics.successful_adaptations,
+                "failed_adaptations": self.learner.metrics.failed_adaptations,
+                "total_optimizations": self.learner.metrics.total_optimizations
+            }
         }
     
     def reset_optimization_state(self):
-        """Reset optimization state."""
-        self.learner = AdaptiveLearner()
+        """Reset the optimization state."""
+        self.active_optimizations.clear()
+        self.optimization_history.clear()
         self.optimization_metrics = OptimizationMetrics()
-        self.active_optimizations.clear() 
+        self.learner = AdaptiveLearner() 

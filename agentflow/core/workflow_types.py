@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass, field
 import asyncio
 import networkx as nx
+import uuid
 
 from .exceptions import WorkflowExecutionError
 
@@ -53,22 +54,55 @@ class WorkflowStep:
     
     def validate(self) -> None:
         """Validate step configuration."""
+        # Validate step type
         if not isinstance(self.type, WorkflowStepType):
-            raise WorkflowExecutionError(f"Invalid step type: {self.type}")
+            try:
+                self.type = WorkflowStepType(self.type)
+            except (ValueError, TypeError):
+                raise WorkflowExecutionError(f"Invalid step type: {self.type}")
             
-        # Add more validation as needed
+        # Validate strategy based on step type
         if self.type == WorkflowStepType.TRANSFORM:
             valid_strategies = {"feature_engineering", "outlier_removal", "standard"}
             if self.config.strategy not in valid_strategies:
                 raise WorkflowExecutionError(
-                    f"Invalid strategy for transform step: {self.config.strategy}"
+                    f"Invalid strategy for transform step: {self.config.strategy}. "
+                    f"Valid strategies are: {', '.join(valid_strategies)}"
+                )
+        elif self.type == WorkflowStepType.ANALYZE:
+            valid_strategies = {"statistical", "exploratory", "diagnostic"}
+            if self.config.strategy not in valid_strategies:
+                raise WorkflowExecutionError(
+                    f"Invalid strategy for analyze step: {self.config.strategy}. "
+                    f"Valid strategies are: {', '.join(valid_strategies)}"
+                )
+        elif self.type == WorkflowStepType.VALIDATE:
+            valid_strategies = {"schema", "data_quality", "business_rules"}
+            if self.config.strategy not in valid_strategies:
+                raise WorkflowExecutionError(
+                    f"Invalid strategy for validate step: {self.config.strategy}. "
+                    f"Valid strategies are: {', '.join(valid_strategies)}"
+                )
+        elif self.type == WorkflowStepType.AGGREGATE:
+            valid_strategies = {"sum", "mean", "custom"}
+            if self.config.strategy not in valid_strategies:
+                raise WorkflowExecutionError(
+                    f"Invalid strategy for aggregate step: {self.config.strategy}. "
+                    f"Valid strategies are: {', '.join(valid_strategies)}"
+                )
+        elif self.type == WorkflowStepType.RESEARCH_EXECUTION:
+            valid_strategies = {"literature_review", "data_collection", "analysis"}
+            if self.config.strategy not in valid_strategies:
+                raise WorkflowExecutionError(
+                    f"Invalid strategy for research execution step: {self.config.strategy}. "
+                    f"Valid strategies are: {', '.join(valid_strategies)}"
                 )
 
 @dataclass
 class WorkflowConfig:
     """Configuration for a workflow."""
-    id: str
     name: str
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
     max_iterations: int = 10
     timeout: float = 300.0
     steps: List[WorkflowStep] = field(default_factory=list)
@@ -100,6 +134,9 @@ class WorkflowConfig:
     
     def _get_execution_order(self) -> List[str]:
         """Get step execution order based on dependencies."""
+        if not self.steps:
+            return []
+            
         graph = nx.DiGraph()
         for step in self.steps:
             graph.add_node(step.id)
@@ -110,7 +147,7 @@ class WorkflowConfig:
             return list(nx.topological_sort(graph))
         except nx.NetworkXUnfeasible as e:
             raise WorkflowExecutionError("Invalid step dependencies") from e
-    
+
     async def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute workflow steps.
         
@@ -129,10 +166,16 @@ class WorkflowConfig:
             
         # Validate steps
         for step in self.steps:
-            step.validate()
+            try:
+                step.validate()
+            except WorkflowExecutionError as e:
+                raise WorkflowExecutionError(f"Step validation failed for {step.id}: {str(e)}")
             
         # Validate dependencies
-        self._validate_dependencies()
+        try:
+            self._validate_dependencies()
+        except WorkflowExecutionError as e:
+            raise WorkflowExecutionError(f"Dependency validation failed: {str(e)}")
         
         # Get execution order
         try:

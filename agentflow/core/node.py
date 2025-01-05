@@ -62,112 +62,103 @@ class Node(ABC):
         """Validate the node configuration."""
         return True
 
-class AgentNode(Node):
-    """Node that executes an agent"""
-    type: str = "agent"
-    model: Optional[Dict[str, Any]] = None
-    description: Optional[str] = None
-    config: Dict[str, Any] = Field(default_factory=dict)
-    metrics: Dict[str, Union[int, float]] = Field(default_factory=lambda: {
-        'tokens': 0,
-        'latency': 0.0,
-        'memory': 0
-    })
-    status: Optional[Dict[str, Any]] = None  # For storing status information
-    use_ell2a: bool = Field(default=False)  # Flag to use ELL2A
-    ell2a_mode: str = Field(default="simple")  # ELL2A mode: "simple" or "complex"
-
-    def __init__(self, **data):
-        super().__init__(**data)
-        if self.use_ell2a:
-            from .ell2a_integration import ell2a_integration
-            self.ell2a = ell2a_integration
-
-    async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute agent with input data"""
-        if self.use_ell2a:
-            return await self._execute_with_ell2a(input_data)
-        return await self._execute_standard(input_data)
-
-    async def _execute_with_ell2a(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute agent using ELL2A"""
-        # Create ELL2A message
-        message = self.ell2a.create_message(
-            role="user",
-            content=input_data.get("content", ""),
-            metadata={
-                "type": LMPType.AGENT,
-                "config": self.config
-            }
-        )
-        self.ell2a.add_message(message)
-
-        # Execute with ELL2A based on mode
-        if self.ell2a_mode == "complex":
-            result = await self._execute_complex_ell2a(message)
-        else:
-            result = await self._execute_simple_ell2a(message)
+class AgentNode(ABC):
+    """Base class for agent nodes in a workflow."""
+    
+    def __init__(self, name: str, description: str):
+        """Initialize agent node.
         
-        # Update metrics
-        if "usage" in result:
-            self.metrics.update({
-                "tokens": result["usage"].get("total_tokens", 0),
-                "latency": result["usage"].get("latency", 0.0)
-            })
-
-        return result
-
-    async def _execute_simple_ell2a(self, message: Any) -> Dict[str, Any]:
-        """Execute using ELL2A simple mode"""
+        Args:
+            name: Node name
+            description: Node description
+        """
+        self.name = name
+        self.description = description
+        self.status = "initialized"
+        self.error = None
+        self._initialized = False
+    
+    async def initialize(self) -> None:
+        """Initialize node resources."""
+        if self._initialized:
+            return
+        
         try:
-            # Get agent implementation
-            agent = self._get_agent_instance()
-
-            # Execute with global ELL2A simple mode
-            @self.ell2a.with_ell2a(mode="simple")
-            async def execute_agent():
-                return await agent.execute({
-                    "messages": [message],
-                    "config": self.config
-                })
-
-            return await execute_agent()
+            await self._initialize_impl()
+            self._initialized = True
+            self.status = "ready"
         except Exception as e:
-            self.logger.error(f"Error executing agent with ELL2A simple: {str(e)}")
+            self.status = "failed"
+            self.error = str(e)
+            logger.error(f"Error initializing node {self.name}: {e}")
             raise
-
-    async def _execute_complex_ell2a(self, message: Any) -> Dict[str, Any]:
-        """Execute using ELL2A complex mode"""
+    
+    async def _initialize_impl(self) -> None:
+        """Implementation of node initialization."""
+        pass
+    
+    async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a task.
+        
+        Args:
+            task: Task to process
+            
+        Returns:
+            Processing result
+        """
+        if not self._initialized:
+            await self.initialize()
+        
         try:
-            # Get agent implementation
-            agent = self._get_agent_instance()
-
-            # Execute with global ELL2A complex mode
-            @self.ell2a.with_ell2a(mode="complex")
-            async def execute_agent():
-                return await agent.execute({
-                    "messages": self.ell2a.get_messages(),
-                    "config": self.config
-                })
-
-            return await execute_agent()
+            self.status = "processing"
+            result = await self.process(task)
+            self.status = "ready"
+            return result
         except Exception as e:
-            self.logger.error(f"Error executing agent with ELL2A complex: {str(e)}")
+            self.status = "failed"
+            self.error = str(e)
+            logger.error(f"Error processing task in node {self.name}: {e}")
             raise
-
-    def _get_agent_instance(self):
-        """Get agent instance"""
-        if isinstance(self.agent, str):
-            module_path, class_name = self.agent.rsplit(".", 1)
-            module = __import__(module_path, fromlist=[class_name])
-            agent_class = getattr(module, class_name)
-            return agent_class(**self.config)
-        return self.agent(**self.config)
-
-    async def _execute_standard(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute agent using standard method"""
-        agent = self._get_agent_instance()
-        return await agent.execute(input_data)
+    
+    @abstractmethod
+    async def process(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a task.
+        
+        Args:
+            task: Task to process
+            
+        Returns:
+            Processing result
+        """
+        pass
+    
+    async def cleanup(self) -> None:
+        """Clean up node resources."""
+        try:
+            await self._cleanup_impl()
+            self._initialized = False
+            self.status = "terminated"
+        except Exception as e:
+            self.status = "failed"
+            self.error = str(e)
+            logger.error(f"Error cleaning up node {self.name}: {e}")
+            raise
+    
+    async def _cleanup_impl(self) -> None:
+        """Implementation of node cleanup."""
+        pass
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get node status.
+        
+        Returns:
+            Status information
+        """
+        return {
+            "name": self.name,
+            "status": self.status,
+            "error": self.error
+        }
 
 class ProcessorNode(Node):
     """Node that executes a processor"""
