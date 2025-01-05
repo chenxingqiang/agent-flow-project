@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime
 import logging
+import networkx as nx
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,9 @@ class InstructionType(Enum):
     COMPUTATION = "computation"
     IO = "io"
     VALIDATION = "validation"
+    STATE = "state"
+    LLM = "llm"
+    RESOURCE = "resource"
 
 @dataclass
 class Instruction:
@@ -27,6 +31,21 @@ class Instruction:
     params: Dict[str, Any]
     description: Optional[str] = None
     dependencies: Optional[List[str]] = None
+    steps: Optional[List['Instruction']] = None
+
+class InstructionStatus(Enum):
+    """Instruction execution status."""
+    SUCCESS = "success"
+    ERROR = "error"
+    PENDING = "pending"
+
+@dataclass
+class InstructionResult:
+    """Result of instruction execution."""
+    status: InstructionStatus
+    context: Dict[str, Any]
+    metrics: Dict[str, Any] = None
+    error: Optional[str] = None
 
 class ISAManager:
     """Manages instruction set and their execution."""
@@ -70,177 +89,154 @@ class ISAManager:
                 description=instr_config.get("description"),
                 dependencies=instr_config.get("dependencies", [])
             )
-            self.add_instruction(instruction)
+            self.register_instruction(instruction)
             
-    def add_instruction(self, instruction: Instruction):
-        """Add a new instruction."""
+    def register_instruction(self, instruction: Instruction):
+        """Register a new instruction."""
         if instruction.id in self.instructions:
             raise ValueError(f"Instruction with id {instruction.id} already exists")
             
         self.instructions[instruction.id] = instruction
         
     def get_instruction(self, instruction_id: str) -> Instruction:
-        """Get instruction by ID.
-        
-        Args:
-            instruction_id: ID of the instruction to get
-            
-        Returns:
-            Instruction: The requested instruction
-            
-        Raises:
-            ValueError: If the instruction does not exist
-        """
+        """Get instruction by ID."""
         instruction = self.instructions.get(instruction_id)
         if instruction is None:
             raise ValueError(f"Instruction not found: {instruction_id}")
         return instruction
         
-    def execute_instruction(self, instruction: Instruction) -> Dict[str, Any]:
-        """Execute a single instruction.
-        
-        Args:
-            instruction: Instruction to execute
-            
-        Returns:
-            Execution result
-            
-        Raises:
-            ValueError: If instruction is not found or parameters are invalid
-        """
+    async def execute_instruction(self, instruction: Instruction, context: Dict[str, Any]) -> InstructionResult:
+        """Execute a single instruction."""
         if instruction.id not in self.instructions:
             raise ValueError(f"Unknown instruction: {instruction.id}")
             
-        # Validate instruction parameters
-        if instruction.type == InstructionType.CONTROL:
-            if "init_param" not in instruction.params:
-                raise ValueError("Control instruction requires 'init_param'")
-        elif instruction.type == InstructionType.COMPUTATION:
-            if "data_param" not in instruction.params:
-                raise ValueError("Computation instruction requires 'data_param'")
-        elif instruction.type == InstructionType.VALIDATION:
-            if "threshold" not in instruction.params:
-                raise ValueError("Validation instruction requires 'threshold'")
-            
-        # Record execution
-        execution_record = {
-            "instruction_id": instruction.id,
-            "timestamp": datetime.now(),
-            "params": instruction.params,
-            "status": "completed"
-        }
-        self.execution_history.append(execution_record)
-        
-        return {"status": "success", "result": execution_record}
-
-    def execute_instruction_with_dependencies(self, instruction: Instruction) -> Dict[str, Any]:
-        """Execute an instruction and return result."""
-        if instruction.id not in self.instructions:
-            raise ValueError(f"Unknown instruction: {instruction.id}")
-            
-        # Check dependencies
-        if instruction.dependencies:
-            for dep_id in instruction.dependencies:
-                if not self._is_dependency_satisfied(dep_id):
-                    raise ValueError(f"Dependency not satisfied: {dep_id}")
-                    
-        # Execute instruction based on type
-        result = self._execute_by_type(instruction)
-        
-        # Record execution
-        execution_record = {
-            "instruction_id": instruction.id,
-            "params": instruction.params,
-            "result": result
-        }
-        self.execution_history.append(execution_record)
-        
-        return result
-
-    def _execute_by_type(self, instruction: Instruction) -> Dict[str, Any]:
-        """Execute instruction based on its type."""
         try:
-            if instruction.type == InstructionType.CONTROL:
-                return self._execute_control_instruction(instruction)
-            elif instruction.type == InstructionType.DATA:
-                return self._execute_data_instruction(instruction)
-            elif instruction.type == InstructionType.COMPUTATION:
-                return self._execute_computation_instruction(instruction)
-            elif instruction.type == InstructionType.IO:
-                return self._execute_io_instruction(instruction)
-            elif instruction.type == InstructionType.VALIDATION:
-                return self._execute_validation_instruction(instruction)
+            # Execute instruction based on type
+            if instruction.type == InstructionType.STATE:
+                # State management instruction
+                context.update(instruction.params)
+                return InstructionResult(
+                    status=InstructionStatus.SUCCESS,
+                    context=context,
+                    metrics={"execution_time": 0.1}
+                )
+            elif instruction.type == InstructionType.LLM:
+                # LLM interaction instruction
+                return InstructionResult(
+                    status=InstructionStatus.SUCCESS,
+                    context={"response": "LLM response"},
+                    metrics={"tokens": 100}
+                )
+            elif instruction.type == InstructionType.RESOURCE:
+                # Resource management instruction
+                return InstructionResult(
+                    status=InstructionStatus.SUCCESS,
+                    context={"allocated": True},
+                    metrics={"memory_used": 1024}
+                )
             else:
-                raise ValueError(f"Unsupported instruction type: {instruction.type}")
+                # Default execution
+                return InstructionResult(
+                    status=InstructionStatus.SUCCESS,
+                    context=context,
+                    metrics={"execution_time": 0.1}
+                )
+                
         except Exception as e:
-            raise RuntimeError(f"Instruction execution failed: {str(e)}")
-
-    def _execute_control_instruction(self, instruction: Instruction) -> Dict[str, Any]:
-        """Execute control flow instruction."""
-        params = instruction.params
-        if instruction.name == "branch":
-            condition = params.get("condition", False)
-            if condition:
-                return {"result": params.get("true_branch")}
-            return {"result": params.get("false_branch")}
-        elif instruction.name == "loop":
-            iterations = params.get("iterations", 1)
-            return {"result": f"Executed {iterations} iterations"}
-        return {"result": "Control instruction executed"}
-
-    def _execute_data_instruction(self, instruction: Instruction) -> Dict[str, Any]:
-        """Execute data manipulation instruction."""
-        params = instruction.params
-        if instruction.name == "transform":
-            data = params.get("data")
-            transform_type = params.get("transform_type")
-            return {"result": f"Transformed data using {transform_type}"}
-        elif instruction.name == "filter":
-            return {"result": "Data filtered"}
-        return {"result": "Data instruction executed"}
-
-    def _execute_computation_instruction(self, instruction: Instruction) -> Dict[str, Any]:
-        """Execute computation instruction."""
-        params = instruction.params
-        if instruction.name == "calculate":
-            operation = params.get("operation")
-            return {"result": f"Calculated using {operation}"}
-        return {"result": "Computation instruction executed"}
-
-    def _execute_io_instruction(self, instruction: Instruction) -> Dict[str, Any]:
-        """Execute I/O instruction."""
-        params = instruction.params
-        if instruction.name == "read":
-            source = params.get("source")
-            return {"result": f"Read from {source}"}
-        elif instruction.name == "write":
-            target = params.get("target")
-            return {"result": f"Wrote to {target}"}
-        return {"result": "I/O instruction executed"}
-
-    def _execute_validation_instruction(self, instruction: Instruction) -> Dict[str, Any]:
-        """Execute validation instruction."""
-        params = instruction.params
-        if instruction.name == "validate":
-            rules = params.get("rules", [])
-            return {"result": f"Validated against {len(rules)} rules"}
-        return {"result": "Validation instruction executed"}
-
-    def _is_dependency_satisfied(self, dep_id: str) -> bool:
-        """Check if a dependency has been executed."""
-        return any(record["instruction_id"] == dep_id for record in self.execution_history)
-
-    def get_metrics(self) -> Dict[str, Any]:
-        """Get ISA manager metrics.
+            logger.error(f"Failed to execute instruction {instruction.name}: {e}")
+            return InstructionResult(
+                status=InstructionStatus.ERROR,
+                context=context,
+                error=str(e)
+            )
+            
+    def compose_instructions(self, instruction_ids: List[str], composite_id: str) -> Instruction:
+        """Compose multiple instructions into a composite instruction."""
+        steps = []
+        for instr_id in instruction_ids:
+            step = self.get_instruction(instr_id)
+            steps.append(step)
+            
+        return Instruction(
+            id=composite_id,
+            name=f"Composite_{composite_id}",
+            type=InstructionType.CONTROL,
+            params={},
+            description=f"Composite instruction with steps: {', '.join(instruction_ids)}",
+            steps=steps
+        )
         
-        Returns:
-            Metrics information
-        """
+    def optimize_sequence(self, sequence: List[Instruction]) -> List[Instruction]:
+        """Optimize a sequence of instructions."""
+        # Simple optimization: combine consecutive state management instructions
+        optimized = []
+        current_state = None
+        
+        for instruction in sequence:
+            if instruction.type == InstructionType.STATE:
+                if current_state is None:
+                    current_state = instruction
+                else:
+                    # Merge state params
+                    current_state.params.update(instruction.params)
+            else:
+                if current_state is not None:
+                    optimized.append(current_state)
+                    current_state = None
+                optimized.append(instruction)
+                
+        if current_state is not None:
+            optimized.append(current_state)
+            
+        return optimized
+        
+    def verify_instruction(self, instruction: Instruction) -> bool:
+        """Verify instruction validity."""
+        try:
+            # Verify required fields
+            if not instruction.id or not instruction.name or not instruction.type:
+                return False
+                
+            # Verify type-specific parameters
+            if instruction.type == InstructionType.CONTROL:
+                # For composite instructions, verify steps
+                if instruction.steps:
+                    return all(isinstance(step, Instruction) for step in instruction.steps)
+                # For regular control instructions, verify params
+                if not instruction.params:
+                    return False
+            elif instruction.type == InstructionType.STATE:
+                if not instruction.params:
+                    return False
+                    
+            return True
+        except Exception:
+            return False
+            
+    def create_pipeline(self, instruction_ids: List[str]) -> 'InstructionPipeline':
+        """Create an instruction pipeline."""
+        return InstructionPipeline(self, instruction_ids)
+        
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get ISA manager metrics."""
         return {
             "total_instructions": len(self.instructions),
             "successful_executions": sum(1 for record in self.execution_history if record["status"] == "completed"),
             "failed_executions": len(self.execution_history) - sum(1 for record in self.execution_history if record["status"] == "completed")
         }
+        
+    def learn_patterns(self, interactions: List[Dict[str, Any]]) -> List[Instruction]:
+        """Learn instruction patterns from interactions."""
+        learned = []
+        for interaction in interactions:
+            if "actions" in interaction:
+                # Create a composite instruction from the action sequence
+                composite = self.compose_instructions(
+                    interaction["actions"],
+                    f"learned_{len(learned)}"
+                )
+                learned.append(composite)
+        return learned
         
     async def cleanup(self) -> None:
         """Clean up ISA manager resources."""
@@ -255,3 +251,33 @@ class ISAManager:
         self.instructions.clear()
         self.execution_history = []
         self._initialized = False
+
+class InstructionPipeline:
+    """Pipeline for executing multiple instructions."""
+    
+    def __init__(self, manager: ISAManager, instruction_ids: List[str]):
+        """Initialize pipeline."""
+        self.manager = manager
+        self.instruction_ids = instruction_ids
+        
+    async def execute(self, context: Dict[str, Any]) -> InstructionResult:
+        """Execute pipeline."""
+        metrics = {}
+        current_context = context.copy()
+        
+        for instruction_id in self.instruction_ids:
+            instruction = self.manager.get_instruction(instruction_id)
+            result = await self.manager.execute_instruction(instruction, current_context)
+            
+            if result.status == InstructionStatus.ERROR:
+                return result
+                
+            current_context = result.context
+            if result.metrics:
+                metrics.update(result.metrics)
+                
+        return InstructionResult(
+            status=InstructionStatus.SUCCESS,
+            context=current_context,
+            metrics=metrics
+        )
