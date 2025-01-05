@@ -42,6 +42,13 @@ class ELL2AIntegration:
         self._messages = []
         self._metrics = {}
     
+    def cleanup(self):
+        """Reset ELL2A integration state."""
+        self._workflows.clear()
+        self._messages.clear()
+        self._metrics.clear()
+        self.ell.clear_history()
+        
     def configure(self, config: Dict[str, Any]) -> None:
         """Configure ELL2A integration.
         
@@ -90,9 +97,9 @@ class ELL2AIntegration:
             Mode-specific configuration
         """
         base_config = {
-            "model": self.config["default_model"],
-            "max_tokens": self.config["max_tokens"],
-            "temperature": self.config["temperature"]
+            "model": self.config.get("model", self.config["default_model"]),
+            "max_tokens": self.config.get("max_tokens", 2000),
+            "temperature": self.config.get("temperature", 0.7)
         }
         mode_config = self.config.get(mode, {})
         return {**base_config, **mode_config}
@@ -193,21 +200,63 @@ class ELL2AIntegration:
             async def wrapper(*args, **kwargs):
                 ell2a = ELL2AIntegration()
                 config = ell2a.get_mode_config(mode)
+                func_name = func.__name__
                 
-                # Create message from function call
-                message = Message(
-                    role=MessageRole.USER,
-                    content=str(args[0]) if args else "",
-                    metadata={
-                        "mode": mode,
-                        "function": func.__name__,
-                        **kwargs
+                # Initialize metrics for function if not exists
+                if func_name not in ell2a._metrics:
+                    ell2a._metrics[func_name] = {
+                        "calls": 0,
+                        "total_time": 0.0,
+                        "errors": 0
                     }
-                )
                 
-                # Process with ELL2A
-                result = await ell2a.process_message(message)
-                return {"result": result.content}
+                try:
+                    # Execute original function
+                    result = await func(*args, **kwargs)
+                    
+                    # Update metrics
+                    ell2a._metrics[func_name]["calls"] += 1
+                    
+                    # Create message from function result
+                    message = Message(
+                        role=MessageRole.USER,
+                        content=str(result),
+                        metadata={
+                            "mode": mode,
+                            "function": func_name,
+                            "status": "success",
+                            **kwargs
+                        }
+                    )
+                    
+                    # Process with ELL2A
+                    processed = await ell2a.process_message(message)
+                    
+                    # Return original result
+                    return result
+                    
+                except Exception as e:
+                    # Update error metrics
+                    ell2a._metrics[func_name]["errors"] += 1
+                    
+                    # Create error message
+                    message = Message(
+                        role=MessageRole.USER,
+                        content=str(e),
+                        metadata={
+                            "mode": mode,
+                            "function": func_name,
+                            "status": "error",
+                            "error": str(e),
+                            **kwargs
+                        }
+                    )
+                    
+                    # Process error with ELL2A
+                    await ell2a.process_message(message)
+                    
+                    # Re-raise the original exception
+                    raise
                 
             return wrapper
         return decorator
