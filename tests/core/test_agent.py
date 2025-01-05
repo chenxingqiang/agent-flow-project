@@ -101,6 +101,7 @@ def agent_config():
             name="gpt-3.5-turbo"
         ),
         workflow=WorkflowConfig(
+            id="test-workflow-id",
             name="test-workflow",
             max_iterations=10,
             timeout=3600

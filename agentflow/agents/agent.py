@@ -86,6 +86,8 @@ class Agent(BaseModel):
         self.errors.append(error_msg)
         if len(self.errors) > self.max_errors:
             self.errors = self.errors[-self.max_errors:]
+        self.state.last_error = error_msg
+        self.state.status = AgentStatus.FAILED
     
     @property
     def client(self) -> Any:
@@ -246,55 +248,52 @@ class Agent(BaseModel):
                 content=message
             )
             
-            # Process with ELL2A
-            response = await self._ell2a.process_message(ell2a_message)
-            
-            # Add to history
+            # Add message to history
             self.history.append({
                 "role": "user",
                 "content": message
             })
+            
+            # Process with ELL2A
+            response = await self._ell2a.process_message(ell2a_message)
+            
+            # Add response to history
             self.history.append({
-                "role": "assistant", 
+                "role": "assistant",
                 "content": response.content
             })
             
+            # Update state
             self.state.messages_processed += 1
             self.state.status = AgentStatus.IDLE
+            
             return response.content
             
         except Exception as e:
             error_msg = str(e)
-            self.state.status = AgentStatus.FAILED
-            self.state.last_error = error_msg
-            
-            # Add error to list with limit enforcement
             self.add_error(error_msg)
-            
             raise
             
     async def cleanup(self) -> None:
-        """Clean up agent resources."""
-        try:
-            if self._initialized:
-                # Reset error tracking
-                self.errors = []
-                self.state.last_error = None
-                
-                if self._instruction_selector:
-                    await self._instruction_selector.cleanup()
-                    self._instruction_selector = None
-                    
-                if self._ell2a:
-                    await self._ell2a.cleanup()
-                    self._ell2a = None
-                    
-                self._initialized = False
-                
-                # Set status to TERMINATED only if not in test mode
-                if not self.metadata.get("test_mode"):
-                    self.state.status = AgentStatus.TERMINATED
-                
-        except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
-            raise
+        """Cleanup agent resources."""
+        if self._ell2a:
+            await self._ell2a.cleanup()
+        
+        if self._isa_manager:
+            await self._isa_manager.cleanup()
+            
+        if self._instruction_selector:
+            await self._instruction_selector.cleanup()
+            
+        self._initialized = False
+        self.state.status = AgentStatus.TERMINATED
+        
+    def __aiter__(self):
+        """Return async iterator."""
+        return self
+        
+    async def __anext__(self):
+        """Return next value from async iterator."""
+        if not self._initialized:
+            await self.initialize()
+        return self
