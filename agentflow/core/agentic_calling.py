@@ -35,6 +35,7 @@ class ExecutionResult:
     error_message: Optional[str] = None
     preserved_context: Optional[ContextPreservation] = None
     has_recovery_options: bool = False
+    metrics: Optional[Dict[str, Any]] = None
 
 @dataclass
 class PerformanceMetrics:
@@ -103,10 +104,13 @@ class AgentInstruction:
             # Execute function
             result = await self._func(**kwargs)
 
+            # Calculate execution time
+            execution_time = time.time() - start_time
+
             # Update metrics
             self._metrics.total_executions += 1
             self._metrics.successful_executions += 1
-            self._metrics.total_latency += time.time() - start_time
+            self._metrics.total_latency += execution_time
 
             # Always preserve context
             preserved_context = ContextPreservation(
@@ -117,20 +121,25 @@ class AgentInstruction:
 
             return ExecutionResult(
                 value=result,
-                preserved_context=preserved_context
+                preserved_context=preserved_context,
+                metrics={"execution_time": execution_time}
             )
 
         except Exception as e:
+            # Calculate execution time
+            execution_time = time.time() - start_time
+
             # Update metrics
             self._metrics.total_executions += 1
             self._metrics.failed_executions += 1
-            self._metrics.total_latency += time.time() - start_time
+            self._metrics.total_latency += execution_time
 
             return ExecutionResult(
                 value=None,
                 status="error",
                 error_message=str(e),
-                has_recovery_options=True
+                has_recovery_options=True,
+                metrics={"execution_time": execution_time}
             )
 
     def get_performance_metrics(self) -> PerformanceMetrics:
