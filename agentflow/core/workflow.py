@@ -1,46 +1,44 @@
-"""Workflow engine module."""
+"""Base workflow module."""
 
-from typing import Dict, Any, Optional
-import uuid
-import asyncio
+from typing import Dict, Any, Optional, List, TYPE_CHECKING
 import logging
+import asyncio
+import uuid
+from dataclasses import dataclass
+from datetime import datetime
 
-from .workflow_base import WorkflowBase
-from ..ell2a.integration import ELL2AIntegration
-from ..core.instruction_selector import InstructionSelector
-from ..core.isa.isa_manager import ISAManager
 from .types import AgentStatus
+from ..ell2a.integration import ELL2AIntegration
+from ..ell2a.types.message import Message, MessageRole
+from .isa.isa_manager import ISAManager
+from .instruction_selector import InstructionSelector
+
+if TYPE_CHECKING:
+    from ..agents.agent import Agent
 
 logger = logging.getLogger(__name__)
 
-class Workflow(WorkflowBase):
-    """Workflow class."""
-    
-    def __init__(self, **data):
-        super().__init__(**data)
-        self._agent = None
-        self._initialized = False
-        
-    @property
-    def agent(self):
-        """Get the agent."""
-        return self._agent
-        
-    @agent.setter
-    def agent(self, value):
-        """Set the agent."""
-        self._agent = value
+@dataclass
+class WorkflowInstance:
+    """Workflow instance class."""
+    id: str
+    agent: 'Agent'
+    status: str = "initialized"
+    error: Optional[str] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    result: Optional[Dict[str, Any]] = None
 
 class WorkflowEngine:
     """Workflow engine class."""
     
     def __init__(self):
         """Initialize workflow engine."""
-        self.workflows: Dict[str, Workflow] = {}
+        self._initialized = False
+        self.workflows: Dict[str, WorkflowInstance] = {}
         self._ell2a: Optional[ELL2AIntegration] = None
         self._isa_manager: Optional[ISAManager] = None
         self._instruction_selector: Optional[InstructionSelector] = None
-        self._initialized: bool = False
     
     async def initialize(self) -> None:
         """Initialize workflow engine."""
@@ -60,7 +58,7 @@ class WorkflowEngine:
             
         self._initialized = True
     
-    async def register_workflow(self, agent: Any) -> str:
+    async def register_workflow(self, agent: 'Agent') -> str:
         """Register a workflow with an agent.
         
         Args:
@@ -72,20 +70,18 @@ class WorkflowEngine:
         if not self._initialized:
             await self.initialize()
             
-        workflow = Workflow(
-            name=f"workflow-{len(self.workflows) + 1}",
-            description=f"Workflow for agent {agent.id}"
+        workflow_id = str(uuid.uuid4())
+        self.workflows[workflow_id] = WorkflowInstance(
+            id=workflow_id,
+            agent=agent
         )
-        workflow.agent = agent
-        self.workflows[workflow.id] = workflow
-        
-        # Initialize agent if needed
-        if not agent._initialized:
-            await agent.initialize()
-            
-        return workflow.id
+        return workflow_id
     
-    async def execute_workflow(self, workflow_id: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_workflow(
+        self,
+        workflow_id: str,
+        input_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Execute a workflow.
         
         Args:
@@ -93,62 +89,100 @@ class WorkflowEngine:
             input_data: Input data for workflow
             
         Returns:
-            Workflow execution result
+            Execution result
             
         Raises:
-            ValueError: If workflow not found
             Exception: If workflow execution fails
         """
+        if not self._initialized:
+            await self.initialize()
+            
         if workflow_id not in self.workflows:
-            raise ValueError(f"Workflow not found: {workflow_id}")
+            raise ValueError(f"Workflow {workflow_id} not found")
             
         workflow = self.workflows[workflow_id]
+        workflow.start_time = datetime.now()
+        workflow.status = "running"
         
         try:
+            # Create message from input data
+            message = input_data.get("message", "")
+            if not isinstance(message, str):
+                message = str(message)
+                
             # Process message with agent
-            response = await workflow.agent.process_message(input_data.get("message", ""))
+            result = await workflow.agent.process_message(message)
             
-            return {
+            # Create response
+            response = {
                 "workflow_id": workflow_id,
-                "content": response,
-                "status": workflow.agent.state.status.value
+                "content": result,
+                "status": "success",
+                "timestamp": datetime.now().isoformat()
             }
             
+            workflow.status = "completed"
+            workflow.end_time = datetime.now()
+            workflow.result = response
+            return response
+            
         except Exception as e:
-            logger.error(f"Error executing workflow {workflow_id}: {str(e)}")
-            workflow.agent.state.status = AgentStatus.FAILED
+            error_msg = str(e)
+            workflow.status = "failed"
+            workflow.error = error_msg
+            workflow.end_time = datetime.now()
             raise
     
+    async def get_workflow_status(self, workflow_id: str) -> Dict[str, Any]:
+        """Get workflow status.
+        
+        Args:
+            workflow_id: Workflow ID
+            
+        Returns:
+            Status information
+        """
+        if workflow_id not in self.workflows:
+            raise ValueError(f"Workflow {workflow_id} not found")
+            
+        workflow = self.workflows[workflow_id]
+        return {
+            "id": workflow.id,
+            "status": workflow.status,
+            "error": workflow.error,
+            "start_time": workflow.start_time.isoformat() if workflow.start_time else None,
+            "end_time": workflow.end_time.isoformat() if workflow.end_time else None,
+            "agent_status": workflow.agent.state.status.value
+        }
+    
     async def cleanup(self) -> None:
-        """Cleanup workflow engine resources."""
-        try:
-            # Store components for cleanup
-            instruction_selector = self._instruction_selector
-            isa_manager = self._isa_manager
-            ell2a = self._ell2a
+        """Clean up workflow engine resources."""
+        if not self._initialized:
+            return
             
-            # Cleanup all workflows
-            for workflow in self.workflows.values():
-                await workflow.agent.cleanup()
-                
-            self.workflows.clear()
+        # Clean up workflows
+        for workflow in self.workflows.values():
+            await workflow.agent.cleanup()
+        self.workflows.clear()
+        
+        # Clean up components
+        if self._ell2a:
+            await self._ell2a.cleanup()
             
-            # Cleanup components
-            if instruction_selector:
-                await instruction_selector.cleanup()
-                
-            if isa_manager:
-                await isa_manager.cleanup()
-                
-            if ell2a:
-                await ell2a.cleanup()
-                
-            # Clear component references
-            self._instruction_selector = None
-            self._isa_manager = None
-            self._ell2a = None
-            self._initialized = False
+        if self._isa_manager:
+            await self._isa_manager.cleanup()
             
-        except Exception as e:
-            logger.error(f"Error during workflow engine cleanup: {str(e)}")
-            raise
+        if self._instruction_selector:
+            await self._instruction_selector.cleanup()
+            
+        self._initialized = False
+    
+    def __aiter__(self):
+        """Return async iterator."""
+        return self
+        
+    async def __anext__(self):
+        """Return next value from async iterator."""
+        if not self._initialized:
+            await self.initialize()
+        return self

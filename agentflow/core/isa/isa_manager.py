@@ -6,6 +6,9 @@ from enum import Enum
 from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 class InstructionType(Enum):
     """Types of instructions."""
@@ -226,3 +229,29 @@ class ISAManager:
     def _is_dependency_satisfied(self, dep_id: str) -> bool:
         """Check if a dependency has been executed."""
         return any(record["instruction_id"] == dep_id for record in self.execution_history)
+
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get ISA manager metrics.
+        
+        Returns:
+            Metrics information
+        """
+        return {
+            "total_instructions": len(self.instructions),
+            "successful_executions": sum(1 for record in self.execution_history if record["status"] == "completed"),
+            "failed_executions": len(self.execution_history) - sum(1 for record in self.execution_history if record["status"] == "completed")
+        }
+        
+    async def cleanup(self) -> None:
+        """Clean up ISA manager resources."""
+        if not self._initialized:
+            return
+            
+        # Clean up instructions
+        for instruction in self.instructions.values():
+            if hasattr(instruction, "cleanup") and callable(instruction.cleanup):
+                await instruction.cleanup()
+                
+        self.instructions.clear()
+        self.execution_history = []
+        self._initialized = False
