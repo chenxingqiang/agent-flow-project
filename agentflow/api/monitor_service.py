@@ -94,9 +94,9 @@ class MonitorService:
             for websocket in self._connections[agent_id]:
                 try:
                     await websocket.send_json(message)
-                except:
+                except Exception:
                     dead_connections.append(websocket)
-                    logger.warning(f"Failed to send message to websocket")
+                    logger.warning("Failed to send message to websocket")
                     
             # Clean up dead connections
             for websocket in dead_connections:

@@ -1,148 +1,149 @@
-"""Base classes for the agent framework."""
+"""Base classes for AgentFlow components."""
 
-from typing import Dict, Any, Optional, Union, List, Callable, Type
-from enum import Enum
-import logging
-import asyncio
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel as PydanticBaseModel
+import uuid
 
-from .config import AgentConfig
+class BaseComponent(PydanticBaseModel, ABC):
+    """Base component class for all AgentFlow components."""
+    
+    id: str
+    name: str
+    description: Optional[str] = None
+    metadata: Dict[str, Any] = {}
+    
+    @abstractmethod
+    async def initialize(self) -> None:
+        """Initialize the component."""
+        pass
+    
+    @abstractmethod
+    async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute the component logic."""
+        pass
+    
+    def get_state(self) -> Dict[str, Any]:
+        """Get component state."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "metadata": self.metadata
+        }
 
-logger = logging.getLogger(__name__)
+class BaseAgent(BaseComponent):
+    """Base agent class."""
+    
+    type: str = "agent"
+    capabilities: List[str] = []
+    
+    @abstractmethod
+    async def plan(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Plan agent actions."""
+        pass
+    
+    @abstractmethod
+    async def act(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute agent actions."""
+        pass
+    
+    @abstractmethod
+    async def observe(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Observe environment."""
+        pass
 
-class TransformationPipeline:
-    def __init__(self):
-        """Initialize transformation pipeline."""
-        self.strategies = []
+class BaseModel(BaseComponent):
+    """Base model class."""
     
-    def add_strategy(self, strategy):
-        """Add a transformation strategy to the pipeline."""
-        self.strategies.append(strategy)
+    type: str = "model"
+    provider: str
+    version: str
     
-    def transform(self, data):
-        """Apply all transformation strategies in sequence."""
-        transformed_data = data
-        for strategy in self.strategies:
-            transformed_data = strategy.transform(transformed_data)
-        return transformed_data
+    @abstractmethod
+    async def predict(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Make predictions."""
+        pass
+    
+    @abstractmethod
+    async def train(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Train the model."""
+        pass
+    
+    @abstractmethod
+    def save(self, path: str) -> None:
+        """Save model state."""
+        pass
+    
+    @abstractmethod
+    def load(self, path: str) -> None:
+        """Load model state."""
+        pass
 
-class AgentTransformationMixin:
-    """Mixin class to add transformation capabilities to agents."""
+class BaseWorkflow(BaseComponent):
+    """Base workflow class."""
     
-    def __init__(self, *args, **kwargs):
-        """Initialize transformation-related attributes."""
-        super().__init__(*args, **kwargs)
-        
-        # Initialize transformation pipelines
-        self.input_transformation_pipeline = TransformationPipeline()
-        self.output_transformation_pipeline = TransformationPipeline()
+    type: str = "workflow"
+    steps: List[Dict[str, Any]] = []
     
-    def configure_input_transformation(self, strategies: Optional[List[Dict[str, Any]]] = None):
-        """Configure input transformation strategies."""
-        if strategies:
-            for strategy_config in strategies:
-                strategy = self._create_transformation_strategy(strategy_config)
-                self.input_transformation_pipeline.add_strategy(strategy)
-    
-    def configure_output_transformation(self, strategies: Optional[List[Dict[str, Any]]] = None):
-        """Configure output transformation strategies."""
-        if strategies:
-            for strategy_config in strategies:
-                strategy = self._create_transformation_strategy(strategy_config)
-                self.output_transformation_pipeline.add_strategy(strategy)
-    
-    def transform_input(self, input_data: Any) -> Any:
-        """Transform input data using configured pipeline."""
-        return self.input_transformation_pipeline.transform(input_data)
-    
-    def transform_output(self, output_data: Any) -> Any:
-        """Transform output data using configured pipeline."""
-        return self.output_transformation_pipeline.transform(output_data)
-    
-    def _create_transformation_strategy(self, strategy_config: Dict[str, Any]):
-        """Create a transformation strategy from configuration."""
-        from ..transformations.advanced_strategies import (
-            OutlierRemovalStrategy,
-            FeatureEngineeringStrategy,
-            TextTransformationStrategy
+    def __init__(self, config: Dict[str, Any]):
+        """Initialize workflow."""
+        super().__init__(
+            id=config.get("id", str(uuid.uuid4())),
+            name=config.get("name", "default"),
+            description=config.get("description"),
+            metadata=config.get("metadata", {})
         )
-        
-        strategy_type = strategy_config['type']
-        params = strategy_config.get('params', {})
-        
-        strategy_map = {
-            'outlier_removal': OutlierRemovalStrategy,
-            'feature_engineering': FeatureEngineeringStrategy,
-            'text_transformation': TextTransformationStrategy
-        }
-        
-        strategy_class = strategy_map.get(strategy_type)
-        if not strategy_class:
-            raise ValueError(f"Unknown transformation strategy type: {strategy_type}")
-        
-        return strategy_class(**params)
-
-class AgentBase:
-    """Base class for all agents in the system."""
+        self.steps = config.get("steps", [])
     
-    def __init__(
-        self, 
-        config: Union[Dict[str, Any], 'AgentConfig'], 
-        agent_config_path: Optional[str] = None
-    ):
-        """
-        Initialize base agent with configuration.
+    async def initialize(self) -> None:
+        """Initialize workflow."""
+        # Validate steps
+        if not self.steps:
+            raise ValueError("Workflow must have at least one step")
         
-        Args:
-            config: Agent configuration dictionary or object
-            agent_config_path: Optional path to configuration file
-        """
-        # Normalize config to dictionary
-        if not isinstance(config, dict):
-            # Convert Pydantic model to dictionary
-            config_dict = config.model_dump() if hasattr(config, 'model_dump') else config.__dict__
+        # Initialize each step
+        for step in self.steps:
+            if "id" not in step:
+                step["id"] = str(uuid.uuid4())
+    
+    async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute workflow."""
+        results = {}
+        
+        for step in self.steps:
+            step_result = await self.run_step(step, context)
+            context.update(step_result)
+            results[step["id"]] = step_result
+        
+        return results
+    
+    async def run_step(self, step: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Run a workflow step."""
+        step_type = step.get("type")
+        if not step_type:
+            raise ValueError(f"Step {step['id']} must have a type")
+        
+        # Execute step based on type
+        if step_type == "agent":
+            return await self._run_agent_step(step, context)
+        elif step_type == "function":
+            return await self._run_function_step(step, context)
         else:
-            config_dict = config
-        
-        # Store full configuration
-        self.config = config_dict
-        
-        # Configuration path
-        self.agent_config_path = agent_config_path
-        
-        # Initialize other attributes
-        self.id = config_dict.get('id')
-        
-        # Initialize metrics
-        self.metrics = {
-            'execution_time': 0,
-            'memory_usage': 0,
-            'performance_metrics': {}
-        }
-        
-        # List to store sub-agents
-        self.agents = []
+            raise ValueError(f"Unknown step type: {step_type}")
     
-    def add_agent(self, agent: 'AgentBase'):
-        """Add a sub-agent to this agent."""
-        self.agents.append(agent)
+    async def _run_agent_step(self, step: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Run an agent step."""
+        agent = step.get("agent")
+        if not agent:
+            raise ValueError(f"Agent step {step['id']} must have an agent")
+        
+        return await agent.execute(context)
     
-    def remove_agent(self, agent: 'AgentBase'):
-        """Remove a sub-agent from this agent."""
-        self.agents.remove(agent)
-    
-    @classmethod
-    def from_config(cls, config_path: str) -> 'AgentBase':
-        """Create an agent from a configuration file."""
-        import json
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-        return cls(config)
-
-class ConfigurationType(str, Enum):
-    """Agent configuration types."""
-    RESEARCH = "RESEARCH"
-    DATA_SCIENCE = "DATA_SCIENCE"
-    DOMAIN_SPECIFIC = "DOMAIN_SPECIFIC"
-    TECHNICAL = "TECHNICAL"
-    GENERIC = "GENERIC"
-    CREATIVE = "CREATIVE"
+    async def _run_function_step(self, step: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Run a function step."""
+        func = step.get("function")
+        if not func:
+            raise ValueError(f"Function step {step['id']} must have a function")
+        
+        return await func(context)

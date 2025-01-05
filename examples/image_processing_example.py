@@ -1,6 +1,6 @@
 from PIL import Image
 import torch
-from agentflow.core.agent import Agent, AgentConfig
+from agentflow.agents.agent import Agent, AgentConfig
 from agentflow.core.instructions.advanced import ImageProcessingInstruction
 from agentflow.core.isa_manager import ISAManager
 import logging

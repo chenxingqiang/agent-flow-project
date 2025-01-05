@@ -3,6 +3,8 @@ from typing import Dict, List, Optional, Set, Tuple, Any, Callable
 from dataclasses import dataclass
 from enum import Enum
 import numpy as np
+from pydantic import BaseModel, Field
+import uuid
 
 class InstructionType(Enum):
     """Types of formal instructions."""
@@ -52,35 +54,43 @@ class OptimizationHint:
     deadline: Optional[float] = None
     locality: Optional[str] = None
 
-class FormalInstruction:
-    """Advanced formal instruction."""
-    
-    def __init__(self,
-                 id: str,
-                 name: str,
-                 type: Optional[InstructionType] = None,
-                 code: Optional[str] = None,
-                 params: Optional[Dict[str, Any]] = None,
-                 metadata: Optional[Dict[str, Any]] = None):
-        self.id = id
-        self.name = name
-        self.type = type or InstructionType.CONTROL
-        self.code = code
-        self.params = params or {}
-        self.metadata = metadata or {}
-        self.status = InstructionStatus.PENDING
-        self.resources = ResourceRequirement()
-        self.security = SecurityConstraint(
-            access_level="default",
-            permissions=set()
-        )
-        self.optimization = OptimizationHint()
-        self.dependencies: Set[str] = set()
-        self.preconditions: List[Callable] = []
-        self.postconditions: List[Callable] = []
-        self.invariants: List[Callable] = []
-        self.metrics: Dict[str, float] = {}
+class FormalInstruction(BaseModel):
+    """Formal instruction."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # Add id
+    type: InstructionType = Field(default=InstructionType.CONTROL)
+    content: str = Field(default="")
+    params: Dict[str, Any] = Field(default_factory=dict)  # Add params
+    name: str = Field(default="")  # Add name
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    dependencies: List[str] = Field(default_factory=list)
+    timeout: float = Field(default=60.0)
+    max_retries: int = Field(default=3)
+    status: InstructionStatus = Field(default=InstructionStatus.PENDING)
+    resources: ResourceRequirement = Field(default_factory=ResourceRequirement)
+    security: SecurityConstraint = Field(default_factory=lambda: SecurityConstraint(access_level="default", permissions=set()))
+    optimization: OptimizationHint = Field(default_factory=OptimizationHint)
+    preconditions: List[Callable] = Field(default_factory=list)
+    postconditions: List[Callable] = Field(default_factory=list)
+    invariants: List[Callable] = Field(default_factory=list)
+    metrics: Dict[str, float] = Field(default_factory=dict)
+
+    def model_dump(self) -> Dict[str, Any]:
+        """Get instruction as dictionary.
         
+        Returns:
+            Dict[str, Any]: Instruction data.
+        """
+        return {
+            "type": self.type.value,
+            "content": self.content,
+            "parameters": self.parameters,
+            "metadata": self.metadata,
+            "dependencies": self.dependencies,
+            "timeout": self.timeout,
+            "max_retries": self.max_retries
+        }
+
     def execute(self, context: Dict[str, Any]) -> Any:
         """Execute instruction with verification and optimization."""
         try:
@@ -158,10 +168,10 @@ class FormalInstruction:
         
     def _execute_sequential(self, context: Dict[str, Any]) -> Any:
         """Execute in sequential mode."""
-        if self.code:
+        if self.content:
             # Execute code
-            locals_dict = {"context": context, **self.params}
-            exec(self.code, globals(), locals_dict)
+            locals_dict = {"context": context, **self.parameters}
+            exec(self.content, globals(), locals_dict)
             return locals_dict.get("result")
         return None
         
@@ -193,13 +203,13 @@ class FormalInstruction:
         
     def add_dependency(self, instruction_id: str):
         """Add a dependency."""
-        self.dependencies.add(instruction_id)
+        self.dependencies.append(instruction_id)
         
     def remove_dependency(self, instruction_id: str):
         """Remove a dependency."""
-        self.dependencies.discard(instruction_id)
+        self.dependencies.remove(instruction_id)
         
-    def get_dependencies(self) -> Set[str]:
+    def get_dependencies(self) -> List[str]:
         """Get all dependencies."""
         return self.dependencies.copy()
         
@@ -236,8 +246,23 @@ class FormalInstruction:
             resources.add("storage")
         return resources
         
+    def get_parameters(self) -> Dict[str, Any]:
+        """Get instruction parameters."""
+        return self.parameters.copy()
+        
     def requires_ordering(self) -> bool:
         """Check if instruction requires specific ordering."""
         # Instructions that modify state or have side effects require ordering
         return (self.type in {InstructionType.STATE, InstructionType.SECURITY} or
                 self.metadata.get("requires_ordering", False))
+
+class ValidationResult(BaseModel):
+    """Validation result."""
+    type: str = Field(default="STATIC")  # Add type
+    is_valid: bool = Field(default=True)
+    score: float = Field(default=1.0)  # Add score
+    violations: List[str] = Field(default_factory=list)  # Add violations
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+    confidence: float = Field(default=1.0)
+    recommendations: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)

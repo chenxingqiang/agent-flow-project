@@ -1,17 +1,17 @@
-from .core.config import AgentConfig, ModelConfig, WorkflowConfig
-from .core.workflow import BaseWorkflow
-from .core.research_workflow import ResearchWorkflow
-from .core.agentflow import AgentFlow
+"""AgentFlow package."""
 
-__version__ = '0.1.0'
-__author__ = 'Chen Xingqiang'
-__email__ = 'chenxingqiang@gmail.com'
+from .agents.agent import Agent
+from .core.workflow import WorkflowEngine
+from .core.config import AgentConfig, ModelConfig, WorkflowConfig
+from .core.types import AgentStatus
+
+__version__ = "0.1.0"
 
 __all__ = [
-    'AgentConfig',
-    'ModelConfig',
-    'WorkflowConfig',
-    'BaseWorkflow',
-    'ResearchWorkflow',
-    'AgentFlow'
-]
+    "Agent",
+    "AgentStatus",
+    "WorkflowEngine",
+    "AgentConfig",
+    "ModelConfig",
+    "WorkflowConfig"
+] 

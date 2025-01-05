@@ -5,6 +5,7 @@ from enum import Enum
 import numpy as np
 from .formal import FormalInstruction
 from .analyzer import AnalysisResult
+from pydantic import BaseModel, Field, ConfigDict
 
 class StrategyType(Enum):
     """Types of specialized learning strategies."""
@@ -46,12 +47,12 @@ class StrategyConfig:
     ensemble_size: int = 5
     adaptation_rate: float = 0.1
 
-class BaseStrategy:
+class BaseStrategy(BaseModel):
     """Base class for learning strategies."""
-    
-    def __init__(self, config: StrategyConfig):
-        self.config = config
-        self.history: List[Dict[str, Any]] = []
+    model_config = ConfigDict(frozen=False, validate_assignment=True)
+
+    config: StrategyConfig
+    history: List[Dict[str, Any]] = Field(default_factory=list)
         
     def train(self,
              instructions: List[FormalInstruction],

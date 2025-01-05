@@ -1,239 +1,309 @@
-"""
-Research Workflow Module for AgentFlow
-"""
+"""Research workflow module."""
 
-from typing import Dict, Any, Optional, Union
-from dataclasses import dataclass, field
-import logging
-from functools import partial
-
-from .base_workflow import BaseWorkflow
-from .config import WorkflowConfig, AgentConfig, ExecutionPolicies
+from typing import Dict, Any, Optional, List
+from dataclasses import dataclass
 import asyncio
+import logging
+from pydantic import BaseModel
+from .workflow import Workflow
+from .node import AgentNode
 
 logger = logging.getLogger(__name__)
 
 @dataclass
-class DistributedStep:
-    """
-    Represents a distributed step in a research workflow
-    """
-    id: str
+class ResearchStep:
+    """Research workflow step."""
     name: str
-    input_type: str
-    output_type: str
-    agents: list = field(default_factory=list)
-    dependencies: list = field(default_factory=list)
-    completed: bool = False
+    description: str
+    inputs: Dict[str, Any]
+    outputs: Dict[str, Any]
+    status: str = "pending"
+    error: Optional[str] = None
+
+@dataclass
+class DistributedConfig:
+    """Configuration for distributed workflow execution."""
+    num_workers: int = 4
+    batch_size: int = 10
+    timeout: float = 30.0
+    retry_limit: int = 3
+    worker_init_timeout: float = 5.0
+
+class ResearchDistributedWorkflow(Workflow):
+    """Distributed workflow implementation for research tasks."""
     
-    def add_agent(self, agent_id: str):
-        """
-        Add an agent to the step
-        
-        Args:
-            agent_id: ID of the agent to add
-        """
-        self.agents.append(agent_id)
+    def __init__(self, name: str, config: Optional[DistributedConfig] = None):
+        super().__init__(name)
+        self.config = config or DistributedConfig()
+        self.worker_pool: List[AgentNode] = []
+        self.task_queue: asyncio.Queue = asyncio.Queue()
+        self.result_queue: asyncio.Queue = asyncio.Queue()
+        self.is_running: bool = False
+        self.workers_initialized: bool = False
     
-    def mark_completed(self):
-        """
-        Mark the step as completed
-        """
-        self.completed = True
-
-class ResearchWorkflow(BaseWorkflow):
-    """
-    Specialized workflow for research-oriented tasks
-    """
-    
-    def __init__(
-        self, 
-        workflow_def: Union[Dict[str, Any], WorkflowConfig]
-    ):
-        """
-        Initialize a research workflow
-        
-        Args:
-            workflow_def: Workflow configuration or dict
-        """
-        # Convert dict to WorkflowConfig if needed
-        if isinstance(workflow_def, dict):
-            workflow_def = WorkflowConfig(
-                id=workflow_def.get('name', 'research_workflow'),
-                name=workflow_def.get('name', 'Research Workflow'),
-                description=workflow_def.get('description', ''),
-                agents=workflow_def.get('agents', []),
-                execution_policies=ExecutionPolicies(**workflow_def.get('execution_policies', {}))
-            )
-
-        super().__init__(workflow_def)
-        self.research_steps: list = []
-        self.agents: list = []
-        
-        # Set error_handling to an empty dictionary
-        self.error_handling = {}
-
-        # Initialize agents from config
-        if workflow_def.agents:
-            from .agent import Agent
-            for agent_config in workflow_def.agents:
-                agent = Agent(config=agent_config)
-                self.agents.append(agent)
-
-        # Initialize research steps from config
-        if workflow_def.execution_policies and workflow_def.execution_policies.steps:
-            for step in workflow_def.execution_policies.steps:
-                self.add_research_step(DistributedStep(
-                    id=str(step.get('step', 1)),
-                    name=step.get('name', f'Step {step.get("step", 1)}'),
-                    input_type=step.get('input_type', 'dict'),
-                    output_type=step.get('output_type', 'dict'),
-                    agents=step.get('agents', [])
-                ))
-
-    def add_research_step(self, step: DistributedStep):
-        """Add a research step to the workflow"""
-        self.research_steps.append(step)
-
-    async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Execute the research workflow
-        
-        Args:
-            input_data: Input data for the workflow
-        
-        Returns:
-            Dict containing the workflow results
-        """
-        results = {}
-        current_input = input_data.copy()
-
-        # Use a semaphore to control concurrency
-        semaphore = asyncio.Semaphore(min(len(self.research_steps), 4))
-
-        # Prepare tasks for each step
-        step_tasks = []
-        for step in self.research_steps:
-            # Create agents for this step if needed
-            if not step.agents:
-                step.agents = self.agents
-
-            # Create a task for each step
-            task = self._execute_step_with_semaphore(semaphore, step, current_input)
-            step_tasks.append(task)
-
-        # Execute steps concurrently
-        step_results = await asyncio.gather(*step_tasks)
-
-        # Process results
-        for step, step_result in zip(self.research_steps, step_results):
-            # Store the result
-            results[f'step_{step.id}_result'] = step_result
+    async def initialize_workers(self) -> None:
+        """Initialize the worker pool."""
+        if self.workers_initialized:
+            return
             
-            # Update current input for next step
-            if isinstance(step_result, dict):
-                current_input.update(step_result)
-            else:
-                current_input[f'step_{step.id}_output'] = step_result
-
-            step.mark_completed()
-
-        return results
-
-    async def _execute_step_with_semaphore(self, semaphore: asyncio.Semaphore, 
-                                           step: DistributedStep, 
-                                           input_data: Dict[str, Any]) -> Any:
-        """
-        Execute a step with concurrency control
-        
-        Args:
-            semaphore: Concurrency control semaphore
-            step: The step to execute
-            input_data: Input data for the step
-        
-        Returns:
-            Result of the step execution
-        """
-        async with semaphore:
+        for i in range(self.config.num_workers):
+            worker = AgentNode(f"worker_{i}", f"Worker node {i}")
             try:
-                # Add a small delay to prevent overwhelming the system
-                await asyncio.sleep(0.01)
-                
-                # Execute the step
-                return await self._execute_step(step, input_data)
+                await asyncio.wait_for(
+                    worker.initialize(),
+                    timeout=self.config.worker_init_timeout
+                )
+                self.worker_pool.append(worker)
+            except asyncio.TimeoutError:
+                logger.error(f"Worker {i} initialization timed out")
             except Exception as e:
-                # Log the error and re-raise
-                print(f"Error in step {step.id}: {str(e)}")
-                raise
-
-    async def _execute_step(self, step: DistributedStep, input_data: Dict[str, Any]) -> Any:
-        """
-        Execute a single step in the workflow
+                logger.error(f"Failed to initialize worker {i}: {str(e)}")
         
-        Args:
-            step: The step to execute
-            input_data: Input data for the step
-            
-        Returns:
-            Result of the step execution
-        """
-        # Execute the step using the execute_step method
+        self.workers_initialized = True
+    
+    async def process_batch(self, worker: AgentNode, batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Process a batch of tasks using a worker node."""
         try:
-            result = await self.execute_step(step.id, input_data)
-            step.completed = True
+            results = []
+            for task in batch:
+                result = await asyncio.wait_for(
+                    worker.process_task(task),
+                    timeout=self.config.timeout
+                )
+                results.append(result)
+            return results
+        except asyncio.TimeoutError:
+            logger.error(f"Batch processing timed out for worker {worker.name}")
+            return [{"status": "error", "error": "timeout"} for _ in batch]
+        except Exception as e:
+            logger.error(f"Error processing batch on worker {worker.name}: {str(e)}")
+            return [{"status": "error", "error": str(e)} for _ in batch]
+    
+    async def worker_loop(self, worker: AgentNode) -> None:
+        """Main loop for a worker node."""
+        while self.is_running:
+            try:
+                # Get batch of tasks
+                batch = []
+                for _ in range(self.config.batch_size):
+                    try:
+                        task = await asyncio.wait_for(
+                            self.task_queue.get(),
+                            timeout=1.0
+                        )
+                        batch.append(task)
+                    except asyncio.TimeoutError:
+                        break
+                
+                if not batch:
+                    continue
+                
+                # Process batch
+                results = await self.process_batch(worker, batch)
+                
+                # Put results in queue
+                for result in results:
+                    await self.result_queue.put(result)
+                    
+            except Exception as e:
+                logger.error(f"Error in worker loop for {worker.name}: {str(e)}")
+    
+    async def start(self) -> None:
+        """Start the distributed workflow."""
+        await self.initialize_workers()
+        if not self.worker_pool:
+            raise RuntimeError("No workers available")
+        
+        self.is_running = True
+        worker_tasks = [
+            asyncio.create_task(self.worker_loop(worker))
+            for worker in self.worker_pool
+        ]
+        
+        await asyncio.gather(*worker_tasks)
+    
+    async def stop(self) -> None:
+        """Stop the distributed workflow."""
+        self.is_running = False
+        for worker in self.worker_pool:
+            await worker.cleanup()
+        self.worker_pool.clear()
+        self.workers_initialized = False
+    
+    async def submit_task(self, task: Dict[str, Any]) -> None:
+        """Submit a task to the workflow."""
+        if not self.is_running:
+            raise RuntimeError("Workflow is not running")
+        await self.task_queue.put(task)
+    
+    async def get_result(self) -> Dict[str, Any]:
+        """Get a result from the workflow."""
+        if not self.is_running:
+            raise RuntimeError("Workflow is not running")
+        return await self.result_queue.get()
+    
+    async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute the workflow with the given context."""
+        if not self.is_running:
+            await self.start()
+        
+        try:
+            await self.submit_task(context)
+            result = await self.get_result()
             return result
         except Exception as e:
-            logger.error(f"Error in step {step.id}: {str(e)}")
-            raise
+            logger.error(f"Error executing workflow: {str(e)}")
+            return {
+                "status": "error",
+                "error": str(e)
+            }
 
-    async def execute_step(self, step_id: str, input_data: Dict[str, Any]) -> Any:
-        """
-        Execute a single step in the workflow. This method should be overridden by subclasses.
-
-        Args:
-            step_id: ID of the step to execute
-            input_data: Input data for the step
-
-        Returns:
-            Result of the step execution
-        """
-        raise NotImplementedError("execute_step must be implemented by subclass")
-
-    def initialize_state(self):
-        """Initialize workflow state"""
-        super().initialize_state()
-        for step in self.research_steps:
-            step.completed = False
-
-    def get_agent(self, agent_id: str) -> Optional['Agent']:
-        """
-        Get agent by ID
+class ResearchWorkflow:
+    """Research workflow implementation."""
+    
+    def __init__(self, config: BaseModel):
+        """Initialize research workflow.
         
         Args:
-            agent_id: ID of the agent
+            config: Workflow configuration
+        """
+        config_dict = config.model_dump()
+        self.name = config_dict.get("name", "default_research")
+        self.steps: List[ResearchStep] = []
+        self.current_step = 0
+        self.status = "initialized"
+        self.results = {}
+        self.config = config_dict
+        
+    async def execute(self) -> Dict[str, Any]:
+        """Execute research workflow.
+        
+        Returns:
+            Workflow results
+        """
+        self.status = "running"
+        try:
+            while self.current_step < len(self.steps):
+                step = self.steps[self.current_step]
+                try:
+                    # Execute step
+                    await self._execute_step(step)
+                    self.current_step += 1
+                except Exception as e:
+                    step.status = "error"
+                    step.error = str(e)
+                    logger.error(f"Error executing step {step.name}: {e}")
+                    raise
+            
+            self.status = "completed"
+            return self.results
+            
+        except Exception as e:
+            self.status = "error"
+            logger.error(f"Workflow execution failed: {e}")
+            raise
+    
+    async def _execute_step(self, step: ResearchStep):
+        """Execute a single workflow step.
+        
+        Args:
+            step: Workflow step to execute
+        """
+        logger.info(f"Executing step: {step.name}")
+        step.status = "running"
+        
+        try:
+            # Process step inputs
+            processed_inputs = await self._process_inputs(step.inputs)
+            
+            # Execute step logic
+            outputs = await self._process_step(step.name, processed_inputs)
+            
+            # Update step outputs and status
+            step.outputs = outputs
+            step.status = "completed"
+            
+            # Update workflow results
+            self.results[step.name] = outputs
+            
+        except Exception as e:
+            step.status = "error"
+            step.error = str(e)
+            raise
+    
+    async def _process_inputs(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Process step inputs.
+        
+        Args:
+            inputs: Step inputs
             
         Returns:
-            Agent if found, None otherwise
+            Processed inputs
         """
-        return next((agent for agent in self.agents if agent.id == agent_id), None)
+        processed = {}
+        for key, value in inputs.items():
+            if isinstance(value, str) and value.startswith("$"):
+                # Reference to previous step output
+                step_name = value[1:].split(".")[0]
+                if step_name in self.results:
+                    processed[key] = self.results[step_name]
+                else:
+                    raise ValueError(f"Referenced step {step_name} not found in results")
+            else:
+                processed[key] = value
+        return processed
     
-    def get_workflow_status(self) -> Dict[str, Any]:
-        """
-        Get current workflow status
+    async def _process_step(self, step_name: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a workflow step.
         
+        Args:
+            step_name: Name of the step
+            inputs: Processed step inputs
+            
         Returns:
-            Workflow status dictionary
+            Step outputs
         """
+        # TODO: Implement actual step processing logic
         return {
-            "total_steps": len(self.research_steps),
-            "completed_steps": len([step for step in self.research_steps if step.completed]),
-            "agents": [agent.id for agent in self.agents]
+            "status": "success",
+            "step": step_name,
+            "inputs": inputs,
+            "output": f"Processed {step_name}"
         }
     
-    def stop(self):
+    def add_step(self, name: str, description: str, inputs: Dict[str, Any]):
+        """Add a step to the workflow.
+        
+        Args:
+            name: Step name
+            description: Step description
+            inputs: Step inputs
         """
-        Stop the research workflow
+        step = ResearchStep(
+            name=name,
+            description=description,
+            inputs=inputs,
+            outputs={}
+        )
+        self.steps.append(step)
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get workflow status.
+        
+        Returns:
+            Workflow status information
         """
-        # Placeholder implementation for stopping workflow
-        for agent in self.agents:
-            agent.stop()
+        return {
+            "name": self.name,
+            "status": self.status,
+            "current_step": self.current_step,
+            "total_steps": len(self.steps),
+            "steps": [
+                {
+                    "name": step.name,
+                    "status": step.status,
+                    "error": step.error
+                }
+                for step in self.steps
+            ]
+        }

@@ -3,7 +3,7 @@ import logging
 from typing import Optional, Callable, Any
 import backoff
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from agentflow.config import config
+from agentflow.configs import config
 
 logger = logging.getLogger(__name__)
 

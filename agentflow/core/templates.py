@@ -4,29 +4,194 @@ Workflow template management
 
 import os
 import json
-from typing import Dict, List, Optional
-from pydantic import BaseModel, Field
+from typing import Dict, List, Optional, Any, Union
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+from datetime import datetime
 
-from .config_manager import WorkflowConfig, AgentConfig, ProcessorConfig
+from ..agents.agent_types import AgentConfig
+from .workflow_types import WorkflowConfig
+from .config_manager import ProcessorConfig
 
 class TemplateParameter(BaseModel):
-    """Template parameter definition"""
-    name: str
-    description: str
-    type: str
-    default: Optional[str] = None
-    required: bool = True
-    options: Optional[List[str]] = None
+    """Template parameter model."""
+    model_config = ConfigDict(frozen=False, validate_assignment=True)
     
+    name: str
+    type: str
+    description: Optional[str] = None
+    default: Optional[Any] = None
+    required: bool = True
+    options: Optional[List[Any]] = None
+    
+    def validate(self, value: Any) -> bool:
+        """Validate parameter value."""
+        if value is None and self.required and self.default is None:
+            return False
+            
+        if value is None and (not self.required or self.default is not None):
+            return True
+            
+        if self.options is not None and value not in self.options:
+            return False
+            
+        if self.type == "string":
+            return isinstance(value, (str, int, float, bool))
+        elif self.type == "integer":
+            try:
+                int(str(value))
+                return True
+            except (ValueError, TypeError):
+                return False
+        elif self.type == "float":
+            try:
+                float(str(value))
+                return True
+            except (ValueError, TypeError):
+                return False
+        elif self.type == "boolean":
+            return isinstance(value, (bool, int, str))
+        elif self.type == "list":
+            return isinstance(value, (list, tuple))
+        elif self.type == "dict":
+            return isinstance(value, dict)
+        return True
+        
+    def convert_value(self, value: Any) -> Any:
+        """Convert parameter value to correct type."""
+        if value is None:
+            if self.default is not None:
+                return self.default
+            elif not self.required:
+                return None
+            else:
+                raise ValueError(f"Required parameter {self.name} has no value or default")
+            
+        if self.type == "string":
+            return str(value)
+        elif self.type == "integer":
+            return int(str(value))
+        elif self.type == "float":
+            return float(str(value))
+        elif self.type == "boolean":
+            if isinstance(value, bool):
+                return value
+            elif isinstance(value, int):
+                return bool(value)
+            elif isinstance(value, str):
+                return value.lower() in ("true", "1", "yes", "on")
+            return bool(value)
+        elif self.type == "list":
+            if isinstance(value, tuple):
+                return list(value)
+            return value
+        return value
+        
+    def set_default(self, value: Any) -> None:
+        """Set default value."""
+        if value is not None and not self.validate(value):
+            raise ValueError(f"Invalid default value for parameter {self.name}: {value}")
+        self.default = value
+        self.required = value is None  # Make required if default is None, not required otherwise
+
 class WorkflowTemplate(BaseModel):
-    """Workflow template definition"""
+    """Workflow template model."""
+    model_config = ConfigDict(frozen=False, validate_assignment=True)
+    
     id: str
     name: str
-    description: str
-    parameters: List[TemplateParameter]
-    workflow: WorkflowConfig
-    metadata: Dict[str, str] = Field(default_factory=dict)
+    description: Optional[str] = None
+    parameters: List[TemplateParameter] = Field(default_factory=list)
+    steps: List[Dict[str, Any]] = Field(default_factory=list)
+    agents: List[Dict[str, Any]] = Field(default_factory=list)
+    processors: List[Dict[str, Any]] = Field(default_factory=list)
+    connections: List[Dict[str, Any]] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    workflow: Union[Dict[str, Any], WorkflowConfig]
     
+    @field_validator('workflow')
+    @classmethod
+    def validate_workflow(cls, v):
+        """Validate workflow field."""
+        if isinstance(v, dict):
+            return WorkflowConfig(**v)
+        return v
+    
+    def validate_parameters(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and process template parameters."""
+        validated = {}
+        missing = []
+        
+        for param in self.parameters:
+            if param.name in params:
+                value = params[param.name]
+                if param.validate(value):
+                    validated[param.name] = param.convert_value(value)
+                else:
+                    raise ValueError(f"Invalid value for parameter {param.name}: {value}")
+            elif param.required and param.default is None:
+                missing.append(param.name)
+            else:
+                validated[param.name] = param.default
+                
+        if missing:
+            raise ValueError(f"Missing required parameters: {', '.join(missing)}")
+            
+        return validated
+    
+    def _replace_parameters(self, data: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
+        """Replace parameter placeholders in data.
+        
+        Args:
+            data: Data structure containing parameter placeholders
+            params: Parameter values to substitute
+            
+        Returns:
+            Dict with parameter placeholders replaced with values
+        """
+        result = {}
+        
+        for key, value in data.items():
+            if isinstance(value, dict):
+                result[key] = self._replace_parameters(value, params)
+            elif isinstance(value, list):
+                result[key] = [
+                    self._replace_parameters(item, params) if isinstance(item, dict)
+                    else self._replace_parameter(item, params) if isinstance(item, str)
+                    else item
+                    for item in value
+                ]
+            elif isinstance(value, str):
+                result[key] = self._replace_parameter(value, params)
+            else:
+                result[key] = value
+                
+        return result
+        
+    def _replace_parameter(self, value: str, params: Dict[str, Any]) -> Any:
+        """Replace a single parameter placeholder.
+        
+        Args:
+            value: String potentially containing parameter placeholder
+            params: Parameter values to substitute
+            
+        Returns:
+            Substituted value if placeholder found, original value otherwise
+        """
+        if value.startswith("$"):
+            param_name = value[1:]
+            return params.get(param_name, value)
+        return value
+    
+    def create_workflow(self, params: Dict[str, Any]) -> WorkflowConfig:
+        """Create workflow from template."""
+        validated_params = self.validate_parameters(params)
+        workflow_dict = self.workflow.model_dump()
+        
+        # Replace parameter placeholders in workflow configuration
+        workflow_dict = self._replace_parameters(workflow_dict, validated_params)
+        
+        return WorkflowConfig(**workflow_dict)
+
 class TemplateManager:
     """Manager for workflow templates"""
     
@@ -130,23 +295,22 @@ class TemplateManager:
     
         # Convert workflow to dict for templating
         workflow_dict = workflow.model_dump()
-        workflow_str = json.dumps(workflow_dict)
     
         # Replace placeholders with actual values
         for name, value in parameters.items():
-            # Convert list to a string representation for JSON replacement
-            if isinstance(value, list):
-                # For lists used in list comprehensions, convert to a list of strings
-                value_str = f"[{', '.join(str(v) for v in value)}]"
+            param = next((p for p in template.parameters if p.name == name), None)
+            if param and param.type == "list":
+                # For list parameters, replace directly in the workflow dict
+                workflow_dict[name] = value
             else:
+                # For other parameters, do string replacement
                 value_str = str(value)
-    
-            # Replace placeholders
-            placeholder = f"{{{{ {name} }}}}"
-            workflow_str = workflow_str.replace(placeholder, value_str)
+                placeholder = f"{{{{ {name} }}}}"
+                for k, v in workflow_dict.items():
+                    if isinstance(v, str):
+                        workflow_dict[k] = v.replace(placeholder, value_str)
     
         # Parse back to workflow config
-        workflow_dict = json.loads(workflow_str)
         workflow = WorkflowConfig(**workflow_dict)
     
         return workflow

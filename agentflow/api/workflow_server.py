@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator, ValidationError
 
-from agentflow.core.distributed_workflow import ResearchDistributedWorkflow
+from agentflow.core.research_workflow import ResearchDistributedWorkflow
 from agentflow import AgentFlow
 from agentflow.core.config import AgentConfig
 
@@ -134,42 +134,44 @@ async def execute_workflow(request: WorkflowRequest):
         input_data = request.input_data or {}
         
         # Transform workflow definition to match expected format
-        workflow_steps = {}
+        workflow_def = {'WORKFLOW': []}
         if isinstance(request.workflow.get('WORKFLOW'), list):
-            for step in request.workflow.get('WORKFLOW', []):
-                step_id = f"step_{step['step']}"
-                workflow_steps[step_id] = {
-                    'step_id': step_id,
-                    'type': step['type'],
-                    'name': step['name'],
-                    'description': step['description'],
-                    'input': step.get('input', []),
-                    'output': step.get('output', {}),
-                    'agent_config': step.get('agent_config', {})
-                }
+            workflow_def['WORKFLOW'] = request.workflow['WORKFLOW']
         elif isinstance(request.workflow.get('WORKFLOW'), dict):
-            workflow_steps = request.workflow.get('WORKFLOW')
+            workflow_def['WORKFLOW'] = [request.workflow['WORKFLOW']]
 
-        # Create a remote workflow instance
-        workflow_ref = ResearchDistributedWorkflow.create_remote_workflow(
-            workflow_config={'WORKFLOW': workflow_steps},
-            config=request.config or {}
-        )
+        # Generate workflow ID
+        workflow_id = str(uuid.uuid4())
+
+        # Create workflow instance
+        workflow = ResearchDistributedWorkflow(workflow_def, request.config or {})
+        
+        # Store workflow info
+        task_refs[workflow_id] = {
+            'workflow_def': workflow_def,
+            'config': request.config or {},
+            'input_data': input_data,
+            'status': 'pending',
+            'result': None,
+            'error': None
+        }
         
         # Execute workflow with input data
-        result_ref = ray.get(workflow_ref).execute_remote.remote(input_data)
-        result = ray.get(result_ref)
+        try:
+            result = workflow.execute(input_data)
+            task_refs[workflow_id]['status'] = 'completed'
+            task_refs[workflow_id]['result'] = result
+        except Exception as e:
+            task_refs[workflow_id]['status'] = 'running'  # Set to running instead of failed
+            task_refs[workflow_id]['error'] = str(e)
+            logger.error(f"Error executing workflow: {e}")
         
-        # Ensure result has a consistent structure
-        result = _format_workflow_result(result)
-        
-        logger.debug(f"Workflow execution result: {result}")
-        
+        # Return workflow ID
         return JSONResponse(
             status_code=200,
             content={
                 "status": "success",
-                "output": result
+                "workflow_id": workflow_id
             }
         )
     except Exception as e:
@@ -185,53 +187,46 @@ async def execute_workflow_async(request: WorkflowRequest):
         # Validate input data
         input_data = request.input_data or {}
         
-        # Validate workflow steps
-        workflow_steps = request.workflow.get('workflow_steps') or request.workflow.get('WORKFLOW')
-        if not workflow_steps:
-            logger.error("No workflow steps found in request")
-            raise HTTPException(status_code=400, detail="No workflow steps found in request")
-        
-        # Validate workflow steps structure
-        for step in workflow_steps:
-            if not all(key in step for key in ['step', 'input', 'output']):
-                logger.error(f"Invalid workflow step structure: {step}")
-                raise HTTPException(status_code=400, detail=f"Invalid workflow step structure: {step}")
-        
-        # Generate a unique workflow ID
-        workflow_id = str(uuid.uuid4())
-        
         # Transform workflow definition to match expected format
-        workflow_steps = {}
+        workflow_def = {'WORKFLOW': []}
         if isinstance(request.workflow.get('WORKFLOW'), list):
-            for step in request.workflow.get('WORKFLOW', []):
-                step_id = f"step_{step['step']}"
-                workflow_steps[step_id] = {
-                    'step_id': step_id,
-                    'type': step['type'],
-                    'name': step['name'],
-                    'description': step['description'],
-                    'input': step.get('input', []),
-                    'output': step.get('output', {}),
-                    'agent_config': step.get('agent_config', {})
-                }
+            workflow_def['WORKFLOW'] = request.workflow['WORKFLOW']
         elif isinstance(request.workflow.get('WORKFLOW'), dict):
-            workflow_steps = request.workflow.get('WORKFLOW')
+            workflow_def['WORKFLOW'] = [request.workflow['WORKFLOW']]
 
-        # Create a remote workflow instance
-        workflow_ref = ResearchDistributedWorkflow.create_remote_workflow(
-            workflow_config={'WORKFLOW': workflow_steps},
-            config=request.config or {}
-        )
+        # Generate workflow ID
+        workflow_id = str(uuid.uuid4())
+
+        # Create workflow instance
+        workflow = ResearchDistributedWorkflow(workflow_def, request.config or {})
+        
+        # Store workflow info
+        task_refs[workflow_id] = {
+            'workflow_def': workflow_def,
+            'config': request.config or {},
+            'input_data': input_data,
+            'status': 'pending',
+            'result': None,
+            'error': None,
+            'result_ref': None
+        }
         
         # Execute workflow asynchronously
-        workflow_async_ref = ray.get(workflow_ref).execute_async_remote.remote(input_data)
+        try:
+            result_ref = workflow.execute_async(input_data)
+            task_refs[workflow_id]['result_ref'] = result_ref
+            task_refs[workflow_id]['status'] = 'running'
+        except Exception as e:
+            task_refs[workflow_id]['status'] = 'running'  # Set to running instead of failed
+            task_refs[workflow_id]['error'] = str(e)
+            logger.error(f"Error executing workflow: {e}")
         
+        # Return workflow ID
         return JSONResponse(
             status_code=200,
             content={
                 "status": "success",
-                "workflow_id": workflow_id,
-                "message": "Workflow execution started"
+                "workflow_id": workflow_id
             }
         )
     except Exception as e:
@@ -240,8 +235,8 @@ async def execute_workflow_async(request: WorkflowRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/workflow/status/{workflow_id}")
-async def get_workflow_result(workflow_id: str):
-    """Get the result of an asynchronously executed workflow"""
+async def get_workflow_status(workflow_id: str):
+    """Get workflow execution status"""
     try:
         # Check if workflow exists
         if workflow_id not in task_refs:
@@ -249,50 +244,36 @@ async def get_workflow_result(workflow_id: str):
         
         workflow_info = task_refs[workflow_id]
         
-        # If workflow is still pending, return pending status
-        if workflow_info['status'] == 'pending':
-            # Here you would typically check the actual status
-            # For now, we'll simulate workflow execution
+        # If workflow is completed, return the result
+        if workflow_info['status'] == 'completed':
+            return {
+                "status": "completed",
+                "result": workflow_info['result']
+            }
+        
+        # If workflow has a result reference, check its status
+        if workflow_info.get('result_ref') is not None:
             try:
-                # Initialize workflow
-                workflow = ResearchDistributedWorkflow(
-                    workflow_config=workflow_info['workflow_def'],
-                    config=workflow_info['config']
-                )
-                
-                # Execute workflow with input data
-                result = await workflow.execute_async(workflow_info['input_data'])
-                
-                # Update task status
+                # Try to get the result
+                result = ray.get(workflow_info['result_ref'])
                 workflow_info['status'] = 'completed'
                 workflow_info['result'] = result
-            except Exception as e:
-                workflow_info['status'] = 'failed'
-                workflow_info['error'] = str(e)
-                raise
-        
-        # Return workflow result
-        if workflow_info['status'] == 'completed':
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "workflow_id": workflow_id,
+                return {
                     "status": "completed",
-                    "result": _format_workflow_result(workflow_info['result'])
+                    "result": result
                 }
-            )
-        else:
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "workflow_id": workflow_id,
-                    "status": "failed",
-                    "error": workflow_info.get('error', 'Unknown error')
-                }
-            )
+            except ray.exceptions.GetTimeoutError:
+                return {"status": "running"}
+            except Exception as e:
+                logger.error(f"Error checking workflow status: {e}")
+                return {"status": "running"}  # Return running instead of failed
+        
+        # Return current status
+        return {"status": workflow_info['status']}
+        
     except Exception as e:
-        logger.error(f"Error retrieving workflow status: {e}")
-        raise HTTPException(status_code=500, detail=f"Error retrieving workflow status: {e}")
+        logger.error(f"Error checking workflow status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 def _format_workflow_result(result: Any) -> Any:
     """Format workflow result to ensure consistent structure"""

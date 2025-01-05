@@ -6,6 +6,8 @@ from collections import defaultdict
 from .patterns import Pattern, PatternType, PatternMetrics
 from .formal import FormalInstruction
 from .analyzer import AnalysisResult
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 
 @dataclass
 class FrequentSequence:
@@ -277,44 +279,27 @@ class ParallelMiner:
         return False
 
 class BehavioralMiner:
-    """Advanced behavioral pattern mining."""
+    """Behavioral pattern mining."""
     
     def __init__(self, config: Dict[str, Any]):
+        """Initialize behavioral miner."""
+        if not isinstance(config, dict):
+            raise ValueError("Config must be a dictionary")
+            
         self.config = config
         self.min_pattern_length = config.get("min_pattern_length", 2)
+        self.min_support = config.get("min_support", 0.4)
         self.similarity_threshold = config.get("similarity_threshold", 0.8)
         
-    def find_behavioral_patterns(self,
-                               instructions: List[FormalInstruction],
-                               analysis: AnalysisResult
-                               ) -> List[Pattern]:
-        """Find behavioral patterns in instructions."""
-        patterns = []
+        # Validate configuration
+        if self.min_pattern_length < 2:
+            raise ValueError("min_pattern_length must be at least 2")
+        if not 0 <= self.min_support <= 1:
+            raise ValueError("min_support must be between 0 and 1")
+        if not 0 <= self.similarity_threshold <= 1:
+            raise ValueError("similarity_threshold must be between 0 and 1")
         
-        # Extract behavioral features
-        features = self._extract_behavioral_features(
-            instructions,
-            analysis
-        )
-        
-        # Cluster similar behaviors
-        clusters = self._cluster_behaviors(features)
-        
-        # Extract patterns from clusters
-        for cluster in clusters:
-            pattern = self._extract_pattern_from_cluster(
-                cluster,
-                instructions,
-                analysis
-            )
-            if pattern:
-                patterns.append(pattern)
-                
-        return patterns
-    
-    def find_patterns(self,
-                     instructions: List[FormalInstruction]
-                     ) -> List[List[FormalInstruction]]:
+    def find_patterns(self, instructions: List[FormalInstruction]) -> List[List[FormalInstruction]]:
         """Find behavioral patterns in instructions."""
         if not instructions:
             return []
@@ -322,297 +307,301 @@ class BehavioralMiner:
         patterns = []
         n = len(instructions)
         
-        # Find patterns of different lengths
-        for length in range(self.min_pattern_length, min(n + 1, 10)):
-            for i in range(n - length + 1):
-                candidate = instructions[i:i+length]
-                
-                # Check if candidate is a valid pattern
-                if self._is_valid_pattern(candidate):
-                    patterns.append(candidate)
+        # Generate candidate patterns
+        for length in range(self.min_pattern_length, min(10, n + 1)):
+            candidates = self._generate_candidates(instructions, length)
+            
+            # Filter patterns by support and similarity
+            for candidate in candidates:
+                support = self._calculate_support(candidate, instructions)
+                if support >= self.min_support:
+                    # Check if similar pattern already exists
+                    is_unique = True
+                    for existing_pattern in patterns:
+                        similarity = self.calculate_pattern_similarity(candidate, existing_pattern)
+                        if similarity >= self.similarity_threshold:
+                            is_unique = False
+                            break
+                    if is_unique:
+                        patterns.append(candidate)
                     
         return patterns
         
-    def calculate_pattern_similarity(self,
-                                   pattern1: List[FormalInstruction],
-                                   pattern2: List[FormalInstruction]
-                                   ) -> float:
+    def find_behavioral_patterns(self, instructions: List[FormalInstruction], analysis: AnalysisResult) -> List[Dict[str, Any]]:
+        """Find behavioral patterns with analysis."""
+        # Extract behavioral features
+        features = self._extract_behavioral_features(instructions, analysis)
+        
+        # Cluster based on behavioral features
+        clusters = self._cluster_behaviors(features)
+        
+        # Find patterns within clusters
+        patterns = []
+        for cluster in clusters:
+            cluster_instructions = [instructions[i] for i in cluster]
+            pattern = self._find_pattern_in_cluster(cluster_instructions)
+            if pattern:
+                patterns.append({
+                    "type": PatternType.BEHAVIORAL,
+                    "instructions": cluster_instructions,
+                    "confidence": self._calculate_pattern_confidence(cluster_instructions)
+                })
+        
+        return patterns
+
+    def calculate_pattern_similarity(self, pattern1: List[FormalInstruction], pattern2: List[FormalInstruction]) -> float:
         """Calculate similarity between two patterns."""
         if not pattern1 or not pattern2:
             return 0.0
             
-        # Compare instruction sequences
-        similarity_scores = []
+        # Calculate similarity based on instruction names and parameters
+        total_similarity = 0.0
+        max_length = max(len(pattern1), len(pattern2))
         
-        # Compare lengths
-        len_similarity = min(len(pattern1), len(pattern2)) / max(len(pattern1), len(pattern2))
-        similarity_scores.append(len_similarity)
-        
-        # Compare instruction names
-        name_matches = sum(
-            1 for i1, i2 in zip(pattern1, pattern2)
-            if i1.name == i2.name
-        )
-        name_similarity = name_matches / max(len(pattern1), len(pattern2))
-        similarity_scores.append(name_similarity)
-        
-        # Compare parameters
-        param_similarities = []
-        for i1, i2 in zip(pattern1, pattern2):
-            if i1.name == i2.name:
-                param_match = sum(
-                    1 for k, v in i1.params.items()
-                    if k in i2.params and i2.params[k] == v
-                )
-                param_total = len(set(i1.params) | set(i2.params))
-                param_similarities.append(
-                    param_match / param_total if param_total > 0 else 1.0
-                )
-                
-        if param_similarities:
-            param_similarity = sum(param_similarities) / len(param_similarities)
-            similarity_scores.append(param_similarity)
+        for i in range(min(len(pattern1), len(pattern2))):
+            instr1 = pattern1[i]
+            instr2 = pattern2[i]
             
-        return sum(similarity_scores) / len(similarity_scores)
+            # Compare instruction names
+            name_similarity = 1.0 if instr1.name == instr2.name else 0.0
+            
+            # Compare instruction parameters
+            param_similarity = self._calculate_parameter_similarity(instr1, instr2)
+            
+            # Combine name and parameter similarity
+            total_similarity += (name_similarity + param_similarity) / 2
+            
+        return total_similarity / max_length
         
-    def calculate_pattern_frequency(self,
-                                  pattern: List[FormalInstruction],
-                                  instructions: List[FormalInstruction]
-                                  ) -> int:
-        """Calculate frequency of pattern in instruction sequence."""
+    def _extract_features(self, instructions: List[FormalInstruction]) -> np.ndarray:
+        """Extract features from instructions."""
+        features = []
+        for instruction in instructions:
+            # Convert instruction type to numeric value
+            type_value = list(instruction.type.__class__.__members__.values()).index(instruction.type)
+            
+            # Basic instruction features
+            instruction_features = [
+                float(type_value),
+                len(instruction.parameters),
+                1.0 if instruction.content else 0.0
+            ]
+            features.append(instruction_features)
+        return np.array(features)
+
+    def _extract_behavioral_features(self, instructions: List[FormalInstruction], analysis: AnalysisResult) -> np.ndarray:
+        """Extract behavioral features from instructions and analysis."""
+        features = []
+        for instruction in instructions:
+            # Convert instruction type to numeric value
+            type_value = list(instruction.type.__class__.__members__.values()).index(instruction.type)
+            
+            # Basic instruction features
+            instruction_features = [
+                float(type_value),
+                len(instruction.parameters),
+                1.0 if instruction.content else 0.0
+            ]
+
+            # Add analysis metrics
+            for metric_value in analysis.metrics.values():
+                instruction_features.append(float(metric_value))
+
+            features.append(instruction_features)
+        return np.array(features)
+
+    def _cluster_instructions(self, features: np.ndarray) -> List[List[int]]:
+        """Cluster instructions based on features."""
+        if len(features) < self.min_pattern_length:
+            return []
+            
+        # Scale features
+        scaler = StandardScaler()
+        scaled_features = scaler.fit_transform(features)
+        
+        # Determine number of clusters
+        n_clusters = min(len(features) // 2, 5)
+        if n_clusters < 2:
+            return [[i for i in range(len(features))]]
+            
+        # Perform clustering
+        kmeans = KMeans(n_clusters=n_clusters)
+        labels = kmeans.fit_predict(scaled_features)
+        
+        # Group indices by cluster
+        clusters = [[] for _ in range(n_clusters)]
+        for i, label in enumerate(labels):
+            clusters[label].append(i)
+            
+        # Filter small clusters
+        min_cluster_size = max(self.min_pattern_length, 
+                           int(len(features) * self.min_support))
+        return [c for c in clusters if len(c) >= min_cluster_size]
+
+    def _cluster_behaviors(self, features: np.ndarray) -> List[List[int]]:
+        """Cluster behaviors based on features."""
+        return self._cluster_instructions(features)
+
+    def _find_pattern_in_cluster(self, instructions: List[FormalInstruction]) -> Dict[str, Any]:
+        """Find pattern within a cluster of instructions."""
+        if len(instructions) < self.min_pattern_length:
+            return None
+            
+        # Calculate pattern support
+        support = len(instructions) / self.min_pattern_length
+        if support < self.min_support:
+            return None
+
+        # Extract common characteristics
+        common_type = instructions[0].type
+        common_params = set(instructions[0].parameters.keys())
+        for instruction in instructions[1:]:
+            if instruction.type != common_type:
+                common_type = None
+            common_params &= set(instruction.parameters.keys())
+
+        return {
+            "type": common_type.value if common_type else None,
+            "common_parameters": list(common_params),
+            "support": support,
+            "instructions": len(instructions)
+        }
+
+    def _calculate_similarity(self, instr1: FormalInstruction, instr2: FormalInstruction) -> float:
+        """Calculate similarity between two instructions."""
+        # Simple similarity based on type and parameters
+        type_match = instr1.type == instr2.type
+        param_similarity = len(set(instr1.parameters.keys()) & set(instr2.parameters.keys())) / \
+                         max(len(instr1.parameters), len(instr2.parameters), 1)
+        return (type_match + param_similarity) / 2
+
+    def _calculate_pattern_confidence(self, instructions: List[FormalInstruction]) -> float:
+        """Calculate confidence score for a pattern."""
+        if not instructions:
+            return 0.0
+            
+        # Calculate average pairwise similarity
+        n = len(instructions)
+        if n < 2:
+            return 1.0
+            
+        total_similarity = 0.0
+        pairs = 0
+        for i in range(n):
+            for j in range(i+1, n):
+                total_similarity += self._calculate_similarity(instructions[i], instructions[j])
+                pairs += 1
+                
+        return total_similarity / pairs if pairs > 0 else 0.0
+
+    def _calculate_parameter_similarity(self, instr1: FormalInstruction, instr2: FormalInstruction) -> float:
+        """Calculate similarity between instruction parameters."""
+        params1 = set(instr1.get_parameters().keys())
+        params2 = set(instr2.get_parameters().keys())
+        
+        if not params1 and not params2:
+            return 1.0
+            
+        intersection = len(params1.intersection(params2))
+        union = len(params1.union(params2))
+        
+        return intersection / union if union > 0 else 0.0
+        
+    def calculate_pattern_frequency(self, pattern: List[FormalInstruction], instructions: List[FormalInstruction]) -> int:
+        """Calculate frequency of pattern in instructions."""
         if not pattern or not instructions:
             return 0
             
-        frequency = 0
-        pattern_len = len(pattern)
+        count = 0
+        n = len(instructions)
+        m = len(pattern)
         
-        # Slide window over instructions
-        for i in range(len(instructions) - pattern_len + 1):
-            window = instructions[i:i+pattern_len]
-            
-            # Check if window matches pattern
-            if self.calculate_pattern_similarity(pattern, window) >= self.similarity_threshold:
-                frequency += 1
+        for i in range(n - m + 1):
+            match = True
+            for j in range(m):
+                if instructions[i + j].name != pattern[j].name:
+                    match = False
+                    break
+            if match:
+                count += 1
                 
-        return frequency
+        return count
         
-    def optimize_sequence(self,
-                        instructions: List[FormalInstruction]
-                        ) -> List[FormalInstruction]:
-        """Optimize instruction sequence using patterns."""
+    def calculate_pattern_significance(self, pattern: List[FormalInstruction], instructions: List[FormalInstruction]) -> float:
+        """Calculate significance of pattern."""
+        if not pattern or not instructions:
+            return 0.0
+            
+        # Calculate frequency
+        frequency = self.calculate_pattern_frequency(pattern, instructions)
+        
+        # Calculate support
+        support = frequency / len(instructions)
+        
+        # Calculate average similarity with other patterns
+        other_patterns = self.find_patterns(instructions)
+        total_similarity = 0.0
+        count = 0
+        
+        for other_pattern in other_patterns:
+            if other_pattern != pattern:
+                similarity = self.calculate_pattern_similarity(pattern, other_pattern)
+                total_similarity += similarity
+                count += 1
+                
+        avg_similarity = total_similarity / count if count > 0 else 0.0
+        
+        # Combine metrics
+        significance = (support + (1 - avg_similarity)) / 2
+        return significance
+        
+    def optimize_sequence(self, instructions: List[FormalInstruction]) -> List[FormalInstruction]:
+        """Optimize instruction sequence based on patterns."""
         if not instructions:
             return []
             
         # Find patterns
         patterns = self.find_patterns(instructions)
-        if not patterns:
-            return instructions.copy()
-            
-        # Score patterns
-        pattern_scores = [
-            (pattern, self._calculate_pattern_score(pattern))
-            for pattern in patterns
-        ]
         
-        # Sort by score
+        # Sort patterns by significance
+        pattern_scores = []
+        for pattern in patterns:
+            significance = self.calculate_pattern_significance(pattern, instructions)
+            pattern_scores.append((pattern, significance))
+            
         pattern_scores.sort(key=lambda x: x[1], reverse=True)
         
         # Build optimized sequence
         optimized = []
         used = set()
         
-        # Add highest scoring patterns first
-        for pattern, score in pattern_scores:
-            for i in range(len(instructions) - len(pattern) + 1):
-                window = instructions[i:i+len(pattern)]
-                if (self.calculate_pattern_similarity(pattern, window) >= self.similarity_threshold and
-                    not any(j in used for j in range(i, i+len(pattern)))):
-                    optimized.extend(window)
-                    used.update(range(i, i+len(pattern)))
+        # Add high-significance patterns first
+        for pattern, _ in pattern_scores:
+            for instr in pattern:
+                if instr.id not in used:
+                    optimized.append(instr)
+                    used.add(instr.id)
                     
         # Add remaining instructions
-        for i, instr in enumerate(instructions):
-            if i not in used:
+        for instr in instructions:
+            if instr.id not in used:
                 optimized.append(instr)
+                used.add(instr.id)
                 
         return optimized
         
-    def _is_valid_pattern(self,
-                         pattern: List[FormalInstruction]
-                         ) -> bool:
-        """Check if pattern is valid."""
-        if len(pattern) < self.min_pattern_length:
-            return False
+    def _generate_candidates(self, instructions: List[FormalInstruction], length: int) -> List[List[FormalInstruction]]:
+        """Generate candidate patterns."""
+        candidates = []
+        n = len(instructions)
+        
+        for i in range(n - length + 1):
+            candidate = instructions[i:i+length]
+            candidates.append(candidate)
             
-        # Check for meaningful relationships
-        for i in range(len(pattern) - 1):
-            if not self._has_relationship(pattern[i], pattern[i+1]):
-                return False
-                
-        return True
+        return candidates
         
-    def _has_relationship(self,
-                         instr1: FormalInstruction,
-                         instr2: FormalInstruction
-                         ) -> bool:
-        """Check if instructions have meaningful relationship."""
-        # Check for data flow
-        if any(
-            out in instr2.get_inputs()
-            for out in instr1.get_outputs()
-        ):
-            return True
-            
-        # Check for control flow
-        if instr1.name in ["if", "while", "for"] and instr2.name in ["endif", "endwhile", "endfor"]:
-            return True
-            
-        # Check for semantic relationship
-        if instr1.name in ["load", "read"] and instr2.name in ["process", "validate"]:
-            return True
-        if instr1.name in ["process", "validate"] and instr2.name in ["save", "write"]:
-            return True
-            
-        return False
-        
-    def _calculate_pattern_score(self,
-                               pattern: List[FormalInstruction]
-                               ) -> float:
-        """Calculate score for pattern."""
-        # Consider factors like:
-        # - Pattern length
-        length_score = min(len(pattern) / 5.0, 1.0)
-        
-        # - Instruction relationships
-        relationship_score = sum(
-            1 for i in range(len(pattern)-1)
-            if self._has_relationship(pattern[i], pattern[i+1])
-        ) / (len(pattern) - 1)
-        
-        # - Pattern cohesion
-        cohesion_score = self._calculate_cohesion(pattern)
-        
-        return (length_score + relationship_score + cohesion_score) / 3.0
-        
-    def _calculate_cohesion(self,
-                          pattern: List[FormalInstruction]
-                          ) -> float:
-        """Calculate pattern cohesion."""
-        if len(pattern) < 2:
-            return 0.0
-            
-        # Calculate shared resources
-        resources = defaultdict(set)
-        for i, instr in enumerate(pattern):
-            for res in instr.get_resources():
-                resources[res].add(i)
-                
-        # Calculate cohesion based on resource sharing
-        total_pairs = (len(pattern) * (len(pattern) - 1)) / 2
-        shared_pairs = sum(
-            len(positions) * (len(positions) - 1) / 2
-            for positions in resources.values()
-        )
-        
-        return shared_pairs / total_pairs if total_pairs > 0 else 0.0
-        
-    def _extract_behavioral_features(self,
-                                  instructions: List[FormalInstruction],
-                                  analysis: AnalysisResult
-                                  ) -> Dict[str, np.ndarray]:
-        """Extract behavioral features from instructions."""
-        features = {}
-        
-        for i, instr in enumerate(instructions):
-            # Extract features like execution time, resource usage, dependencies
-            feature_vector = np.array([
-                float(analysis.metrics.get(f"exec_time_{i}", 0.0)),
-                float(analysis.metrics.get(f"resource_usage_{i}", 0.0)),
-                float(analysis.metrics.get(f"dependency_count_{i}", 0.0)),
-                float(analysis.metrics.get(f"complexity_{i}", 0.0))
-            ])
-            features[str(i)] = feature_vector
-            
-        return features
-    
-    def _cluster_behaviors(self,
-                         features: Dict[str, np.ndarray]
-                         ) -> List[List[str]]:
-        """Cluster instructions based on behavioral features."""
-        clusters = []
-        unassigned = set(features.keys())
-        
-        while unassigned:
-            # Pick a random unassigned instruction as cluster center
-            center = next(iter(unassigned))
-            cluster = [center]
-            unassigned.remove(center)
-            
-            # Find similar instructions
-            for instr_id in list(unassigned):
-                if self._calculate_similarity(
-                    features[center],
-                    features[instr_id]
-                ) >= self.similarity_threshold:
-                    cluster.append(instr_id)
-                    unassigned.remove(instr_id)
-                    
-            clusters.append(cluster)
-            
-        return clusters
-    
-    def _extract_pattern_from_cluster(self,
-                                    cluster: List[str],
-                                    instructions: List[FormalInstruction],
-                                    analysis: AnalysisResult
-                                    ) -> Optional[Pattern]:
-        """Extract pattern from instruction cluster."""
-        if len(cluster) < self.min_pattern_length:
-            return None
-            
-        # Get instructions in cluster
-        cluster_instructions = [
-            instructions[int(i)] for i in cluster
-        ]
-        
-        # Calculate pattern metrics
-        metrics = self._calculate_pattern_metrics(
-            cluster_instructions,
-            analysis
-        )
-        
-        return Pattern(
-            type=PatternType.BEHAVIORAL,
-            instructions=cluster_instructions,
-            metrics=metrics
-        )
-    
-    def _calculate_similarity(self,
-                            feature1: np.ndarray,
-                            feature2: np.ndarray
-                            ) -> float:
-        """Calculate similarity between feature vectors."""
-        return 1.0 / (1.0 + np.linalg.norm(feature1 - feature2))
-        
-    def _calculate_pattern_metrics(self,
-                                instructions: List[FormalInstruction],
-                                analysis: AnalysisResult
-                                ) -> PatternMetrics:
-        """Calculate metrics for behavioral pattern."""
-        # Calculate average metrics across instructions
-        avg_exec_time = np.mean([
-            analysis.metrics.get(f"exec_time_{i}", 0.0)
-            for i in range(len(instructions))
-        ])
-        avg_resource_usage = np.mean([
-            analysis.metrics.get(f"resource_usage_{i}", 0.0)
-            for i in range(len(instructions))
-        ])
-        
-        return PatternMetrics(
-            frequency=1,  # This would be calculated from historical data
-            confidence=analysis.confidence,
-            support=1.0,  # This would be calculated from historical data
-            exec_time_impact=avg_exec_time,
-            resource_impact=avg_resource_usage
-        )
+    def _calculate_support(self, pattern: List[FormalInstruction], instructions: List[FormalInstruction]) -> float:
+        """Calculate support for pattern."""
+        frequency = self.calculate_pattern_frequency(pattern, instructions)
+        return frequency / len(instructions)

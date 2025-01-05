@@ -1,77 +1,79 @@
-"""Exceptions for AgentFlow core."""
+"""Exceptions module for AgentFlow."""
 
 class AgentFlowError(Exception):
-    """Base exception for AgentFlow errors."""
+    """Base exception class for AgentFlow."""
     pass
 
-class ConfigurationError(AgentFlowError):
-    """Raised when there is a configuration error."""
+class WorkflowEngineError(AgentFlowError):
+    """Exception raised for errors in the workflow engine."""
     pass
 
 class ValidationError(AgentFlowError):
-    """Raised when validation fails."""
+    """Exception raised for validation errors."""
     pass
 
-class WorkflowError(AgentFlowError):
-    """Raised when there is a workflow error."""
+class WorkflowTimeoutError(AgentFlowError):
+    """Exception raised when a workflow execution times out."""
     pass
 
-class ObjectiveError(AgentFlowError):
-    """Raised when there is an objective error."""
+class ConfigurationError(AgentFlowError):
+    """Exception raised for configuration errors."""
     pass
 
-class PersistenceError(AgentFlowError):
-    """Raised when there is a persistence error."""
+class CommunicationError(AgentFlowError):
+    """Exception raised for communication errors between agents."""
     pass
 
-class MonitoringError(AgentFlowError):
-    """Raised when there is a monitoring error."""
+class ExecutionError(AgentFlowError):
+    """Exception raised for errors during workflow execution."""
     pass
 
-class IntegrationError(AgentFlowError):
-    """Raised when there is an integration error."""
+class WorkflowExecutionError(AgentFlowError):
+    """Exception raised when workflow execution fails."""
     pass
 
-class DashboardError(AgentFlowError):
-    """Raised when there is a dashboard error."""
+class StepExecutionError(AgentFlowError):
+    """Exception raised when step execution fails."""
     pass
 
-class WorkflowExecutionError(Exception):
-    """Exception raised when workflow execution fails"""
+class StepValidationError(AgentFlowError):
+    """Exception raised when step validation fails."""
+    pass
+
+class StepTimeoutError(AgentFlowError):
+    """Exception raised when step execution times out."""
+    pass
+
+class StepRetryError(AgentFlowError):
+    """Exception raised when step retry mechanism fails."""
+    pass
+
+class WorkflowStateError(AgentFlowError):
+    """Exception raised when workflow state is invalid."""
+    pass
+
+class WorkflowConfigError(AgentFlowError):
+    """Exception raised when workflow configuration is invalid."""
+    pass
+
+class WorkflowInputError(AgentFlowError):
+    """Exception raised when workflow input is invalid."""
+    pass
+
+class WorkflowOutputError(AgentFlowError):
+    """Exception raised when workflow output is invalid."""
     pass
 
 class WorkflowValidationError(Exception):
-    """Exception raised when workflow validation fails"""
+    """Exception raised when workflow validation fails."""
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(self.message)
+
+class AgentConfigError(Exception):
+    """Agent configuration error."""
     pass
 
-class StepExecutionError(Exception):
-    """Exception raised when step execution fails"""
-    pass
-
-class StepValidationError(Exception):
-    """Exception raised when step validation fails"""
-    pass
-
-class StepTimeoutError(Exception):
-    """Exception raised when step execution times out"""
-    pass
-
-class StepRetryError(Exception):
-    """Exception raised when step retry mechanism fails"""
-    pass
-
-class WorkflowStateError(Exception):
-    """Exception raised when workflow state is invalid"""
-    pass
-
-class WorkflowConfigError(Exception):
-    """Exception raised when workflow configuration is invalid"""
-    pass
-
-class WorkflowInputError(Exception):
-    """Exception raised when workflow input is invalid"""
-    pass
-
-class WorkflowOutputError(Exception):
-    """Exception raised when workflow output is invalid"""
+class AgentExecutionError(Exception):
+    """Agent execution error."""
     pass

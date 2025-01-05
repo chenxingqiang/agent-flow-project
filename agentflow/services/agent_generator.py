@@ -4,7 +4,7 @@ import os
 from typing import Dict, Any, Optional
 from pathlib import Path
 import asyncio
-from ..core.agent import Agent
+from ..agents.agent import Agent
 from ..core.config import AgentConfig
 
 class AgentGenerator:

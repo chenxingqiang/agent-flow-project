@@ -108,7 +108,7 @@ def pytest_configure(config):
 def test_sync_workflow_execution(server):
     """Test synchronous workflow execution"""
     url = f"{server.base_url}/workflow/execute"
-    
+
     request_data = {
         "workflow": {
             "WORKFLOW": [

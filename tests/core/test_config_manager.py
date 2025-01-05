@@ -7,12 +7,8 @@ import json
 import pytest
 import tempfile
 
-from agentflow.core.config_manager import (
-    ConfigManager, 
-    AgentConfig, 
-    ModelConfig, 
-    WorkflowConfig
-)
+from agentflow.core.config import AgentConfig, ModelConfig, ConfigurationType, WorkflowConfig
+from agentflow.core.config_manager import ConfigManager
 
 @pytest.fixture
 def config_manager():
@@ -28,10 +24,10 @@ def test_agent_config_save_and_load(config_manager):
         id="test-agent-1",
         name="Test Agent",
         description="A test agent configuration",
-        type="test",
+        type=ConfigurationType.GENERIC,
         model=ModelConfig(
             name="test-model",
-            provider="test-provider"
+            provider="default"
         ),
         system_prompt="You are a test agent"
     )
@@ -59,10 +55,10 @@ def test_workflow_config_save_and_load(config_manager):
                 id="agent-1",
                 name="Agent 1",
                 description="First test agent",
-                type="test",
+                type=ConfigurationType.GENERIC,
                 model=ModelConfig(
                     name="test-model-1",
-                    provider="test-provider"
+                    provider="default"
                 ),
                 system_prompt="You are agent 1"
             )
@@ -91,10 +87,10 @@ def test_list_configurations(config_manager):
             id=f"agent-{i}",
             name=f"Agent {i}",
             description=f"Test agent {i}",
-            type="test",
+            type=ConfigurationType.GENERIC,
             model=ModelConfig(
                 name=f"test-model-{i}",
-                provider="test-provider"
+                provider="default"
             ),
             system_prompt=f"You are agent {i}"
         ) for i in range(3)
@@ -117,10 +113,10 @@ def test_delete_configurations(config_manager):
         id="delete-test-agent",
         name="Delete Test Agent",
         description="An agent to be deleted",
-        type="test",
+        type=ConfigurationType.GENERIC,
         model=ModelConfig(
             name="delete-test-model",
-            provider="test-provider"
+            provider="default"
         ),
         system_prompt="You are a test agent to be deleted"
     )
@@ -145,10 +141,10 @@ def test_export_and_import_config(config_manager):
             id="export-import-agent",
             name="Export Import Agent",
             description="Agent for export/import testing",
-            type="test",
+            type=ConfigurationType.GENERIC,
             model=ModelConfig(
                 name="export-import-model",
-                provider="test-provider"
+                provider="default"
             ),
             system_prompt="You are an export/import test agent"
         )

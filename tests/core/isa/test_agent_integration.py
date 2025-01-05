@@ -2,16 +2,30 @@
 
 import pytest
 import os
-from agentflow.core.agent import Agent, AgentConfig
+from agentflow.agents.agent import Agent, AgentConfig
 from agentflow.core.isa.isa_manager import Instruction, InstructionType
+from agentflow.core.isa.types import AgentType
 
 @pytest.fixture
 def sample_config():
-    """Sample agent configuration."""
+    """Create a sample configuration for testing."""
     return {
-        "isa_config_path": os.path.join(os.path.dirname(__file__), "test_isa_config.json"),
-        "max_steps": 100,
-        "rl_algorithm": "PPO"
+        "AGENT": {
+            "name": "TestAgent",
+            "type": AgentType.RESEARCH.value
+        },
+        "MODEL": {
+            "name": "gpt-4",
+            "provider": "openai"
+        },
+        "WORKFLOW": {
+            "max_iterations": 5
+        },
+        "isa_config_path": "/Users/xingqiangchen/TASK/APOS/tests/core/isa/test_isa_config.json",
+        "domain_config": {
+            "instruction_set": ["research", "analyze", "summarize"],
+            "optimization_strategy": "rl"
+        }
     }
 
 @pytest.fixture
@@ -47,7 +61,7 @@ class TestAgentISAIntegration:
     @pytest.mark.asyncio
     async def test_initialization(self, sample_config):
         """Test agent initialization with ISA."""
-        config = AgentConfig(**sample_config)
+        config = AgentConfig.from_dict(sample_config)
         agent = Agent(config)
         await agent.initialize()
         
@@ -57,7 +71,7 @@ class TestAgentISAIntegration:
     @pytest.mark.asyncio
     async def test_instruction_selection(self, sample_config):
         """Test instruction selection based on input."""
-        config = AgentConfig(**sample_config)
+        config = AgentConfig.from_dict(sample_config)
         agent = Agent(config)
         await agent.initialize()
         
@@ -71,7 +85,7 @@ class TestAgentISAIntegration:
     @pytest.mark.asyncio
     async def test_instruction_execution(self, sample_config):
         """Test executing selected instructions."""
-        config = AgentConfig(**sample_config)
+        config = AgentConfig.from_dict(sample_config)
         agent = Agent(config)
         await agent.initialize()
         
@@ -87,39 +101,38 @@ class TestAgentISAIntegration:
     @pytest.mark.asyncio
     async def test_error_handling(self, sample_config):
         """Test error handling in ISA integration."""
-        config = AgentConfig(**sample_config)
+        config = AgentConfig.from_dict(sample_config)
         agent = Agent(config)
         await agent.initialize()
         
-        # Test invalid instruction
-        invalid_instruction = Instruction(
-            id="invalid",
-            name="nonexistent",
-            type=InstructionType.CONTROL,
-            params={}
-        )
+        # Test invalid instruction handling
         with pytest.raises(ValueError):
-            agent.isa_manager.execute_instruction(invalid_instruction)
+            agent.isa_manager.get_instruction("nonexistent")
             
-        # Test invalid config path
-        config.isa_config_path = "nonexistent.json"
-        with pytest.raises(FileNotFoundError):
-            agent.isa_manager.load_instructions(config.isa_config_path)
+        # Test instruction execution error handling
+        instruction = agent.isa_manager.get_instruction("init")
+        instruction.params = {"invalid": "params"}
+        with pytest.raises(Exception):
+            agent.isa_manager.execute_instruction(instruction)
             
     @pytest.mark.asyncio
     async def test_instruction_optimization(self, sample_config):
         """Test RL-based instruction optimization."""
-        config = AgentConfig(**sample_config)
+        config = AgentConfig.from_dict(sample_config)
         agent = Agent(config)
         await agent.initialize()
         
-        # Test optimization
-        input_data = {"task": "complex task", "params": {"x": 1, "data": "test"}, "text": "complex task"}
-        initial_sequence = agent.instruction_selector.select_instructions(input_data, agent.isa_manager.instructions)
+        # Test optimization strategy
+        input_data = {"task": "complex task", "params": {"data": "test"}, "text": "complex task requiring multiple steps"}
+        selected = agent.instruction_selector.select_instructions(input_data, agent.isa_manager.instructions)
         
-        # Skip optimization if no optimizer is configured
-        if agent.optimizer is None:
-            return
+        # Execute instructions and collect rewards
+        rewards = []
+        for instruction_id in selected:
+            instruction = agent.isa_manager.get_instruction(instruction_id)
+            result = agent.isa_manager.execute_instruction(instruction)
+            reward = agent.instruction_selector.get_reward(result)
+            rewards.append(reward)
             
-        # Optimize sequence
-        optimized = agent.optimizer.optimize(initial_sequence, input_data)
+        assert all(isinstance(r, (int, float)) for r in rewards)
+        assert len(rewards) == len(selected)

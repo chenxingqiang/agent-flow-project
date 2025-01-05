@@ -105,7 +105,7 @@ result = controller.route_data(data)
 
 ## Visualization
 
-AgentFlow provides powerful visualization capabilities through integration with ell.studio.
+AgentFlow provides powerful visualization capabilities through integration with ell2a.studio.
 
 ### Basic Usage
 
@@ -114,7 +114,7 @@ from agentflow.visualization.service import VisualizationService
 
 # Create visualization service
 service = VisualizationService({
-    "api_key": "your_ell_studio_api_key",
+    "api_key": "your_ell2a_studio_api_key",
     "project_id": "your_project_id"
 })
 
@@ -182,8 +182,8 @@ graph = VisualGraph()
 graph.add_node(VisualNode(...))
 graph.add_edge(VisualEdge(...))
 
-# Convert to ell.studio format
-ell_data = graph.to_ell_format()
+# Convert to ell2a.studio format
+ell2a_data = graph.to_ell2a_format()
 ```
 
 ## Examples

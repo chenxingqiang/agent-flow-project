@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import ray
 import logging
-from ..core.agent import Agent
+from ..agents.agent import Agent
 from ..core.config import AgentConfig
 
 class AgentRequest(BaseModel):

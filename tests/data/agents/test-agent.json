@@ -1,0 +1,29 @@
+{
+  "id": "test-agent",
+  "name": "Test Agent",
+  "type": "generic",
+  "version": "1.0.0",
+  "mode": "sync",
+  "max_retries": 3,
+  "timeout": 60.0,
+  "workflow_path": null,
+  "workflow": {},
+  "steps": [],
+  "transformations": [],
+  "domain_config": {},
+  "metadata": {},
+  "system_prompt": "You are a helpful assistant.",
+  "isa_config_path": null,
+  "max_errors": 10,
+  "model": {
+    "provider": "default",
+    "name": "gpt-4",
+    "temperature": 0.7,
+    "max_tokens": null,
+    "top_p": 1.0,
+    "frequency_penalty": 0.0,
+    "presence_penalty": 0.0,
+    "stop": null,
+    "metadata": {}
+  }
+}

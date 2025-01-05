@@ -46,62 +46,67 @@
         "steps": [
             {
                 "step": 1,
+                "type": "transform",
                 "title": "Extract Research Details",
                 "description": "Analyze the research topic, academic requirements, and special considerations",
                 "action": "analyze_topic",
-                "input": ["research_topic", "academic_level", "field"],
-                "output": {
-                    "type": "analysis",
-                    "format": "markdown",
-                    "details": "Comprehensive research topic summary"
+                "config": {
+                    "strategy": "text",
+                    "params": {
+                        "method": "clean"
+                    }
                 }
             },
             {
                 "step": 2,
+                "type": "transform",
                 "title": "Literature Review",
                 "description": "Conduct a systematic literature review focusing on machine learning applications in education",
                 "action": "conduct_literature_review",
-                "input": ["research_topic", "field"],
-                "output": {
-                    "type": "literature_review",
-                    "format": "markdown",
-                    "details": "Annotated bibliography and research gaps"
+                "config": {
+                    "strategy": "text",
+                    "params": {
+                        "method": "clean"
+                    }
                 }
             },
             {
                 "step": 3,
+                "type": "transform",
                 "title": "Research Methodology Design",
                 "description": "Define research methodology, including research questions, hypotheses, and experimental design",
                 "action": "define_methodology",
-                "input": ["research_topic", "special_requirements"],
-                "output": {
-                    "type": "methodology",
-                    "format": "markdown",
-                    "details": "Comprehensive research methodology plan"
+                "config": {
+                    "strategy": "text",
+                    "params": {
+                        "method": "clean"
+                    }
                 }
             },
             {
                 "step": 4,
+                "type": "transform",
                 "title": "Innovative Research Ideas",
                 "description": "Generate innovative research ideas and approaches for AI applications in education",
                 "action": "generate_research_ideas",
-                "input": ["research_topic", "field"],
-                "output": {
-                    "type": "ideas",
-                    "format": "markdown",
-                    "details": "List of innovative research approaches"
+                "config": {
+                    "strategy": "text",
+                    "params": {
+                        "method": "clean"
+                    }
                 }
             },
             {
                 "step": 5,
+                "type": "transform",
                 "title": "Project Timeline and Milestones",
                 "description": "Create a detailed project timeline aligned with the research deadline",
                 "action": "create_project_timeline",
-                "input": ["deadline", "research_topic"],
-                "output": {
-                    "type": "timeline",
-                    "format": "markdown",
-                    "details": "Comprehensive project timeline with milestones"
+                "config": {
+                    "strategy": "text",
+                    "params": {
+                        "method": "clean"
+                    }
                 }
             }
         ]

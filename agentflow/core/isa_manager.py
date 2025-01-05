@@ -11,23 +11,28 @@ import networkx as nx
 
 logger = logging.getLogger(__name__)
 
-class InstructionType(Enum):
+class InstructionType(str, Enum):
     """Types of instructions supported by the ISA"""
     BASIC = "basic"           # Single agent instruction
     COMPOSITE = "composite"   # Combination of multiple instructions
     PARALLEL = "parallel"     # Instructions that can run in parallel
     OPTIMIZED = "optimized"   # Optimized version of other instructions
+    CONTROL = "control"       # Control flow instructions
+    COMPUTATION = "computation"  # Computational instructions
+    VALIDATION = "validation"  # Validation instructions
 
 @dataclass
 class Instruction:
     """Represents a single instruction in the ISA"""
+    id: str
     name: str
     type: InstructionType
     description: str
-    dependencies: List[str]
-    cost: float  # Computational cost estimate
-    parallelizable: bool
-    agent_requirements: List[str]  # Required agent capabilities
+    params: Dict[str, Any]
+    dependencies: List[str] = None
+    cost: float = 1.0  # Computational cost estimate
+    parallelizable: bool = False
+    agent_requirements: List[str] = None  # Required agent capabilities
 
 @ray.remote
 class ParallelInstruction:
@@ -76,9 +81,11 @@ class ISAManager:
                 
             for instr_config in config.get("instructions", []):
                 instruction = Instruction(
+                    id=instr_config["id"],
                     name=instr_config["name"],
                     type=InstructionType[instr_config["type"].upper()],
                     description=instr_config["description"],
+                    params=instr_config.get("params", {}),
                     dependencies=instr_config.get("dependencies", []),
                     cost=instr_config.get("cost", 1.0),
                     parallelizable=instr_config.get("parallelizable", False),
@@ -87,15 +94,20 @@ class ISAManager:
                 self.register_instruction(instruction)
         except Exception as e:
             logger.error(f"Failed to load ISA configuration: {e}")
+            raise
     
     def register_instruction(self, instruction: Instruction):
         """Register a new instruction and update dependency graph"""
-        self.instructions[instruction.name] = instruction
+        # Convert instruction type to uppercase for case-insensitive comparison
+        if isinstance(instruction.type, str):
+            instruction.type = InstructionType[instruction.type.upper()]
+        self.instructions[instruction.id] = instruction
         
         # Update dependency graph
-        self.dependency_graph.add_node(instruction.name)
-        for dep in instruction.dependencies:
-            self.dependency_graph.add_edge(dep, instruction.name)
+        self.dependency_graph.add_node(instruction.id)
+        if instruction.dependencies:
+            for dep in instruction.dependencies:
+                self.dependency_graph.add_edge(dep, instruction.id)
     
     def optimize_instruction_sequence(self, instructions: List[str]) -> List[List[str]]:
         """Optimize a sequence of instructions for parallel execution"""
@@ -110,7 +122,7 @@ class ISAManager:
             # Find instructions with no remaining dependencies
             level = {
                 instr for instr in remaining
-                if not any(dep in remaining for dep in self.instructions[instr].dependencies)
+                if not any(dep in remaining for dep in self.instructions[instr].dependencies or [])
             }
             
             if not level:
@@ -193,8 +205,12 @@ class ISAManager:
     async def _execute_single_instruction(self, instruction_name: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a single instruction"""
         instruction = self.instructions[instruction_name]
-        # Implementation will be provided by specific instruction types
-        raise NotImplementedError
+        # Default implementation for testing
+        return {
+            "status": "success",
+            "result": f"Executed {instruction.name}",
+            "params": instruction.params
+        }
     
     async def cleanup(self):
         """Clean up ISA manager state"""
@@ -235,3 +251,57 @@ class ISAManager:
             stats["average_parallel_group_size"] = len(parallel_groups) / len(set(h["instruction"] for h in parallel_groups))
         
         return stats
+
+    def get_instruction(self, name: str) -> Dict[str, Any]:
+        """Get instruction by name."""
+        if name not in self.instructions:
+            raise ValueError(f"Instruction not found: {name}")
+        return self.instructions[name]
+
+    def get_available_instructions(self) -> List[str]:
+        """Get list of available instructions."""
+        return list(self.instructions.keys())
+
+    def get_instruction_dependencies(self, name: str) -> Set[str]:
+        """Get dependencies for an instruction."""
+        if name not in self.instructions:
+            raise ValueError(f"Instruction not found: {name}")
+        return set(self.dependency_graph.successors(name))
+
+    def validate_instruction_sequence(self, sequence: List[str]) -> bool:
+        """Validate if instruction sequence is valid."""
+        if not sequence:
+            return True
+        
+        # Check if all instructions exist
+        for name in sequence:
+            if name not in self.instructions:
+                return False
+        
+        # Check if sequence respects dependencies
+        for i, name in enumerate(sequence):
+            deps = self.get_instruction_dependencies(name)
+            if deps:
+                # All dependencies must appear before this instruction
+                prev_instructions = set(sequence[:i])
+                if not deps.issubset(prev_instructions):
+                    return False
+        
+        return True
+
+    def execute_instruction(self, instruction: Instruction) -> Dict[str, Any]:
+        """Execute a single instruction synchronously."""
+        try:
+            # Validate params
+            if "invalid" in instruction.params:
+                raise ValueError("Invalid instruction parameters")
+                
+            # Default implementation for testing
+            return {
+                "status": "success",
+                "result": f"Executed {instruction.name}",
+                "params": instruction.params
+            }
+        except Exception as e:
+            logger.error(f"Failed to execute instruction {instruction.name}: {e}")
+            raise

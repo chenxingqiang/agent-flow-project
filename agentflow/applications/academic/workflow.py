@@ -5,7 +5,7 @@ from ...core.workflow import BaseWorkflow
 class AcademicWorkflow(BaseWorkflow):
     """Academic paper workflow implementation"""
     
-    @ell.simple(model="gpt-4o")
+    @ell2a.simple(model="gpt-4o")
     def process_step(self, step_number: int, inputs: Dict[str, Any]) -> Any:
         """Process academic workflow step"""
         step = next(s for s in self.workflow_def['WORKFLOW'] if s['step'] == step_number)

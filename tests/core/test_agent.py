@@ -3,48 +3,98 @@ Tests for Agent functionality
 """
 
 import pytest
-from unittest.mock import MagicMock
+import asyncio
+from unittest.mock import MagicMock, AsyncMock
 import logging
+import time
+from typing import AsyncGenerator
 
-from agentflow.core.agent import Agent
-from agentflow.core.config_manager import AgentConfig, ModelConfig, WorkflowConfig
+# Add anext for Python < 3.10
+try:
+    from builtins import anext
+except ImportError:
+    async def anext(ait):
+        return await ait.__anext__()
+
+from agentflow.agents.agent import Agent, AgentStatus
+from agentflow.core.config import AgentConfig, ModelConfig, WorkflowConfig
+from agentflow.ell2a.integration import ELL2AIntegration
+from agentflow.ell2a.types.message import Message, MessageRole
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-@pytest.fixture(autouse=True)
-def mock_ray(mocker):
-    """Mock Ray to prevent initialization"""
-    mock_ray = mocker.MagicMock()
-    mocker.patch('ray.init', return_value=None)
-    return mock_ray
+# Configure pytest-asyncio
+pytestmark = pytest.mark.asyncio
 
-@pytest.fixture(autouse=True)
-def mock_openai(mocker):
-    """Mock OpenAI client"""
-    mock_client = MagicMock()
-    
-    # Create a mock response
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = "Test response"
-    mock_response.usage.total_tokens = 10
-
-    # Configure the mock to return the mock response
-    mock_client.chat.completions.create.return_value = mock_response
-
-    mocker.patch('openai.OpenAI', return_value=mock_client)
-    return mock_client
+# Add event loop fixture
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create event loop for tests."""
+    try:
+        policy = asyncio.get_event_loop_policy()
+        loop = policy.new_event_loop()
+        asyncio.set_event_loop(loop)
+        yield loop
+    finally:
+        loop.close()
 
 @pytest.fixture
-async def agent_config():
-    """Create test agent config"""
+def mock_ell2a():
+    """Mock ELL2A integration."""
+    mock = MagicMock(spec=ELL2AIntegration)
+    mock.enabled = True
+    mock.tracking_enabled = True
+    mock.config = {}
+    mock.metrics = {
+        "function_calls": 0,
+        "total_execution_time": 0.0,
+        "errors": 0
+    }
+    
+    async def mock_process(message: Message) -> Message:
+        if not isinstance(message, Message):
+            raise TypeError(f"Expected Message, got {type(message)}")
+            
+        # Return default response if no side effect
+        if not hasattr(mock.process_message, '_mock_side_effect') or mock.process_message._mock_side_effect is None:
+            return Message(
+                role=MessageRole.ASSISTANT,
+                content="Test response",
+                metadata={
+                    "model": "test-model",
+                    "timestamp": time.time()
+                }
+            )
+            
+        # Handle side effect
+        side_effect = mock.process_message._mock_side_effect
+        if isinstance(side_effect, Exception):
+            raise side_effect
+        elif isinstance(side_effect, type) and issubclass(side_effect, Exception):
+            raise side_effect("Test error")
+        elif callable(side_effect):
+            result = side_effect(message)
+            if asyncio.iscoroutine(result):
+                return await result
+            return result
+        else:
+            return side_effect
+    
+    mock.process_message = AsyncMock(wraps=mock_process)
+    mock.configure = MagicMock()
+    mock.cleanup = AsyncMock()
+    return mock
+
+@pytest.fixture
+def agent_config():
+    """Create test agent config."""
     return AgentConfig(
         id="test-agent",
         name="Test Agent",
         description="Test agent for unit tests",
-        agent_type="generic",
+        type="generic",
         system_prompt="You are a test agent",
         model=ModelConfig(
             provider="default",
@@ -52,7 +102,8 @@ async def agent_config():
         ),
         workflow=WorkflowConfig(
             name="test-workflow",
-            max_iterations=10
+            max_iterations=10,
+            timeout=3600
         ),
         config={
             "algorithm": "PPO"
@@ -60,217 +111,72 @@ async def agent_config():
     )
 
 @pytest.fixture
-async def agent(mock_openai):
-    """Create test agent instance"""
-    config = AgentConfig(
-        id="test-agent",
-        name="Test Agent",
-        description="Test agent for unit tests",
-        agent_type="generic",
-        system_prompt="You are a test agent",
-        model=ModelConfig(
-            provider="default",
-            name="gpt-3.5-turbo"
-        ),
-        workflow=WorkflowConfig(
-            name="test-workflow",
-            max_iterations=10
-        ),
-        config={
-            "algorithm": "PPO"
-        }
-    )
-    agent = Agent(config)
-    await agent.initialize()
-    return agent
+async def agent(agent_config, mock_ell2a):
+    """Create and initialize test agent."""
+    _agent = None
+    try:
+        _agent = Agent(config=agent_config)
+        _agent._ell2a = mock_ell2a
+        await _agent.initialize()
+        _agent.metadata["test_mode"] = True
+        yield _agent
+    finally:
+        if _agent:
+            await _agent.cleanup()
 
 @pytest.mark.asyncio
 async def test_agent_initialization(agent):
-    """Test agent initialization"""
-    agent_instance = await agent
-    assert agent_instance._config_obj.id == "test-agent"
-    assert agent_instance._config_obj.name == "Test Agent"
-    assert agent_instance._config_obj.agent_type == "generic"
-    assert agent_instance._config_obj.system_prompt == "You are a test agent"
-    assert agent_instance._config_obj.model.name == "gpt-3.5-turbo"
-    assert agent_instance._config_obj.workflow.max_iterations == 10
-    assert agent_instance._config_obj.config["algorithm"] == "PPO"
+    """Test agent initialization."""
+    agent_instance = await anext(agent)
+    assert isinstance(agent_instance, Agent)
+    assert agent_instance.state.status == AgentStatus.IDLE
+    assert agent_instance._initialized
 
 @pytest.mark.asyncio
-async def test_agent_process_message():
-    """Test agent message processing"""
-    config = AgentConfig(
-        id="test-agent",
-        name="Test Agent",
-        description="Test agent for unit tests",
-        agent_type="generic",
-        system_prompt="You are a test agent",
-        model=ModelConfig(
-            provider="default",
-            name="gpt-3.5-turbo"
-        ),
-        workflow=WorkflowConfig(
-            name="test-workflow",
-            max_iterations=10
-        ),
-        config={
-            "algorithm": "PPO"
-        }
-    )
-    agent = Agent(config)
-    await agent.initialize()
+async def test_message_processing(agent, mock_ell2a):
+    """Test message processing."""
+    agent_instance = await anext(agent)
+    assert isinstance(agent_instance, Agent)
 
-    # Create a mock response
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = "Test response"
-    mock_response.usage.total_tokens = 10
+    test_message = "Test message"
+    response = await agent_instance.process_message(test_message)
 
-    # Create a mock client
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value = mock_response
-
-    # Set the mock client
-    agent.client = mock_client
-
-    message = "Test message"
-    response = agent.process_message(message)
-    
-    # Debug logging
-    logger.debug(f"Response type: {type(response)}")
-    logger.debug(f"Response value: {repr(response)}")
-    
-    assert isinstance(response, str)
     assert response == "Test response"
-
-    # Check workflow history
-    history = agent.get_workflow_history()
-    assert len(history) == 1
-    assert history[0]['step'] == 'process_message'
-    assert history[0]['status'] == 'success'
-    assert history[0]['details']['message'] == message
-    assert history[0]['details']['response'] == "Test response"
-    assert history[0]['details']['tokens'] == 10
+    assert len(agent_instance.history) == 2
+    assert agent_instance.state.status == AgentStatus.IDLE
 
 @pytest.mark.asyncio
-async def test_agent_error_handling():
-    """Test agent error handling"""
-    config = AgentConfig(
-        id="test-agent",
-        name="Test Agent",
-        description="Test agent for unit tests",
-        agent_type="generic",
-        system_prompt="You are a test agent",
-        model=ModelConfig(
-            provider="default",
-            name="gpt-3.5-turbo"
-        ),
-        workflow=WorkflowConfig(
-            name="test-workflow",
-            max_iterations=10
-        ),
-        config={
-            "algorithm": "PPO"
-        }
-    )
-    agent = Agent(config)
-    await agent.initialize()
+async def test_error_handling(agent, mock_ell2a):
+    """Test error handling."""
+    agent_instance = await anext(agent)
+    assert isinstance(agent_instance, Agent)
+
+    # Set up mock to raise an exception
+    mock_ell2a.process_message.side_effect = Exception("Test error")
+    agent_instance._ell2a = mock_ell2a
 
     with pytest.raises(Exception):
-        agent.process_message(None)
+        await agent_instance.process_message("Test message")
 
-    history = agent.get_workflow_history()
-    assert any(step.get('status') == 'error' for step in history)
-
-    await agent.cleanup()
-
-@pytest.mark.asyncio
-async def test_agent_cleanup():
-    """Test agent cleanup"""
-    config = AgentConfig(
-        id="test-agent",
-        name="Test Agent",
-        description="Test agent for unit tests",
-        agent_type="generic",
-        system_prompt="You are a test agent",
-        model=ModelConfig(
-            provider="default",
-            name="gpt-3.5-turbo"
-        ),
-        workflow=WorkflowConfig(
-            name="test-workflow",
-            max_iterations=10
-        ),
-        config={
-            "algorithm": "PPO"
-        }
-    )
-    agent = Agent(config)
-    await agent.initialize()
-
-    await agent.cleanup()
-    assert not agent._initialized
-    assert not agent.history
-    assert not agent.errors
-    assert not agent._workflow_history
+    assert agent_instance.state.status == AgentStatus.FAILED
+    assert len(agent_instance.errors) == 1
+    assert agent_instance.state.last_error == "Test error"
 
 @pytest.mark.asyncio
-async def test_workflow_history():
-    """Test workflow history tracking"""
-    config = AgentConfig(
-        id="test-agent",
-        name="Test Agent",
-        description="Test agent for unit tests",
-        agent_type="generic",
-        system_prompt="You are a test agent",
-        model=ModelConfig(
-            provider="default",
-            name="gpt-3.5-turbo"
-        ),
-        workflow=WorkflowConfig(
-            name="test-workflow",
-            max_iterations=10
-        ),
-        config={
-            "algorithm": "PPO"
-        }
-    )
-    agent = Agent(config)
-    await agent.initialize()
+async def test_error_limit(agent, mock_ell2a):
+    """Test error limit handling."""
+    agent_instance = await anext(agent)
+    assert isinstance(agent_instance, Agent)
 
-    history = agent.get_workflow_history()
-    assert isinstance(history, list)
+    # Set up mock to raise an exception
+    mock_ell2a.process_message.side_effect = Exception("Test error")
+    agent_instance._ell2a = mock_ell2a
 
-    await agent.cleanup()
+    # Generate more errors than the limit
+    for i in range(agent_instance.max_errors + 5):
+        with pytest.raises(Exception):
+            await agent_instance.process_message("Test message")
 
-@pytest.mark.asyncio
-async def test_workflow_error_tracking():
-    """Test workflow error tracking"""
-    config = AgentConfig(
-        id="test-agent",
-        name="Test Agent",
-        description="Test agent for unit tests",
-        agent_type="generic",
-        system_prompt="You are a test agent",
-        model=ModelConfig(
-            provider="default",
-            name="gpt-3.5-turbo"
-        ),
-        workflow=WorkflowConfig(
-            name="test-workflow",
-            max_iterations=10
-        ),
-        config={
-            "algorithm": "PPO"
-        }
-    )
-    agent = Agent(config)
-    await agent.initialize()
-
-    with pytest.raises(ValueError):
-        agent.process_message(None)
-
-    history = agent.get_workflow_history()
-    assert any(step.get('status') == 'error' for step in history)
-
-    await agent.cleanup()
+    # Check that errors list is limited
+    assert len(agent_instance.errors) == agent_instance.max_errors
+    assert agent_instance.state.status == AgentStatus.FAILED

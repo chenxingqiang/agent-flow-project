@@ -5,7 +5,7 @@ from .base import BaseInstruction
 from ..optimization.distributed import DistributedOptimizer
 from ..optimization.federated import FederatedOptimizer
 from ..monitoring.monitor import PerformanceMonitor
-from ..testing.advanced_testing import TestGenerator, PerformanceTest
+from ....tests.advanced_testing import TestGenerator, PerformanceTest
 
 @dataclass
 class DistributedInstruction(BaseInstruction):

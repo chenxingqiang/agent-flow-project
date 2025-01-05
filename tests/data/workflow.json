@@ -1,21 +1,49 @@
 {
     "WORKFLOW": {
-        "max_iterations": 10,
-        "logging_level": "INFO",
-        "distributed": false,
-        "steps": [
-            {
-                "type": "research_planning",
-                "config": {
-                    "depth": "comprehensive"
-                }
-            },
-            {
-                "type": "document_generation",
-                "config": {
-                    "format": "academic"
-                }
+        "step_1": {
+            "id": "step_1",
+            "name": "Research Planning",
+            "description": "Plan the research approach",
+            "type": "research_planning",
+            "input": ["query"],
+            "output": ["plan"],
+            "config": {
+                "max_retries": 3,
+                "timeout": 30
             }
-        ]
-    }
+        },
+        "step_2": {
+            "id": "step_2",
+            "name": "Implementation",
+            "description": "Implement the research plan",
+            "type": "implementation",
+            "input": ["plan"],
+            "output": ["code"],
+            "config": {
+                "max_retries": 3,
+                "timeout": 30
+            },
+            "dependencies": ["step_1"]
+        },
+        "step_3": {
+            "id": "step_3",
+            "name": "Documentation",
+            "description": "Generate documentation",
+            "type": "document_generation",
+            "input": ["code"],
+            "output": ["docs"],
+            "config": {
+                "max_retries": 3,
+                "timeout": 30
+            },
+            "dependencies": ["step_2"]
+        }
+    },
+    "CONFIG": {
+        "max_retries": 3,
+        "timeout": 30,
+        "parallel_execution": false
+    },
+    "INPUT": ["query"],
+    "OUTPUT": ["docs"]
 }

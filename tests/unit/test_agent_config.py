@@ -1,14 +1,16 @@
 import pytest
 from typing import Dict, Any
-from agentflow.core.config import AgentConfig, ModelConfig, WorkflowConfig
-from agentflow.core.agent import Agent
+from agentflow.core.config import AgentConfig, ModelConfig
+from agentflow.core.workflow_types import WorkflowConfig
+from agentflow.agents.agent import Agent
+import pydantic_core
 
 def test_agent_config_initialization():
     """Test comprehensive agent configuration initialization"""
     config_data = {
         "id": "research_agent_1",
         "name": "Research Agent",
-        "agent_type": "research",
+        "type": "research",
         "model": {
             "provider": "openai",
             "name": "gpt-4",
@@ -29,7 +31,7 @@ def test_agent_config_initialization():
     
     assert agent_config.id == "research_agent_1"
     assert agent_config.name == "Research Agent"
-    assert agent_config.agent_type == "research"
+    assert agent_config.type == "research"
     assert agent_config.model.provider == "openai"
     assert agent_config.model.name == "gpt-4"
     assert agent_config.model.temperature == 0.7
@@ -48,86 +50,131 @@ def test_agent_config_model_validation():
         {
             "provider": "anthropic",
             "name": "claude-2",
-            "temperature": 0.3
+            "temperature": 0.7
         }
     ]
 
-    for model_data in valid_models:
-        model_config = ModelConfig(**model_data)
-        assert model_config.provider in ["openai", "anthropic"]
-        assert model_config.temperature >= 0 and model_config.temperature <= 1
+    for model_config in valid_models:
+        config = {
+            "type": "research",
+            "model": model_config
+        }
+        agent_config = AgentConfig(**config)
+        assert agent_config.model.provider == model_config["provider"]
+        assert agent_config.model.name == model_config["name"]
+        assert agent_config.model.temperature == model_config["temperature"]
 
 def test_agent_config_workflow_policies():
-    """Test workflow configuration policies"""
-    workflow_data = {
-        "max_iterations": 10,
-        "logging_level": "DEBUG",
-        "required_fields": ["topic", "deadline"],
-        "error_handling": {
-            "missing_input_error": "Missing required workflow inputs",
-            "max_retry_error": "Maximum retry attempts exceeded"
-        },
-        "steps": [
-            {
-                "type": "research_planning",
-                "required_inputs": ["topic"]
+    """Test workflow policies configuration"""
+    config = {
+        "type": "research",
+        "workflow": {
+            "max_iterations": 10,
+            "retry_policy": {
+                "max_retries": 3,
+                "retry_delay": 1.0
             },
-            {
-                "type": "document_generation",
-                "required_inputs": ["research_findings"]
+            "error_policy": {
+                "ignore_warnings": True,
+                "fail_fast": False
             }
-        ]
+        }
     }
-
-    workflow_config = WorkflowConfig(**workflow_data)
     
-    assert workflow_config.max_iterations == 10
-    assert workflow_config.logging_level == "DEBUG"
-    assert workflow_config.required_fields == ["topic", "deadline"]
-    assert len(workflow_config.steps) == 2
-    assert workflow_config.steps[0].type == "research_planning"
+    agent_config = AgentConfig(**config)
+    assert agent_config.workflow.max_iterations == 10
+    assert agent_config.workflow.retry_policy["max_retries"] == 3
+    assert agent_config.workflow.retry_policy["retry_delay"] == 1.0
 
 def test_agent_config_minimal_configuration():
-    """Test minimal agent configuration"""
+    """Test minimal configuration requirements"""
     minimal_config = {
-        "id": "basic_agent",
-        "name": "Basic Agent",
+        "type": "research",
         "model": {
             "provider": "openai",
-            "name": "gpt-3.5-turbo"
+            "name": "gpt-4"
+        }
+    }
+    
+    agent_config = AgentConfig(**minimal_config)
+    assert agent_config.type == "research"
+    assert agent_config.model.provider == "openai"
+    assert agent_config.model.name == "gpt-4"
+
+def test_agent_config_invalid_configurations():
+    """Test invalid configuration handling"""
+    invalid_configs = [
+        {
+            "type": "invalid_type",
+            "model": {"provider": "openai", "name": "gpt-4"}
+        },
+        {
+            "type": "research",
+            "model": {"provider": "invalid_provider", "name": "gpt-4"}
+        }
+    ]
+    
+    for config in invalid_configs:
+        with pytest.raises(ValueError):
+            AgentConfig(**config)
+
+def test_agent_config_defaults():
+    """Test default configuration values"""
+    minimal_config = {
+        "type": "research",
+        "model": {
+            "provider": "openai",
+            "name": "gpt-4"
         }
     }
 
     agent_config = AgentConfig(**minimal_config)
     
-    assert agent_config.id == "basic_agent"
-    assert agent_config.name == "Basic Agent"
-    assert agent_config.model.provider == "openai"
-    assert agent_config.model.name == "gpt-3.5-turbo"
-    assert agent_config.model.temperature == 0.5  # Default value
+    # Check default values
+    assert agent_config.workflow is not None
     assert agent_config.workflow.max_iterations == 10  # Default value
+    assert agent_config.workflow.timeout == 3600  # Default value
+    assert agent_config.max_retries == 3  # Default value
 
-def test_agent_config_invalid_configurations():
-    """Test invalid agent configurations"""
-    invalid_configs = [
-        # Missing required model fields
-        {
-            "id": "invalid_agent_1",
-            "model": {}
+def test_agent_config_serialization():
+    """Test configuration serialization and deserialization"""
+    config_data = {
+        "type": "research",
+        "model": {
+            "provider": "openai",
+            "name": "gpt-4",
+            "temperature": 0.7
         },
-        # Invalid model provider
-        {
-            "id": "invalid_agent_2",
-            "model": {
-                "provider": "unsupported_provider",
-                "name": "model"
-            }
+        "workflow": {
+            "max_iterations": 5,
+            "logging_level": "DEBUG"
         }
-    ]
+    }
 
-    for config in invalid_configs:
-        with pytest.raises((ValueError, TypeError)):
-            AgentConfig(**config)
+    agent_config = AgentConfig(**config_data)
+    
+    # Convert to dictionary
+    config_dict = agent_config.model_dump()
+    
+    assert config_dict['type'] == "research"
+    assert config_dict['model']['provider'] == "openai"
+    assert config_dict['workflow']['max_iterations'] == 5
+
+def test_agent_config_immutability():
+    """Test configuration validation and immutability"""
+    config_data = {
+        "type": "research",
+        "model": {
+            "provider": "openai",
+            "name": "gpt-4"
+        }
+    }
+
+    agent_config = AgentConfig(**config_data)
+    
+    # Verify that the original configuration cannot be modified
+    with pytest.raises(pydantic_core.ValidationError, match="Instance is frozen"):
+        agent_config.name = "Modified Name"
 
 def test_agent_config_complex_workflow_steps():
     """Test complex workflow steps configuration"""
@@ -184,73 +231,6 @@ def test_agent_config_validation():
                 "provider": "unsupported_provider"
             }
         })
-
-def test_agent_config_defaults():
-    """Test default configuration values"""
-    minimal_config = {
-        "agent_type": "research",
-        "model": {
-            "provider": "openai",
-            "name": "gpt-4"
-        }
-    }
-
-    agent_config = AgentConfig(**minimal_config)
-    
-    # Check default values
-    assert agent_config.workflow.max_iterations == 10  # Default value
-    assert agent_config.workflow.logging_level == "INFO"  # Default value
-    assert agent_config.model.temperature == 0.5  # Default temperature
-
-def test_agent_config_serialization():
-    """Test configuration serialization and deserialization"""
-    config_data = {
-        "agent_type": "research",
-        "model": {
-            "provider": "openai",
-            "name": "gpt-4",
-            "temperature": 0.7
-        },
-        "workflow": {
-            "max_iterations": 5,
-            "logging_level": "DEBUG"
-        }
-    }
-
-    agent_config = AgentConfig(**config_data)
-    
-    # Convert to dictionary
-    config_dict = agent_config.model_dump()
-    
-    assert config_dict['agent_type'] == "research"
-    assert config_dict['model']['name'] == "gpt-4"
-    assert config_dict['workflow']['max_iterations'] == 5
-
-def test_agent_config_immutability():
-    """Test configuration validation and immutability"""
-    config_data = {
-        "agent_type": "research",
-        "model": {
-            "provider": "openai",
-            "name": "gpt-4"
-        }
-    }
-
-    agent_config = AgentConfig(**config_data)
-
-    # Verify that the original configuration cannot be modified
-    with pytest.raises(Exception) as excinfo:
-        # Attempt to create a new config with an invalid agent type
-        AgentConfig(**{
-            **config_data,
-            "agent_type": "invalid_type"
-        })
-    
-    # Verify that the validation error is raised
-    assert "Unsupported agent type" in str(excinfo.value)
-    
-    # Verify that the original configuration remains unchanged
-    assert agent_config.agent_type == "research"
 
 def test_agent_config_complex_workflow():
     """Test complex workflow configuration"""

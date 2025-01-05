@@ -1,20 +1,39 @@
-"""Core components of the agentflow package"""
+"""Core module for agentflow."""
 
-from .config import AgentConfig, ModelConfig, WorkflowConfig
-from .base_workflow import BaseWorkflow
-from .workflow import WorkflowEngine
-from .objective_workflow import ObjectiveWorkflow
-from .rate_limiter import ModelRateLimiter, RateLimitError
-from .research_workflow import ResearchWorkflow
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..agents.agent_types import AgentConfig, AgentMode, AgentType, AgentStatus
+    from ..agents.agent import Agent, AgentState
+
+from .workflow_types import WorkflowConfig, WorkflowStep, WorkflowStepType
+from .workflow_executor import WorkflowExecutor
+from .workflow_state import WorkflowStateManager, WorkflowStatus, StepStatus
+from .exceptions import WorkflowExecutionError, StepExecutionError
+from .workflow import Workflow
+
+# Re-export types for convenience
+if TYPE_CHECKING:
+    from ..agents.agent_types import AgentConfig, AgentMode, AgentType, AgentStatus
+
+# Rebuild models after all imports are done
+WorkflowConfig.model_rebuild()
 
 __all__ = [
-    'AgentConfig',
-    'ModelConfig',
     'WorkflowConfig',
-    'BaseWorkflow',
-    'WorkflowEngine',
-    'ObjectiveWorkflow',
-    'ResearchWorkflow',
-    'ModelRateLimiter',
-    'RateLimitError'
+    'WorkflowStep',
+    'WorkflowStepType',
+    'AgentType',
+    'AgentMode',
+    'WorkflowExecutor',
+    'WorkflowStateManager',
+    'WorkflowStatus',
+    'StepStatus',
+    'WorkflowExecutionError',
+    'StepExecutionError',
+    'AgentConfig',
+    'AgentMode',
+    'AgentType',
+    'AgentStatus',
+    'Workflow'
 ]

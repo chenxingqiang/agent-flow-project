@@ -1,461 +1,333 @@
 """Advanced transformation strategies for data processing."""
-
-import abc
-import logging
-from typing import Any, Callable, Dict, List, Optional, Union
-
 import numpy as np
 import pandas as pd
-import scipy.stats as stats
-import nltk
+import logging
+from typing import Any, Dict, List, Optional, Union
+from sklearn.preprocessing import StandardScaler, PolynomialFeatures
+from sklearn.covariance import EllipticEnvelope
+from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer, PorterStemmer
+from nltk.stem import WordNetLemmatizer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.ensemble import IsolationForest
+from sklearn.neighbors import LocalOutlierFactor
+from sklearn.svm import OneClassSVM
 
-class AdvancedTransformationStrategy(abc.ABC):
-    """
-    Advanced base class for sophisticated data transformation strategies.
-    
-    This abstract base class provides a framework for implementing complex
-    data transformation techniques with robust error handling and logging.
-    """
+class AdvancedTransformationStrategy:
+    """Base class for advanced transformation strategies."""
     
     def __init__(self, logger: Optional[logging.Logger] = None, **kwargs):
-        """
-        Initialize the transformation strategy.
+        """Initialize transformation strategy.
         
         Args:
-            logger: Optional custom logger. If not provided, a default logger is created.
-            **kwargs: Additional configuration parameters
+            logger: Optional logger instance
+            **kwargs: Additional strategy-specific parameters
         """
         self.logger = logger or logging.getLogger(self.__class__.__name__)
-        self.config = kwargs
+        self.params = kwargs
     
-    @abc.abstractmethod
     def transform(self, data: Any) -> Any:
-        """
-        Abstract method for transforming input data.
+        """Transform input data.
         
         Args:
             data: Input data to transform
-        
+            
         Returns:
             Transformed data
-        
-        Raises:
-            ValueError: If transformation fails
         """
-        pass
+        raise NotImplementedError("Subclasses must implement transform method")
 
 class OutlierRemovalStrategy(AdvancedTransformationStrategy):
-    """Advanced outlier removal strategy using multiple statistical techniques."""
+    """Strategy for removing outliers from data."""
     
     def __init__(self, method: str = 'z_score', threshold: float = 3.0, **kwargs):
-        """Initialize outlier removal strategy."""
+        """Initialize outlier removal strategy.
+        
+        Args:
+            method: Method to use for outlier detection ('z_score', 'iqr', 'modified_z_score', 'isolation_forest')
+            threshold: Threshold for outlier detection
+        """
         super().__init__(**kwargs)
         self.method = method
         self.threshold = threshold
+        self.type = 'outlier_removal'
+        self.params = {
+            'method': method,
+            'threshold': threshold,
+            **kwargs
+        }
     
     def transform(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
-        """Remove outliers from the input data."""
-        try:
-            if isinstance(data, pd.DataFrame):
-                return self._remove_outliers_dataframe(data)
-            elif isinstance(data, np.ndarray):
-                return self._remove_outliers_array(data)
-            else:
-                raise ValueError(f"Unsupported data type: {type(data)}")
-        except Exception as e:
-            self.logger.error(f"Outlier removal failed: {e}")
-            raise ValueError(f"Outlier removal failed: {e}")
-    
-    def _remove_outliers_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Remove outliers from a pandas DataFrame."""
-        numeric_columns = df.select_dtypes(include=[np.number]).columns
-        for column in numeric_columns:
-            df = df[~self._is_outlier(df[column])]
-        return df
-    
-    def _remove_outliers_array(self, arr: np.ndarray) -> np.ndarray:
-        """Remove outliers from a NumPy array."""
-        mask = ~self._is_outlier(arr)
-        return arr[mask]
-    
-    def _is_outlier(self, data: Union[pd.Series, np.ndarray]) -> np.ndarray:
-        """Identify outliers using the specified method."""
+        """Remove outliers from data.
+        
+        Args:
+            data: Input data (DataFrame or ndarray)
+            
+        Returns:
+            Data with outliers removed
+        """
+        self.logger.info(f"Applying strategy: {self.method} outlier removal with threshold {self.threshold}")
+        
+        # Convert numpy array to DataFrame if needed
+        is_numpy = isinstance(data, np.ndarray)
+        if is_numpy:
+            data = pd.DataFrame(data)
+        
+        # Get numeric columns only
+        numeric_data = data.select_dtypes(include=[np.number])
+        if numeric_data.empty:
+            return data if not is_numpy else data.values
+        
         if self.method == 'z_score':
-            z_scores = np.abs(stats.zscore(data))
-            return z_scores > self.threshold
+            z_scores = np.abs(StandardScaler().fit_transform(numeric_data))
+            mask = (z_scores < self.threshold).all(axis=1)
         elif self.method == 'iqr':
-            q1, q3 = np.percentile(data, [25, 75])
-            iqr = q3 - q1
-            lower_bound = q1 - self.threshold * iqr
-            upper_bound = q3 + self.threshold * iqr
-            return (data < lower_bound) | (data > upper_bound)
+            Q1 = numeric_data.quantile(0.25)
+            Q3 = numeric_data.quantile(0.75)
+            IQR = Q3 - Q1
+            mask = ~((numeric_data < (Q1 - self.threshold * IQR)) | (numeric_data > (Q3 + self.threshold * IQR))).any(axis=1)
         elif self.method == 'modified_z_score':
-            median = np.median(data)
-            mad = np.median(np.abs(data - median))
-            modified_z_scores = 0.6745 * (data - median) / mad
-            return np.abs(modified_z_scores) > self.threshold
+            median = numeric_data.median()
+            mad = (numeric_data - median).abs().median()
+            modified_z_scores = 0.6745 * (numeric_data - median) / mad
+            mask = (np.abs(modified_z_scores) < self.threshold).all(axis=1)
+        elif self.method == 'isolation_forest':
+            contamination = self.params.get('contamination', 0.1)
+            random_state = self.params.get('random_state', None)
+            detector = IsolationForest(contamination=contamination, random_state=random_state)
+            predictions = detector.fit_predict(numeric_data)
+            mask = predictions == 1  # 1 for inliers, -1 for outliers
         else:
-            raise ValueError(f"Unknown outlier detection method: {self.method}")
+            raise ValueError(f"Unknown outlier removal method: {self.method}")
+        
+        result = data[mask]
+        return result if not is_numpy else result.values
 
 class FeatureEngineeringStrategy(AdvancedTransformationStrategy):
-    """Advanced feature engineering strategy with multiple transformation techniques."""
+    """Strategy for feature engineering."""
     
-    def __init__(self, strategy: str = 'polynomial', degree: int = 2, **kwargs):
+    def __init__(self, strategy: str = 'polynomial', **kwargs):
         """Initialize feature engineering strategy."""
         super().__init__(**kwargs)
         self.strategy = strategy
-        self.degree = degree
+        self.degree = kwargs.get('degree', 2)
+        self.with_mean = kwargs.get('with_mean', True)
+        self.with_std = kwargs.get('with_std', True)
+        self.type = 'feature_engineering'
+        self.params = {
+            'strategy': strategy,
+            'degree': self.degree,
+            'with_mean': self.with_mean,
+            'with_std': self.with_std,
+            **kwargs
+        }
     
-    def transform(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
-        """Apply feature engineering transformation."""
-        try:
-            if self.strategy == 'polynomial':
-                return self._polynomial_features(data)
-            elif self.strategy == 'log':
-                return self._log_transform(data)
-            elif self.strategy == 'exp':
-                return self._exp_transform(data)
-            elif self.strategy == 'binning':
-                return self._binning_transform(data, bins=self.degree)
-            elif self.strategy == 'standard':
-                return self._standard_transform(data)
-            else:
-                raise ValueError(f"Unknown feature engineering strategy: {self.strategy}")
-        except Exception as e:
-            self.logger.error(f"Feature engineering failed: {e}")
-            raise ValueError(f"Feature engineering failed: {e}")
-    
-    def _polynomial_features(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
-        """Generate polynomial features."""
-        try:
-            # If input is a DataFrame, handle mixed types
-            if isinstance(data, pd.DataFrame):
-                # Separate numeric and non-numeric columns
-                numeric_columns = data.select_dtypes(include=[np.number]).columns
-                non_numeric_columns = data.select_dtypes(exclude=[np.number]).columns
-                
-                # Apply polynomial features only to numeric columns
-                if len(numeric_columns) > 0:
-                    from sklearn.preprocessing import PolynomialFeatures
-                    poly_features = PolynomialFeatures(
-                        degree=self.degree, 
-                        include_bias=False
-                    )
-                    
-                    # Transform numeric columns
-                    numeric_poly = poly_features.fit_transform(data[numeric_columns])
-                    numeric_poly_df = pd.DataFrame(
-                        numeric_poly, 
-                        columns=poly_features.get_feature_names_out(numeric_columns),
-                        index=data.index
-                    )
-                    
-                    # Combine with non-numeric columns
-                    if len(non_numeric_columns) > 0:
-                        result = pd.concat([numeric_poly_df, data[non_numeric_columns]], axis=1)
-                    else:
-                        result = numeric_poly_df
-                    
-                    return result
-                
-                # If no numeric columns, return original data
-                return data
-            
-            # If input is a numpy array, use standard polynomial features
-            elif isinstance(data, np.ndarray):
-                from sklearn.preprocessing import PolynomialFeatures
-                poly_features = PolynomialFeatures(
-                    degree=self.degree, 
-                    include_bias=False
-                )
-                return poly_features.fit_transform(data)
-            
-            else:
-                raise TypeError(f"Unsupported data type: {type(data)}")
+    def transform(self, data: Union[pd.DataFrame, np.ndarray, Dict[str, Any]]) -> Union[pd.DataFrame, np.ndarray]:
+        """Apply feature engineering transformations.
         
-        except Exception as e:
-            self.logger.error(f"Polynomial feature generation failed: {e}")
-            raise ValueError(f"Polynomial feature generation failed: {e}")
-    
-    def _log_transform(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
-        """Apply logarithmic transformation."""
-        return np.log1p(data)
-    
-    def _exp_transform(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
-        """Apply exponential transformation."""
-        return np.exp(data) - 1
-    
-    def _binning_transform(self, data: Union[pd.DataFrame, np.ndarray], bins: int = 5) -> Union[pd.DataFrame, np.ndarray]:
-        """Discretize continuous features into categorical bins."""
-        if isinstance(data, pd.DataFrame):
-            return pd.qcut(data, q=bins, labels=False, duplicates='drop')
+        Args:
+            data: Input data (DataFrame, ndarray, or dictionary)
+            
+        Returns:
+            Transformed data with engineered features
+        """
+        self.logger.info(f"Applying {self.strategy} feature engineering")
+        
+        # Convert dictionary to DataFrame if needed
+        if isinstance(data, dict):
+            data = pd.DataFrame([data])
+        
+        # Convert numpy array to DataFrame if needed
+        if isinstance(data, np.ndarray):
+            data = pd.DataFrame(data)
+        
+        # Get numeric columns only
+        numeric_data = data.select_dtypes(include=[np.number])
+        if numeric_data.empty:
+            # If no numeric columns, return original data
+            return data
+        
+        if self.strategy == 'standard':
+            scaler = StandardScaler()
+            transformed_data = scaler.fit_transform(numeric_data)
+            transformed_df = pd.DataFrame(transformed_data, columns=numeric_data.columns, index=data.index)
+            
+            # Replace numeric columns with transformed data
+            result = data.copy()
+            for col in numeric_data.columns:
+                result[col] = transformed_df[col]
+            return result
+            
+        elif self.strategy == 'polynomial':
+            poly = PolynomialFeatures(degree=self.params.get('degree', 2))
+            transformed_data = poly.fit_transform(numeric_data)
+            feature_names = [f'poly_{i}' for i in range(transformed_data.shape[1])]
+            transformed_df = pd.DataFrame(transformed_data, columns=feature_names, index=data.index)
+            
+            # Combine original non-numeric columns with transformed data
+            non_numeric_cols = data.select_dtypes(exclude=[np.number]).columns
+            if not non_numeric_cols.empty:
+                result = pd.concat([data[non_numeric_cols], transformed_df], axis=1)
+            else:
+                result = transformed_df
+            return result
+            
         else:
-            return pd.qcut(pd.Series(data.flatten()), q=bins, labels=False, duplicates='drop').values
-    
-    def _standard_transform(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
-        """Apply standard scaling transformation."""
-        if isinstance(data, pd.DataFrame):
-            return (data - data.mean()) / data.std()
-        elif isinstance(data, np.ndarray):
-            return (data - np.mean(data, axis=0)) / np.std(data, axis=0)
-        else:
-            raise ValueError("Input must be a pandas DataFrame or numpy array")
+            raise ValueError(f"Unknown feature engineering strategy: {self.strategy}")
 
 class TextTransformationStrategy(AdvancedTransformationStrategy):
-    """Text transformation strategy for text data preprocessing."""
+    """Strategy for text data transformations."""
     
-    def __init__(self, strategy: str = 'tokenize', **kwargs):
-        """
-        Initialize text transformation strategy.
-
-        Args:
-            strategy: Type of text transformation ('tokenize', 'lemmatize', 'stem')
-            **kwargs: Additional parameters for specific strategies
-        """
-        self.strategy = strategy
-        self.kwargs = kwargs
+    def __init__(self, method: str = 'normalize', **kwargs):
+        """Initialize text transformation strategy."""
+        super().__init__(**kwargs)
+        self.method = method
+        self.remove_stopwords = kwargs.get('remove_stopwords', True)
+        self.lemmatize = kwargs.get('lemmatize', False)
+        self.vectorize = kwargs.get('vectorize', False)
+        self.max_features = kwargs.get('max_features', 100)
+    
+    def transform(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
+        """Transform text data.
         
-        # Initialize NLTK components
-        try:
-            nltk.download('punkt', quiet=True)
-            nltk.download('stopwords', quiet=True)
-            nltk.download('wordnet', quiet=True)
-            nltk.download('punkt_tab', quiet=True)
+        Args:
+            data: Input data (DataFrame or ndarray)
             
-            self.tokenizer = nltk.word_tokenize
-            self.lemmatizer = WordNetLemmatizer() if strategy == 'lemmatize' else None
-            self.stemmer = PorterStemmer() if strategy == 'stem' else None
-            self.stop_words = set(stopwords.words('english'))
-        except Exception as e:
-            logging.warning(f"Failed to initialize NLTK components: {str(e)}")
-            self.tokenizer = str.split
-            self.lemmatizer = None
-            self.stemmer = None
-            self.stop_words = set()
-
-    def transform(self, data: Union[str, List[str], pd.Series, pd.DataFrame]) -> Union[List[str], List[List[str]], pd.Series, pd.DataFrame]:
-        """
-        Transform text data based on the selected strategy.
-
-        Args:
-            data: Input text data (string, list of strings, pandas Series, or DataFrame)
-
         Returns:
-            Transformed text data
+            Transformed data with processed text
         """
-        if isinstance(data, str):
-            return self._transform_single(data)
-        elif isinstance(data, list):
-            return [self._transform_single(text) for text in data]
-        elif isinstance(data, pd.Series):
-            return data.apply(self._transform_single)
-        elif isinstance(data, pd.DataFrame):
-            # Process only string/object columns
-            text_columns = data.select_dtypes(include=['object']).columns
-            result = data.copy()
-            for col in text_columns:
-                result[col] = result[col].apply(self._transform_single)
-            return result
-        else:
-            raise ValueError(f"Unsupported data type for text transformation: {type(data)}")
-
-    def _transform_single(self, text: str) -> str:
-        """
-        Transform a single text string.
-
-        Args:
-            text: Input text string
-
-        Returns:
-            Transformed text
-        """
-        if not isinstance(text, str):
-            return text
-
-        # Tokenize
-        tokens = self.tokenizer(text.lower())
+        self.logger.info(f"Applying {self.method} text transformation")
         
-        # Remove stopwords if specified
-        if self.kwargs.get('remove_stopwords', False):
-            tokens = [t for t in tokens if t not in self.stop_words]
+        # Convert numpy array to DataFrame if needed
+        is_numpy = isinstance(data, np.ndarray)
+        if is_numpy:
+            data = pd.DataFrame(data)
         
-        # Apply transformation strategy
-        if self.strategy == 'lemmatize' and self.lemmatizer:
-            tokens = [self.lemmatizer.lemmatize(t) for t in tokens]
-        elif self.strategy == 'stem' and self.stemmer:
-            tokens = [self.stemmer.stem(t) for t in tokens]
+        # Get text columns only
+        text_cols = data.select_dtypes(include=['object']).columns
+        if len(text_cols) == 0:
+            return data if not is_numpy else data.values
         
-        # Join tokens if not tokenizing
-        if self.strategy != 'tokenize':
-            return ' '.join(tokens)
+        result = data.copy()
         
-        return tokens
+        for col in text_cols:
+            if self.method == 'normalize':
+                # Basic text cleaning
+                result[col] = result[col].str.lower()
+                result[col] = result[col].str.replace(r'[^\w\s]', '', regex=True)
+                
+                if self.remove_stopwords:
+                    stop_words = set(stopwords.words('english'))
+                    result[col] = result[col].apply(lambda x: ' '.join([word for word in str(x).split() if word not in stop_words]))
+                
+                if self.lemmatize:
+                    lemmatizer = WordNetLemmatizer()
+                    result[col] = result[col].apply(lambda x: ' '.join([lemmatizer.lemmatize(word) for word in str(x).split()]))
+                
+                # Add word count feature
+                result[f'{col}_word_count'] = result[col].str.split().str.len()
+                
+                if self.vectorize:
+                    # Add TF-IDF features
+                    vectorizer = TfidfVectorizer(max_features=self.max_features)
+                    tfidf_matrix = vectorizer.fit_transform(result[col].fillna(''))
+                    feature_names = [f'{col}_tfidf_{i}' for i in range(tfidf_matrix.shape[1])]
+                    tfidf_df = pd.DataFrame(tfidf_matrix.toarray(), columns=feature_names, index=data.index)
+                    result = pd.concat([result, tfidf_df], axis=1)
+            
+            else:
+                raise ValueError(f"Unknown text transformation method: {self.method}")
+        
+        return result if not is_numpy else result.values
 
 class AnomalyDetectionStrategy(AdvancedTransformationStrategy):
     """Strategy for detecting anomalies in data."""
-
-    def __init__(self, strategy: str = 'isolation_forest', contamination: float = 0.1, detection_methods: Optional[List[str]] = None, **kwargs):
+    
+    def __init__(self, strategy: str = 'isolation_forest', **kwargs):
         """Initialize anomaly detection strategy.
         
         Args:
-            strategy: Base detection method ('isolation_forest', 'local_outlier_factor', 'ensemble')
-            contamination: Expected proportion of outliers in the dataset
-            detection_methods: List of detection methods for ensemble strategy
-            **kwargs: Additional parameters for the detection method
+            strategy: Strategy to use ('isolation_forest', 'local_outlier_factor', 'one_class_svm')
+            **kwargs: Additional strategy-specific parameters
         """
-        super().__init__(**kwargs)  # Pass kwargs to parent class
+        super().__init__(**kwargs)
         self.strategy = strategy
-        self.contamination = contamination
-        self.detection_methods = detection_methods or ['isolation_forest', 'local_outlier_factor']
-        self.kwargs = kwargs
-        
-        # Initialize detectors
-        self.detectors = {}
-        if strategy == 'ensemble':
-            for method in self.detection_methods:
-                self.detectors[method] = self._create_detector(method)
-        else:
-            self.detectors[strategy] = self._create_detector(strategy)
-
-    def _create_detector(self, method: str) -> Any:
-        """Create an anomaly detector based on the specified method."""
-        detector_kwargs = {k: v for k, v in self.kwargs.items() if k != 'detection_methods'}
-        
-        if method == 'isolation_forest':
-            from sklearn.ensemble import IsolationForest
-            return IsolationForest(contamination=self.contamination, **detector_kwargs)
-        elif method == 'local_outlier_factor':
-            from sklearn.neighbors import LocalOutlierFactor
-            return LocalOutlierFactor(contamination=self.contamination, **detector_kwargs)
-        else:
-            raise ValueError(f"Unknown detection method: {method}")
-
+    
     def transform(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Apply anomaly detection to the data.
+        """Detect anomalies in data.
         
         Args:
             data: Input DataFrame
             
         Returns:
-            DataFrame with anomaly scores
+            DataFrame with anomaly detection results
         """
-        try:
-            if self.strategy == 'ensemble':
-                # Run all detectors and combine results
-                scores = pd.DataFrame()
-                for method, detector in self.detectors.items():
-                    scores[f'anomaly_score_{method}'] = detector.fit_predict(data)
-                
-                # Combine scores (majority voting)
-                data['anomaly_score'] = scores.mean(axis=1)
-            else:
-                # Single detector
-                detector = self.detectors[self.strategy]
-                data['anomaly_score'] = detector.fit_predict(data)
-            
-            return data
-            
-        except Exception as e:
-            self.logger.error(f"Anomaly detection failed: {str(e)}")
-            return data
+        self.logger.info(f"Applying {self.strategy} anomaly detection")
+        
+        result = data.copy()
+        
+        if self.strategy == 'isolation_forest':
+            contamination = self.params.get('contamination', 0.1)
+            random_state = self.params.get('random_state', None)
+            detector = IsolationForest(contamination=contamination, random_state=random_state)
+            predictions = detector.fit_predict(data)
+            result['predictions'] = predictions
+            return result
+        
+        elif self.strategy == 'local_outlier_factor':
+            n_neighbors = self.params.get('n_neighbors', 20)
+            contamination = self.params.get('contamination', 0.1)
+            detector = LocalOutlierFactor(n_neighbors=n_neighbors, contamination=contamination)
+            predictions = detector.fit_predict(data)
+            result['predictions'] = predictions
+            return result
+        
+        elif self.strategy == 'one_class_svm':
+            kernel = self.params.get('kernel', 'rbf')
+            nu = self.params.get('nu', 0.1)
+            detector = OneClassSVM(kernel=kernel, nu=nu)
+            predictions = detector.fit_predict(data)
+            result['predictions'] = predictions
+            return result
+        
+        else:
+            raise ValueError(f"Unknown anomaly detection strategy: {self.strategy}")
 
 class TimeSeriesTransformationStrategy(AdvancedTransformationStrategy):
-    """Time series transformation strategy."""
-
-    def __init__(self, strategy: str = 'rolling_features', window: int = 14, **kwargs):
-        """Initialize time series transformation strategy."""
-        super().__init__()
+    """Strategy for transforming time series data."""
+    
+    def __init__(self, strategy: str = 'moving_average', **kwargs):
+        """Initialize time series transformation strategy.
+        
+        Args:
+            strategy: Strategy to use ('moving_average', 'exponential_smoothing', 'differencing')
+            **kwargs: Additional strategy-specific parameters
+        """
+        super().__init__(**kwargs)
         self.strategy = strategy
-        self.window = window
-        self.kwargs = kwargs
-
-    def transform(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
-        """Apply time series transformation."""
-        try:
-            if self.strategy == 'rolling_features':
-                return self._rolling_features(data)
-            elif self.strategy == 'lag_features':
-                return self._lag_features(data)
-            elif self.strategy == 'diff_features':
-                return self._diff_features(data)
-            else:
-                raise ValueError(f"Unknown time series strategy: {self.strategy}")
-        except Exception as e:
-            self.logger.error(f"Time series transformation failed: {e}")
-            raise ValueError(f"Time series transformation failed: {e}")
-
-    def _rolling_features(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
-        """Create rolling window features."""
-        if isinstance(data, np.ndarray):
-            data = pd.DataFrame(data)
-        
-        result = data.copy()
-        for col in data.columns:
-            result[f'{col}_rolling_mean'] = data[col].rolling(window=self.window).mean()
-            result[f'{col}_rolling_std'] = data[col].rolling(window=self.window).std()
-            result[f'{col}_rolling_min'] = data[col].rolling(window=self.window).min()
-            result[f'{col}_rolling_max'] = data[col].rolling(window=self.window).max()
-        
-        return result.fillna(method='bfill')
-
-    def _lag_features(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
-        """Create lagged features."""
-        if isinstance(data, np.ndarray):
-            data = pd.DataFrame(data)
-        
-        result = data.copy()
-        for col in data.columns:
-            for lag in range(1, self.window + 1):
-                result[f'{col}_lag_{lag}'] = data[col].shift(lag)
-        
-        return result.fillna(method='bfill')
-
-    def _diff_features(self, data: Union[pd.DataFrame, np.ndarray]) -> Union[pd.DataFrame, np.ndarray]:
-        """Create difference features."""
-        if isinstance(data, np.ndarray):
-            data = pd.DataFrame(data)
-        
-        result = data.copy()
-        for col in data.columns:
-            result[f'{col}_diff_1'] = data[col].diff()
-            result[f'{col}_diff_{self.window}'] = data[col].diff(self.window)
-            result[f'{col}_pct_change'] = data[col].pct_change(self.window)
-        
-        return result.fillna(method='bfill')
-
-# Example usage and demonstration
-def demonstrate_transformations():
-    """Demonstrate advanced transformation strategies."""
-    # Create sample data
-    data = pd.DataFrame({
-        'numeric': np.random.randn(100),
-        'text': ['Sample text ' * 3] * 100
-    })
     
-    # Demonstrate outlier removal
-    outlier_strategy = OutlierRemovalStrategy(method='z_score', threshold=3.0)
-    cleaned_data = outlier_strategy.transform(data['numeric'])
-    
-    # Demonstrate feature engineering
-    feature_strategy = FeatureEngineeringStrategy(strategy='polynomial', degree=2)
-    engineered_features = feature_strategy.transform(data[['numeric']])
-    
-    # Demonstrate text transformation
-    text_strategy = TextTransformationStrategy(method='tokenize', remove_stopwords=True)
-    processed_text = text_strategy.transform(data['text'])
-    
-    # Demonstrate anomaly detection
-    anomaly_strategy = AnomalyDetectionStrategy(strategy='isolation_forest', contamination=0.1)
-    detected_anomalies = anomaly_strategy.transform(data[['numeric']])
-    
-    return {
-        'cleaned_data': cleaned_data,
-        'engineered_features': engineered_features,
-        'processed_text': processed_text,
-        'detected_anomalies': detected_anomalies
-    }
-
-if __name__ == "__main__":
-    demonstrate_transformations()
+    def transform(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Transform time series data.
+        
+        Args:
+            data: Input DataFrame
+            
+        Returns:
+            DataFrame with transformed time series
+        """
+        self.logger.info(f"Applying {self.strategy} time series transformation")
+        
+        if self.strategy == 'moving_average':
+            window = self.params.get('window', 3)
+            return data.rolling(window=window).mean()
+        
+        elif self.strategy == 'exponential_smoothing':
+            alpha = self.params.get('alpha', 0.3)
+            return data.ewm(alpha=alpha).mean()
+        
+        elif self.strategy == 'differencing':
+            periods = self.params.get('periods', 1)
+            return data.diff(periods=periods)
+        
+        else:
+            raise ValueError(f"Unknown time series transformation strategy: {self.strategy}") 

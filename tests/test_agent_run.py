@@ -1,107 +1,147 @@
-import os
-import sys
-import json
-import logging
-from typing import Dict, Any
-from agentflow.core.agent import ResearchAgent
-from agentflow.core.config import AgentConfig, ModelConfig
+"""Test agent run module."""
 
-# Add the project root to the Python path
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, project_root)
+import pytest
+import numpy as np
+from agentflow.core.config import AgentConfig, ConfigurationType, AgentMode, ModelConfig
+from agentflow.core.workflow_types import WorkflowConfig, WorkflowStep, WorkflowStepType, StepConfig
+from agentflow.core.exceptions import WorkflowExecutionError
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('/Users/xingqiangchen/TASK/APOS/tests/agent_run_log.txt'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger('AgentRunTest')
+@pytest.mark.asyncio
+async def test_agent_run():
+    """Test agent run functionality."""
+    workflow = WorkflowConfig(
+        name="test_workflow",
+        max_iterations=5,
+        timeout=30,
+        steps=[
+            WorkflowStep(
+                id="step-1",
+                name="step_1",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="feature_engineering",
+                    params={
+                        "method": "standard",
+                        "with_mean": True,
+                        "with_std": True
+                    }
+                )
+            )
+        ]
+    )
+    agent = AgentConfig(
+        id="test-agent-1",
+        name="test_agent",
+        type=ConfigurationType.DATA_SCIENCE,
+        mode=AgentMode.SEQUENTIAL,
+        version="1.0.0",
+        model_settings=ModelConfig(
+            provider="openai",
+            name="gpt-4",
+            temperature=0.7,
+            max_tokens=4096
+        ),
+        workflow=workflow
+    )
+    data = np.random.randn(10, 2)
+    result = await agent.workflow.execute({"data": data})
+    assert "step-1" in result
+    assert "data" in result["step-1"]
+    assert isinstance(result["step-1"]["data"], np.ndarray)
+    assert result["step-1"]["data"].shape == data.shape
 
-def load_config(config_path: str) -> Dict[str, Any]:
-    """Load agent configuration from JSON file"""
-    try:
-        with open(config_path, 'r') as f:
-            config_data = json.load(f)
-        return config_data  # Return raw dict instead of AgentConfig
-    except Exception as e:
-        logger.error(f"Failed to load configuration: {e}")
-        raise
+@pytest.mark.asyncio
+async def test_agent_run_with_dependencies():
+    """Test agent run with workflow dependencies."""
+    workflow = WorkflowConfig(
+        name="dependency_workflow",
+        max_iterations=5,
+        timeout=30,
+        steps=[
+            WorkflowStep(
+                id="step-1",
+                name="step_1",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="feature_engineering",
+                    params={
+                        "method": "standard",
+                        "with_mean": True,
+                        "with_std": True
+                    }
+                )
+            ),
+            WorkflowStep(
+                id="step-2",
+                name="step_2",
+                type=WorkflowStepType.TRANSFORM,
+                dependencies=["step-1"],
+                config=StepConfig(
+                    strategy="outlier_removal",
+                    params={
+                        "method": "isolation_forest",
+                        "threshold": 0.1
+                    }
+                )
+            )
+        ]
+    )
+    agent = AgentConfig(
+        id="test-agent-2",
+        name="test_agent",
+        type=ConfigurationType.DATA_SCIENCE,
+        mode=AgentMode.SEQUENTIAL,
+        version="1.0.0",
+        model_settings=ModelConfig(
+            provider="openai",
+            name="gpt-4",
+            temperature=0.7,
+            max_tokens=4096
+        ),
+        workflow=workflow
+    )
+    data = np.random.randn(100, 2)  # More data points for outlier detection
+    result = await agent.workflow.execute({"data": data})
+    assert "step-1" in result
+    assert "step-2" in result
+    assert "data" in result["step-2"]
+    assert isinstance(result["step-2"]["data"], np.ndarray)
+    assert result["step-2"]["data"].shape[1] == data.shape[1]  # Same number of features
+    assert result["step-2"]["data"].shape[0] <= data.shape[0]  # Some points may be removed as outliers
 
-def run_agent_workflow() -> Dict[str, Any]:
-    """Run the research agent workflow"""
-    try:
-        # Path to the configuration file
-        config_path = '/Users/xingqiangchen/TASK/APOS/tests/test_agent_run_config.json'
-        
-        # Load configuration
-        agent_config: Dict[str, Any] = load_config(config_path)
-        
-        # Print the entire configuration
-        print("Full Agent Config:", json.dumps(agent_config, indent=2))
-        
-        # Create Research Agent
-        research_agent = ResearchAgent(AgentConfig(
-            **agent_config,
-            model=ModelConfig(provider='default', name='default')
-        ))
-        
-        # Prepare initial input
-        initial_input = {
-            'research_topic': 'AI Applications in Education',
-            'deadline': '2024-12-31',
-            'academic_level': 'PhD',
-            'field': 'Computer Science',
-            'special_requirements': 'Focus on machine learning applications',
-            'author': 'John Doe'
-        }
-        
-        # Execute workflow
-        results = research_agent.execute_workflow(initial_input)
-        
-        # Generate output documents
-        output_dir = '/Users/xingqiangchen/TASK/APOS/tests/agent_outputs'
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Generate comprehensive research report
-        report_path = os.path.join(output_dir, 'research_report.md')
-        with open(report_path, 'w') as f:
-            f.write("# Research Report: AI Applications in Education\n\n")
-            
-            # Write results from each workflow step
-            for step in agent_config.get('WORKFLOW', {}).get('steps', []):
-                step_title = step.get('title', f"Step {step.get('step')}")
-                step_description = step.get('description', '')
-                
-                f.write(f"## {step_title}\n")
-                f.write(f"{step_description}\n\n")
-                
-                # Attempt to write step-specific results
-                step_results = results.get(step.get('action'), {})
-                if step_results:
-                    f.write("### Results\n")
-                    f.write(json.dumps(step_results, indent=2) + "\n\n")
-        
-        # Log output paths
-        logger.info(f"Generated Research Report: {report_path}")
-        
-        return results
-    
-    except Exception as e:
-        logger.error(f"Error during agent workflow execution: {e}")
-        raise
-
-def main() -> None:
-    try:
-        results = run_agent_workflow()
-        print("Agent workflow completed successfully.")
-        return results
-    except Exception as e:
-        print(f"Agent workflow failed: {e}")
-        return None
-
-if __name__ == '__main__':
-    main()
+@pytest.mark.asyncio
+async def test_agent_run_error_handling():
+    """Test agent run error handling."""
+    workflow = WorkflowConfig(
+        name="error_workflow",
+        max_iterations=5,
+        timeout=30,
+        steps=[
+            WorkflowStep(
+                id="step-1",
+                name="step_1",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="invalid_strategy",
+                    params={}
+                )
+            )
+        ]
+    )
+    agent = AgentConfig(
+        id="test-agent-3",
+        name="test_agent",
+        type=ConfigurationType.DATA_SCIENCE,
+        mode=AgentMode.SEQUENTIAL,
+        version="1.0.0",
+        model_settings=ModelConfig(
+            provider="openai",
+            name="gpt-4",
+            temperature=0.7,
+            max_tokens=4096
+        ),
+        workflow=workflow
+    )
+    data = np.random.randn(10, 2)
+    with pytest.raises(WorkflowExecutionError):
+        await agent.workflow.execute({"data": data})

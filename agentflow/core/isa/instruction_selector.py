@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from .instruction import Instruction
+from .isa_manager import Instruction
 
 class InstructionSelector:
     """Selects and optimizes instruction sequences."""
@@ -14,13 +15,13 @@ class InstructionSelector:
         """Initialize instruction selector."""
         self.logger = logger or logging.getLogger(self.__class__.__name__)
 
-    def select_instructions(self, input_data: Dict[str, Any], available_instructions: List[Instruction]) -> List[Instruction]:
+    def select_instructions(self, input_data: Dict[str, Any], available_instructions: Dict[str, Instruction]) -> List[Instruction]:
         """
         Select appropriate instructions based on input data.
 
         Args:
             input_data: Input data to process
-            available_instructions: List of available instructions
+            available_instructions: Dictionary of available instructions
 
         Returns:
             Selected instruction sequence
@@ -28,12 +29,13 @@ class InstructionSelector:
         try:
             # Extract task and parameters
             task = input_data.get('task', '')
+            text = input_data.get('text', '')
             params = input_data.get('params', {})
 
             # Score each instruction
             scored_instructions = []
-            for instruction in available_instructions:
-                score = self._score_instruction(instruction, task, params)
+            for instruction in available_instructions.values():
+                score = self._score_instruction(instruction, task, text, params)
                 scored_instructions.append((score, instruction))
 
             # Sort by score and select top instructions
@@ -46,15 +48,18 @@ class InstructionSelector:
             self.logger.error(f"Instruction selection failed: {str(e)}")
             return []
 
-    def _score_instruction(self, instruction: Instruction, task: str, params: Dict[str, Any]) -> float:
-        """Score an instruction based on task and parameters."""
+    def _score_instruction(self, instruction: Instruction, task: str, text: str, params: Dict[str, Any]) -> float:
+        """Score an instruction based on task, text and parameters."""
         try:
             # Base score
             score = 0.0
 
-            # Match instruction name/type with task
-            if task.lower() in instruction.name.lower():
+            # Match instruction name with task and text
+            name = instruction.name.lower()
+            if name in task.lower():
                 score += 1.0
+            if name in text.lower():
+                score += 0.5
 
             # Check parameter compatibility
             required_params = set(instruction.params.keys())

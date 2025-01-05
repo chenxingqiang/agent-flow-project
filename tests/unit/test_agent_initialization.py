@@ -1,9 +1,17 @@
 import pytest
 import ray
-from agentflow.core.config import AgentConfig
-from agentflow.core.agent import Agent
+from agentflow.core.config import AgentConfig, ConfigurationType
+from agentflow.agents.agent import Agent
+from agentflow.core.workflow_state import AgentState, AgentStatus
 from pathlib import Path
 import json
+
+@pytest.fixture(scope="module")
+def test_data_dir():
+    """Create test data directory"""
+    test_dir = Path(__file__).parent.parent / 'data'
+    test_dir.mkdir(parents=True, exist_ok=True)
+    return test_dir
 
 @pytest.fixture(scope="module")
 def ray_context():
@@ -114,35 +122,36 @@ def test_agent_file_initialization(test_data_dir):
     workflow_path = test_data_dir / 'workflow.json'
 
     # Create test config files if they don't exist
-    if not config_path.exists():
-        config_data = {
-            "AGENT": {
-                "name": "FileAgent",
-                "type": "research",
-                "version": "1.0.0"
-            },
-            "MODEL": {
-                "provider": "openai",
-                "name": "gpt-4"
-            },
-            "WORKFLOW": {
-                "max_iterations": 5
-            }
+    config_data = {
+        "AGENT": {
+            "name": "FileAgent",
+            "type": "research",
+            "version": "1.0.0",
+            "workflow_path": str(workflow_path)
+        },
+        "MODEL": {
+            "provider": "openai",
+            "name": "gpt-4"
+        },
+        "WORKFLOW": {
+            "max_iterations": 5,
+            "steps": []
         }
-        config_path.write_text(json.dumps(config_data))
+    }
+    config_path.write_text(json.dumps(config_data))
 
     if not workflow_path.exists():
         workflow_data = {
-            "WORKFLOW": {
-                "max_iterations": 10,
-                "distributed": False
-            }
+            "max_iterations": 10,
+            "distributed": False,
+            "steps": []
         }
         workflow_path.write_text(json.dumps(workflow_data))
 
-    agent = Agent(str(config_path), str(workflow_path))
+    agent = Agent(str(config_path))
+    assert agent is not None
     assert agent.name == "FileAgent"
-    assert agent.workflow.max_iterations == 10
+    assert agent.type == "research"
 
 def test_agent_state_initialization():
     """Test agent state initialization"""
@@ -163,7 +172,8 @@ def test_agent_state_initialization():
 
     agent = Agent(config_data)
     assert hasattr(agent, 'state')
-    assert isinstance(agent.state, dict)
+    assert isinstance(agent.state, AgentState)
+    assert agent.state.status == AgentStatus.INITIALIZED
 
 def test_agent_invalid_initialization():
     """Test agent initialization with invalid config"""

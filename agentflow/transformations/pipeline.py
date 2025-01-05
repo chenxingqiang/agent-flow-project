@@ -1,96 +1,59 @@
 """Transformation pipeline module for data processing."""
-
-import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import List, Any
 import pandas as pd
-import numpy as np
-
-from .advanced_strategies import (
-    TextTransformationStrategy,
-    FeatureEngineeringStrategy,
-    OutlierRemovalStrategy,
-    AnomalyDetectionStrategy
-)
 
 class TransformationPipeline:
-    """Pipeline for applying multiple transformation strategies."""
-
-    def __init__(self, strategies: Optional[List[Dict[str, Any]]] = None):
-        """
-        Initialize transformation pipeline.
-
-        Args:
-            strategies: List of strategy configurations
-        """
+    """Pipeline for executing multiple transformation strategies."""
+    
+    def __init__(self):
+        """Initialize transformation pipeline."""
         self.strategies = []
-        if strategies:
-            self._configure_strategies(strategies)
-
-    def _configure_strategies(self, strategies: List[Dict[str, Any]]) -> None:
-        """
-        Configure transformation strategies.
-
+        
+    def add_strategy(self, strategy: Any):
+        """Add a transformation strategy to the pipeline.
+        
         Args:
-            strategies: List of strategy configurations
+            strategy: Strategy object to add
         """
-        for config in strategies:
-            strategy_type = config.pop('type', '').lower()
-            
-            try:
-                if strategy_type == 'text':
-                    self.strategies.append(TextTransformationStrategy(**config))
-                elif strategy_type == 'feature':
-                    self.strategies.append(FeatureEngineeringStrategy(**config))
-                elif strategy_type == 'outlier':
-                    self.strategies.append(OutlierRemovalStrategy(**config))
-                elif strategy_type == 'anomaly':
-                    self.strategies.append(AnomalyDetectionStrategy(**config))
-                else:
-                    logging.warning(f"Unknown strategy type: {strategy_type}")
-            except Exception as e:
-                logging.error(f"Failed to configure strategy {strategy_type}: {str(e)}")
-
-    def add_strategy(self, strategy_type: str, **kwargs) -> None:
-        """
-        Add a transformation strategy to the pipeline.
-
-        Args:
-            strategy_type: Type of strategy to add
-            **kwargs: Strategy configuration parameters
-        """
-        try:
-            if strategy_type == 'text':
-                self.strategies.append(TextTransformationStrategy(**kwargs))
-            elif strategy_type == 'feature':
-                self.strategies.append(FeatureEngineeringStrategy(**kwargs))
-            elif strategy_type == 'outlier':
-                self.strategies.append(OutlierRemovalStrategy(**kwargs))
-            elif strategy_type == 'anomaly':
-                self.strategies.append(AnomalyDetectionStrategy(**kwargs))
-            else:
-                logging.warning(f"Unknown strategy type: {strategy_type}")
-        except Exception as e:
-            logging.error(f"Failed to add strategy {strategy_type}: {str(e)}")
-
-    def transform(self, data: Union[pd.DataFrame, np.ndarray, str, List[str]]) -> Any:
-        """
-        Apply all transformation strategies in sequence.
-
+        self.strategies.append(strategy)
+        
+    def transform(self, data: Any) -> Any:
+        """Execute all transformation strategies in sequence.
+        
         Args:
             data: Input data to transform
-
+            
         Returns:
             Transformed data
         """
-        transformed_data = data
+        result = data
         for strategy in self.strategies:
-            try:
-                transformed_data = strategy.transform(transformed_data)
-            except Exception as e:
-                logging.error(f"Failed to apply strategy {type(strategy).__name__}: {str(e)}")
-                continue
-        return transformed_data
-
-    def reset(self) -> None:
-        """Reset the pipeline by clearing all strategies."""
-        self.strategies = []
+            transform_result = strategy.transform(result)
+            
+            # Handle different result formats
+            if hasattr(transform_result, 'data'):
+                if 'transformed_data' in transform_result.data:
+                    result = transform_result.data['transformed_data']
+                elif 'cleaned_data' in transform_result.data:
+                    result = transform_result.data['cleaned_data']
+                else:
+                    result = transform_result.data
+            else:
+                result = transform_result
+                
+            # Convert result to DataFrame if it's a list
+            if isinstance(result, list):
+                if len(result) > 0:
+                    if isinstance(result[0], (list, pd.Series, pd.DataFrame)):
+                        result = pd.DataFrame(result)
+                    else:
+                        result = pd.DataFrame(result).T
+                        
+            # Add any additional columns from the transformation result
+            if isinstance(result, pd.DataFrame) and hasattr(transform_result, 'data'):
+                for key, value in transform_result.data.items():
+                    if key not in ['transformed_data', 'cleaned_data'] and isinstance(value, list):
+                        if len(value) == len(result):
+                            result[key] = value
+                            
+        return result

@@ -1,52 +1,72 @@
 """Base test agent for testing purposes"""
 
-from typing import Dict, Any, Union
+from typing import Dict, Any, Union, Optional, TYPE_CHECKING
 import logging
-from ..core.agent import AgentBase
-from ..core.config import AgentConfig
+import json
+import ray
+import asyncio
+
+if TYPE_CHECKING:
+    from .agent import Agent as AgentBase
+    from ..core.config import AgentConfig
 
 logger = logging.getLogger(__name__)
 
-class BaseTestAgent(AgentBase):
-    """Test agent for unit testing."""
-
-    def __init__(self, config: Union[Dict[str, Any], AgentConfig]):
+class BaseTestAgent:
+    """Base test agent class."""
+    def __init__(self, config: Union[Dict[str, Any], 'AgentConfig']):
         # Ensure config is an AgentConfig instance
-        self.agent_config = config if isinstance(config, AgentConfig) else AgentConfig(**config)
-        
-        # Initialize base agent with config
-        super().__init__(self.agent_config)
-        
-        # Extract knowledge and data from config
+        # Map 'test' agent type to 'default'
         if isinstance(config, dict):
-            self.knowledge = config.get('knowledge', {})
-            self.data = config.get('data', {})
+            if config.get('type') == 'test':
+                config['type'] = 'default'
+            self.config = config
         else:
-            self.knowledge = getattr(config, 'knowledge', {})
-            self.data = getattr(config, 'data', {})
+            if config.type == 'test':
+                config.type = 'default'
+            self.config = config.dict()
+
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.INFO)
 
     async def execute(self, context: Dict[str, Any], *args, **kwargs) -> Dict[str, Any]:
-        """Execute test agent functionality.
+        """Execute the test agent."""
+        self.logger.info("Executing test agent with context: %s", context)
         
-        Args:
-            context (Dict[str, Any]): Execution context
-            *args: Additional positional arguments
-            **kwargs: Additional keyword arguments
-            
-        Returns:
-            Dict[str, Any]: Execution results with knowledge and data
-        """
-        try:
-            # Merge knowledge and data into result
-            result = {
-                'knowledge': self.knowledge,
-                'data': self.data
-            }
-            
-            # Add any additional context
-            result.update(context)
-            
-            return result
-        except Exception as e:
-            logger.error(f"Agent execution failed: {e}")
-            raise
+        # Simulate some processing
+        await asyncio.sleep(0.1)
+        
+        # Return a simple response
+        response = {
+            "status": "success",
+            "message": "Test agent executed successfully",
+            "input_context": context,
+            "agent_config": self.config,
+            "args": args,
+            "kwargs": kwargs
+        }
+        
+        self.logger.info("Test agent execution completed with response: %s", response)
+        return response
+
+@ray.remote
+class CustomAgent:
+    """Custom agent class for distributed execution."""
+    def __init__(self, config: Union[str, Dict[str, Any], 'AgentConfig'], workflow_path: Optional[str] = None):
+        self.config = self._validate_custom_config(config)
+        self.workflow_path = workflow_path
+
+    def _validate_custom_config(self, config: Union[str, Dict[str, Any], 'AgentConfig']) -> Dict[str, Any]:
+        """Validate and process custom agent configuration."""
+        if isinstance(config, str):
+            try:
+                with open(config, 'r') as f:
+                    config = json.load(f)
+            except Exception as e:
+                raise ValueError(f"Failed to load config from file: {e}")
+        
+        if isinstance(config, dict):
+            return config
+        
+        return config.dict()

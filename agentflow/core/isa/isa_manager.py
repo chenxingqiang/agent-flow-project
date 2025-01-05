@@ -5,6 +5,7 @@ import json
 from enum import Enum
 from dataclasses import dataclass
 from pathlib import Path
+from datetime import datetime
 
 class InstructionType(Enum):
     """Types of instructions."""
@@ -27,12 +28,15 @@ class Instruction:
 class ISAManager:
     """Manages instruction set and their execution."""
     
-    def __init__(self):
+    def __init__(self, config_path: Optional[str] = None):
         """Initialize ISA manager."""
         self.instructions: Dict[str, Instruction] = {}
         self.execution_history: List[Dict[str, Any]] = []
         self._initialized = False
         
+        if config_path:
+            self.load_instructions(config_path)
+            
     async def initialize(self):
         """Initialize ISA manager asynchronously."""
         if self._initialized:
@@ -72,11 +76,61 @@ class ISAManager:
             
         self.instructions[instruction.id] = instruction
         
-    def get_instruction(self, instruction_id: str) -> Optional[Instruction]:
-        """Get instruction by ID."""
-        return self.instructions.get(instruction_id)
+    def get_instruction(self, instruction_id: str) -> Instruction:
+        """Get instruction by ID.
+        
+        Args:
+            instruction_id: ID of the instruction to get
+            
+        Returns:
+            Instruction: The requested instruction
+            
+        Raises:
+            ValueError: If the instruction does not exist
+        """
+        instruction = self.instructions.get(instruction_id)
+        if instruction is None:
+            raise ValueError(f"Instruction not found: {instruction_id}")
+        return instruction
         
     def execute_instruction(self, instruction: Instruction) -> Dict[str, Any]:
+        """Execute a single instruction.
+        
+        Args:
+            instruction: Instruction to execute
+            
+        Returns:
+            Execution result
+            
+        Raises:
+            ValueError: If instruction is not found or parameters are invalid
+        """
+        if instruction.id not in self.instructions:
+            raise ValueError(f"Unknown instruction: {instruction.id}")
+            
+        # Validate instruction parameters
+        if instruction.type == InstructionType.CONTROL:
+            if "init_param" not in instruction.params:
+                raise ValueError("Control instruction requires 'init_param'")
+        elif instruction.type == InstructionType.COMPUTATION:
+            if "data_param" not in instruction.params:
+                raise ValueError("Computation instruction requires 'data_param'")
+        elif instruction.type == InstructionType.VALIDATION:
+            if "threshold" not in instruction.params:
+                raise ValueError("Validation instruction requires 'threshold'")
+            
+        # Record execution
+        execution_record = {
+            "instruction_id": instruction.id,
+            "timestamp": datetime.now(),
+            "params": instruction.params,
+            "status": "completed"
+        }
+        self.execution_history.append(execution_record)
+        
+        return {"status": "success", "result": execution_record}
+
+    def execute_instruction_with_dependencies(self, instruction: Instruction) -> Dict[str, Any]:
         """Execute an instruction and return result."""
         if instruction.id not in self.instructions:
             raise ValueError(f"Unknown instruction: {instruction.id}")

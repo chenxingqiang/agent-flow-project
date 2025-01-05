@@ -1,633 +1,523 @@
-"""
-Data transformation processors
-"""
+"""Transform processor module."""
 
-import json
-from typing import Any, Dict, List
-import jmespath
-from pydantic import BaseModel
+import numpy as np
+from typing import Dict, Any, Union, Callable, List
+from dataclasses import dataclass
+from ..workflow_types import StepConfig
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import IsolationForest
+import logging
 
-from . import BaseProcessor, ProcessorResult
+logger = logging.getLogger(__name__)
 
-class FilterProcessor(BaseProcessor):
-    """Filters input data based on conditions"""
+@dataclass
+class ProcessorResult:
+    """Processor result."""
+    data: Dict[str, Any]
+    metadata: Dict[str, str] = None
+    error: str = None
+
+class TransformationPipeline:
+    """Pipeline for executing a sequence of transformations."""
     
     def __init__(self, config: Dict[str, Any]):
-        """Initialize processor
+        """Initialize transformation pipeline.
         
         Args:
-            config: Processor configuration
-                - conditions: List of filter conditions
-                    - field: Field to filter on
-                    - operator: Comparison operator
-                    - value: Value to compare against
+            config: Pipeline configuration containing processors and their configs
         """
-        self.conditions = config.get("conditions", [])
+        self.processors = []
+        self.processor_map = {
+            "filter": FilterProcessor,
+            "transform": TransformProcessor,
+            "aggregate": AggregateProcessor
+        }
         
-    async def process(self, input_data: Dict[str, Any]) -> ProcessorResult:
-        """Filter input data
+        # Initialize processors from config
+        for processor_config in config.get("processors", []):
+            processor_type = processor_config.get("type")
+            if processor_type in self.processor_map:
+                processor_class = self.processor_map[processor_type]
+                processor = processor_class(processor_config.get("config", {}))
+                self.processors.append(processor)
+    
+    async def process(self, data: Dict[str, Any]) -> ProcessorResult:
+        """Process data through the pipeline.
         
         Args:
-            input_data: Input data to filter
+            data: Input data to process
             
         Returns:
-            Filtered data
+            ProcessorResult: Result of pipeline execution
         """
+        current_data = data
+        metadata = {}
+        
         try:
-            # Validate input
-            if not input_data:
-                return ProcessorResult(
-                    output={},
-                    error="Empty input data",
-                    metadata={"filtered": "true"}
-                )
-            
-            result = input_data.copy()
-            
-            for condition in self.conditions:
-                field = condition["field"]
-                operator = condition["operator"]
-                value = condition["value"]
+            for processor in self.processors:
+                result = await processor.process(current_data)
                 
-                try:
-                    field_value = jmespath.search(field, result)
-                except Exception:
+                if result.error:
                     return ProcessorResult(
-                        output={},
-                        error=f"Could not find field: {field}",
-                        metadata={"filtered": "true"}
+                        data={},
+                        metadata=metadata,
+                        error=f"Pipeline error in {processor.__class__.__name__}: {result.error}"
                     )
                 
-                if not self._evaluate_condition(field_value, operator, value):
-                    return ProcessorResult(
-                        output={},
-                        metadata={"filtered": "true"}
-                    )
-                    
-            return ProcessorResult(
-                output=result,
-                metadata={"filtered": "false"}
-            )
+                current_data = result.data
+                if result.metadata:
+                    metadata.update(result.metadata)
+            
+            return ProcessorResult(data=current_data, metadata=metadata)
             
         except Exception as e:
             return ProcessorResult(
-                output={},
-                error=str(e),
-                metadata={"filtered": "true"}
+                data={},
+                metadata=metadata,
+                error=f"Pipeline execution error: {str(e)}"
             )
-            
-    def _evaluate_condition(self, field_value: Any, operator: str, value: Any) -> bool:
-        """Evaluate filter condition
+    
+    def validate_config(self, config: Dict[str, Any]) -> bool:
+        """Validate pipeline configuration.
         
         Args:
-            field_value: Value from input data
-            operator: Comparison operator
-            value: Value to compare against
+            config: Pipeline configuration to validate
             
         Returns:
-            True if condition is met, False otherwise
+            bool: True if valid, False otherwise
         """
-        if operator == "eq":
-            return field_value == value
-        elif operator == "ne":
-            return field_value != value
-        elif operator == "gt":
-            return field_value > value
-        elif operator == "lt":
-            return field_value < value
-        elif operator == "contains":
-            return value in field_value
-        elif operator == "exists":
-            return field_value is not None
-        else:
-            raise ValueError(f"Unknown operator: {operator}")
-            
-    async def process_data(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Filter input data based on conditions
-    
-        Args:
-            input_data: Input data to filter
-        
-        Returns:
-            Filtered data
-        """
-        try:
-            # Handle single dict or list of dicts
-            if isinstance(input_data, dict):
-                result = input_data if self._filter_single_item(input_data) else {}
-            elif isinstance(input_data, list):
-                result = [item for item in input_data if self._filter_single_item(item)]
-            else:
-                raise ValueError(f"Unsupported input type: {type(input_data)}")
-        
-            return result
-    
-        except Exception as e:
-            return {}
-
-    def _filter_single_item(self, input_data: Dict[str, Any]) -> bool:
-        """Filter a single input item
-    
-        Args:
-            input_data: Single input dictionary
-        
-        Returns:
-            True if item passes all conditions, False otherwise
-        """
-        try:
-            for condition in self.conditions:
-                field = condition['field']
-                operator = condition['operator']
-                value = condition['value']
-            
-                field_value = jmespath.search(field, input_data)
-            
-                if not self._evaluate_condition(field_value, operator, value):
-                    return False
-                
-            return True
-        except Exception:
+        if not isinstance(config, dict):
             return False
-
-    def validate_input(self, input_data: Dict[str, Any]) -> bool:
-        """Validate input data
-        
-        Args:
-            input_data: Input data to validate
             
-        Returns:
-            True if valid, False otherwise
-        """
-        return isinstance(input_data, dict)
-        
-    def get_input_schema(self) -> Dict[str, Any]:
-        """Get input schema
-        
-        Returns:
-            JSON schema for input data
-        """
-        return {
-            "type": "object"
-        }
-        
-    def get_output_schema(self) -> Dict[str, Any]:
-        """Get output schema
-        
-        Returns:
-            JSON schema for output data
-        """
-        return {
-            "type": "object"
-        }
-        
-class TransformProcessor(BaseProcessor):
-    """Transforms input data using JMESPath expressions"""
-    
-    def __init__(self, config: Dict[str, Any]):
-        """Initialize processor
-        
-        Args:
-            config: Processor configuration
-                - transformations: Dict mapping output fields to JMESPath expressions
-        """
-        self.transformations = config.get("transformations", {})
-        
-    async def process(self, input_data: Dict[str, Any]) -> ProcessorResult:
-        """Process input data and apply transformations
-
-        Args:
-            input_data: Input data dictionary
-
-        Returns:
-            Processed result with transformed data
-        """
-        # Validate input
-        if not input_data:
-            return ProcessorResult(
-                output={},
-                error="Empty input data"
-            )
-        
-        # Perform transformations
-        result = {}
-        transformed_fields = []
-        
-        for output_field, expression in self.transformations.items():
-            try:
-                # Special case for squared_value
-                if output_field == 'squared_value':
-                    result[output_field] = input_data.get('value', 0) ** 2
-                    transformed_fields.append(output_field)
-                    continue
-                
-                # Special case for category_length
-                if output_field == 'category_length':
-                    result[output_field] = len(input_data.get('category', ''))
-                    transformed_fields.append(output_field)
-                    continue
-                
-                # Handle $input. prefix explicitly
-                if expression.startswith('$input.'):
-                    # Direct field extraction
-                    field = expression.replace('$input.', '')
-                    
-                    # Handle nested field extraction
-                    if '.' in field:
-                        # Use nested access
-                        parts = field.split('.')
-                        current = input_data
-                        for part in parts:
-                            if isinstance(current, dict):
-                                current = current.get(part)
-                                if current is None:
-                                    break
-                            else:
-                                current = None
-                                break
-                        result[output_field] = current
-                    else:
-                        # Simple field extraction
-                        result[output_field] = input_data.get(field)
-                    
-                    transformed_fields.append(output_field)
-                else:
-                    # Fallback to eval for complex expressions
-                    # Modify the context to make it more robust
-                    context = {
-                        "__builtins__": {
-                            "len": len, 
-                            "str": str, 
-                            "int": int, 
-                            "max": max, 
-                            "min": min, 
-                            "upper": str.upper
-                        },
-                        "input": input_data
-                    }
-                    
-                    # Replace length with len for compatibility
-                    modified_expression = expression.replace("length(", "len(")
-                    
-                    # Evaluate the expression
-                    value = eval(modified_expression.replace('input.', ''), 
-                                 {"__builtins__": context["__builtins__"]}, 
-                                 context)
-                    result[output_field] = value
-                    transformed_fields.append(output_field)
-            except Exception as e:
-                # For any other field, set to None
-                result[output_field] = None
-                transformed_fields.append(output_field)
-        
-        return ProcessorResult(
-            output=result,
-            metadata={"transformed_fields": str(transformed_fields)}
-        )
-
-    async def process_data(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Transform input data
-        
-        Args:
-            input_data: Input data to transform
-        
-        Returns:
-            Transformed data
-        """
-        try:
-            # Handle single dict or list of dicts
-            if isinstance(input_data, dict):
-                result = {}
-                for output_field, expression in self.transformations.items():
-                    try:
-                        # Handle $input. prefix and input. prefix
-                        if expression.startswith('$input.') or expression.startswith('input.'):
-                            # Remove prefix
-                            field = expression.replace('$input.', '').replace('input.', '')
-                            
-                            # Handle nested field extraction
-                            if '.' in field:
-                                # Use nested access
-                                parts = field.split('.')
-                                current = input_data
-                                for i, part in enumerate(parts):
-                                    if i == len(parts) - 1:
-                                        current = current.get(part, {})
-                                    else:
-                                        if part not in current:
-                                            current = {}
-                                            break
-                                        current = current[part]
-                                result[output_field] = current
-                            else:
-                                # Simple field extraction or method call
-                                if field == 'upper()':
-                                    result[output_field] = input_data.get('name', '').upper()
-                                elif field == 'value * 2':
-                                    result[output_field] = input_data.get('value', 0) * 2
-                                else:
-                                    result[output_field] = input_data.get(field)
-                        else:
-                            # Evaluate complex expressions
-                            result[output_field] = eval(expression, 
-                                                       {"__builtins__": {"len": len, "str": str, "int": int, "max": max, "min": min, "upper": str.upper}}, 
-                                                       {"input": input_data})
-                    except Exception:
-                        result[output_field] = None
-                
-                # Ensure all specified fields are present with None if not found
-                for field in self.transformations.keys():
-                    if field not in result:
-                        result[field] = None
-                
-                return result
-            elif isinstance(input_data, list):
-                return [await self.process_data(item) for item in input_data]
-            else:
-                raise ValueError(f"Unsupported input type: {type(input_data)}")
-        
-        except Exception:
-            return {}
-
-    def validate_input(self, input_data: Dict[str, Any]) -> bool:
-        """Validate input data
-        
-        Args:
-            input_data: Input data to validate
-            
-        Returns:
-            True if valid, False otherwise
-        """
-        # Check if input is a dictionary
-        if not isinstance(input_data, dict):
+        processors = config.get("processors", [])
+        if not isinstance(processors, list):
             return False
-        
-        # Validate each transformation field exists in input
-        for output_field, expression in self.transformations.items():
-            # Skip if not a direct field reference
-            if not expression.startswith('$input.'):
-                continue
             
-            # Extract field name
-            field = expression.replace('$input.', '')
-            
-            # Handle nested field validation
-            if '.' in field:
-                parts = field.split('.')
-                current = input_data
-                for part in parts:
-                    if not isinstance(current, dict) or part not in current:
-                        return False
-                    current = current[part]
-            else:
-                # Simple field validation
-                if field not in input_data:
-                    return False
-        
-        return True
-
-    def get_input_schema(self) -> Dict[str, Any]:
-        """Get input schema
-        
-        Returns:
-            JSON schema for input data
-        """
-        # Build input schema based on transformation fields
-        properties = {}
-        required = []
-        
-        for output_field, expression in self.transformations.items():
-            if expression.startswith('$input.'):
-                field = expression.replace('$input.', '')
+        for processor_config in processors:
+            if not isinstance(processor_config, dict):
+                return False
                 
-                # Handle nested fields
-                if '.' in field:
-                    parts = field.split('.')
-                    current = properties
-                    for i, part in enumerate(parts):
-                        if i == len(parts) - 1:
-                            current[part] = {"type": ["string", "number", "boolean", "null"]}
-                        else:
-                            if part not in current:
-                                current[part] = {"type": "object", "properties": {}}
-                            current = current[part].get("properties", {})
-                else:
-                    # Simple field
-                    properties[field] = {"type": ["string", "number", "boolean", "null"]}
-                    required.append(field)
-        
-        return {
-            "type": "object",
-            "properties": properties,
-            "required": required
-        }
-
-    def get_output_schema(self) -> Dict[str, Any]:
-        """Get output schema
-        
-        Returns:
-            JSON schema for output data
-        """
-        return {
-            "type": "object",
-            "properties": {
-                field: {"type": "any"}
-                for field in self.transformations.keys()
-            }
-        }
-
-class AggregateProcessor(BaseProcessor):
-    """Aggregates input data based on specified criteria"""
-    
-    def __init__(self, config: Dict[str, Any]):
-        """Initialize processor
-        
-        Args:
-            config: Processor configuration
-                - group_by: Field to group by
-                - aggregations: Dict of aggregation configurations
-        """
-        self.group_by = config.get("group_by")
-        self.aggregations = config.get("aggregations", {})
-        self._grouped_data: Dict[str, List[Dict[str, Any]]] = {}
-        self._total_records = 0
-    
-    async def process(self, input_data: Dict[str, Any]) -> ProcessorResult:
-        """Aggregate input data
-        
-        Args:
-            input_data: Input data to aggregate
-            
-        Returns:
-            Aggregated data
-        """
-        try:
-            # Group input data
-            group_key = input_data.get(self.group_by, 'default')
-            if group_key is not None:
-                if group_key not in self._grouped_data:
-                    self._grouped_data[group_key] = []
-                self._grouped_data[group_key].append(input_data)
-                self._total_records += 1
-            
-            # Always return aggregation results
-            result = {}
-            for group, group_data in self._grouped_data.items():
-                group_result = {}
-                for agg_name, agg_config in self.aggregations.items():
-                    agg_type = agg_config['type']
-                    agg_field = agg_config['field']
-                    
-                    if len(group_data) > 0:
-                        if agg_type == 'sum':
-                            group_result[agg_name] = sum(item[agg_field] for item in group_data)
-                        elif agg_type == 'avg':
-                            group_result[agg_name] = sum(item[agg_field] for item in group_data) / len(group_data)
-                        elif agg_type == 'count':
-                            group_result[agg_name] = len(group_data)
-                    else:
-                        # Default values for empty groups
-                        if agg_type == 'sum':
-                            group_result[agg_name] = 0
-                        elif agg_type == 'avg':
-                            group_result[agg_name] = 0
-                        elif agg_type == 'count':
-                            group_result[agg_name] = 0
+            processor_type = processor_config.get("type")
+            if processor_type not in self.processor_map:
+                return False
                 
-                result[group] = group_result
-            
-            # If no data processed, return a default result
-            if not result:
-                result = {'default': {agg_name: 0 for agg_name in self.aggregations}}
-            
-            return ProcessorResult(
-                output=result,
-                metadata={
-                    "group_count": str(len(self._grouped_data)),
-                    "total_records": str(self._total_records)
-                }
-            )
-        
-        except Exception as e:
-            return ProcessorResult(
-                output={'default': {agg_name: 0 for agg_name in self.aggregations}},
-                error=str(e)
-            )
-
-    async def process_data(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Aggregate input data
-        
-        Args:
-            input_data: Input data to aggregate
-        
-        Returns:
-            Aggregated data
-        """
-        try:
-            # Handle single dict or list of dicts
-            if isinstance(input_data, list):
-                # Aggregate multiple records
-                result = {}
-                grouped_data = {}
-                
-                for item in input_data:
-                    group_key = item.get(self.group_by, 'default')
-                    if group_key is not None:
-                        if group_key not in grouped_data:
-                            grouped_data[group_key] = []
-                        grouped_data[group_key].append(item)
-                
-                for group, group_data in grouped_data.items():
-                    group_result = {"group_data": group_data}
-                    
-                    for agg_name, agg_config in self.aggregations.items():
-                        agg_type = agg_config.get("type")
-                        field = agg_config.get("field")
-                        
-                        values = [item.get(field, 0) for item in group_data]
-                        
-                        if agg_type == "sum":
-                            group_result[agg_name] = sum(values)
-                        elif agg_type == "avg":
-                            group_result[agg_name] = sum(values) / len(values) if values else 0
-                        elif agg_type == "count":
-                            group_result[agg_name] = len(values)
-                    
-                    result[group] = group_result
-                
-                return result
-            elif isinstance(input_data, dict):
-                # Aggregate single record
-                return await self.process(input_data)
-            else:
-                raise ValueError(f"Unsupported input type: {type(input_data)}")
-        
-        except Exception:
-            return {}
-
-    def validate_input(self, input_data: Dict[str, Any]) -> bool:
-        """Validate input data
-        
-        Args:
-            input_data: Input data to validate
-            
-        Returns:
-            True if valid, False otherwise
-        """
-        # Check if input is a dictionary
-        if not isinstance(input_data, dict):
-            return False
-        
-        # Validate group_by field exists
-        if not self.group_by or self.group_by not in input_data:
-            return False
-        
-        # Validate aggregation fields
-        for agg_config in self.aggregations.values():
-            field = agg_config.get('field')
-            if not field or field not in input_data:
+            if not isinstance(processor_config.get("config", {}), dict):
                 return False
         
         return True
 
+class FilterProcessor:
+    """Filter processor class."""
+
+    def __init__(self, config: Dict[str, Any]):
+        """Initialize filter processor."""
+        self.conditions = config.get("conditions", [])
+
+    async def process(self, data: Dict[str, Any]) -> ProcessorResult:
+        """Process data using the configured filters."""
+        try:
+            # Process data
+            result = await self.process_data(data)
+            
+            # Determine if data was filtered
+            filtered = False
+            if isinstance(data, dict):
+                filtered = not self._check_conditions(data)
+            elif isinstance(data, list):
+                filtered = len(result) < len(data)
+            
+            # Create metadata
+            metadata = {"filtered": str(filtered).lower()}
+            
+            return ProcessorResult(data=result, metadata=metadata)
+        except Exception as e:
+            return ProcessorResult(data={}, metadata={}, error=str(e))
+
+    async def process_data(self, data: Union[Dict[str, Any], List[Dict[str, Any]]]) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
+        """Process input data and apply filters."""
+        if isinstance(data, list):
+            return [item for item in data if self._check_conditions(item)]
+        return data if self._check_conditions(data) else {}
+
+    def _check_conditions(self, data: Dict[str, Any]) -> bool:
+        """Check if data matches all conditions."""
+        for condition in self.conditions:
+            field = condition.get("field")
+            operator = condition.get("operator")
+            value = condition.get("value")
+            
+            if not all([field, operator, value is not None]):
+                continue
+            
+            data_value = data.get(field)
+            if data_value is None:
+                return False
+            
+            if not self._apply_operator(operator, data_value, value):
+                return False
+        
+        return True
+
+    def _apply_operator(self, operator: str, data_value: Any, condition_value: Any) -> bool:
+        """Apply operator to compare values."""
+        if operator == "eq":
+            return data_value == condition_value
+        elif operator == "gt":
+            return data_value > condition_value
+        elif operator == "lt":
+            return data_value < condition_value
+        elif operator == "gte":
+            return data_value >= condition_value
+        elif operator == "lte":
+            return data_value <= condition_value
+        elif operator == "contains":
+            return str(condition_value).lower() in str(data_value).lower()
+        elif operator == "startswith":
+            return str(data_value).startswith(str(condition_value))
+        elif operator == "endswith":
+            return str(data_value).endswith(str(condition_value))
+        else:
+            raise ValueError(f"Unsupported operator: {operator}")
+
+class TransformProcessor:
+    """Transform processor class."""
+
+    def __init__(self, config: Dict[str, Any]):
+        """Initialize transform processor."""
+        self.config = config
+        self.strategy = config.get("strategy", "")
+        self.params = config.get("params", {})
+        self.transformations = config.get("transformations", {})
+        self.transform_methods = {
+            "FILTER": self._filter_output,
+            "MAP": self._map_output,
+            "feature_engineering": self._feature_engineering,
+            "outlier_removal": self._outlier_removal
+        }
+
+    async def process(self, data: Dict[str, Any]) -> ProcessorResult:
+        """Process data using the configured transformations."""
+        try:
+            # Validate input
+            if not self.validate_input(data):
+                return ProcessorResult(data={}, metadata={}, error="Invalid input data")
+
+            # Process data based on strategy
+            if self.strategy in self.transform_methods:
+                result = await self.transform_methods[self.strategy](data)
+                return ProcessorResult(data=result, metadata={"strategy": self.strategy})
+            else:
+                error_msg = f"Unsupported transformation strategy: {self.strategy}"
+                logger.error(error_msg)
+                return ProcessorResult(data={}, metadata={}, error=error_msg)
+            
+        except Exception as e:
+            error_msg = f"Transformation failed: {str(e)}"
+            logger.error(error_msg)
+            return ProcessorResult(data={}, metadata={}, error=error_msg)
+
+    async def process_data(self, data: Union[Dict[str, Any], List[Dict[str, Any]]]) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
+        """Process input data and apply transformations."""
+        if isinstance(data, list):
+            return [self._apply_transformations(item) for item in data]
+        return self._apply_transformations(data)
+
+    def _apply_transformations(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply transformations to data."""
+        result = {}
+        for output_field, expression in self.transformations.items():
+            try:
+                if isinstance(expression, str):
+                    if expression.startswith("$input."):
+                        # Handle dot notation for nested fields
+                        path = expression.replace("$input.", "").split(".")
+                        value = data
+                        for key in path:
+                            value = value.get(key)
+                            if value is None:
+                                break
+                        result[output_field] = value
+                    elif "input[" in expression:
+                        # Handle Python-style expressions
+                        input_data = data
+                        result[output_field] = eval(expression, {"input": input_data})
+                    else:
+                        result[output_field] = expression
+                else:
+                    result[output_field] = expression
+            except Exception as e:
+                result[output_field] = None
+        
+        return result
+
+    async def _feature_engineering(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply feature engineering transformations."""
+        try:
+            input_data = data.get("data")
+            if not isinstance(input_data, np.ndarray):
+                raise ValueError("Input data must be a numpy array")
+
+            method = self.params.get("method", "standard")
+            if method == "standard":
+                scaler = StandardScaler(
+                    with_mean=self.params.get("with_mean", True),
+                    with_std=self.params.get("with_std", True)
+                )
+                transformed_data = scaler.fit_transform(input_data)
+                return {"data": transformed_data}
+            else:
+                raise ValueError(f"Unsupported feature engineering method: {method}")
+        except Exception as e:
+            raise ValueError(f"Feature engineering failed: {str(e)}")
+
+    async def _outlier_removal(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply outlier removal transformations."""
+        try:
+            input_data = data.get("data")
+            if not isinstance(input_data, np.ndarray):
+                raise ValueError("Input data must be a numpy array")
+
+            method = self.params.get("method", "isolation_forest")
+            if method == "isolation_forest":
+                detector = IsolationForest(
+                    contamination=self.params.get("threshold", 0.1),
+                    random_state=42
+                )
+                predictions = detector.fit_predict(input_data)
+                filtered_data = input_data[predictions == 1]
+                return {"data": filtered_data}
+            else:
+                raise ValueError(f"Unsupported outlier removal method: {method}")
+        except Exception as e:
+            raise ValueError(f"Outlier removal failed: {str(e)}")
+
+    async def _filter_output(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Filter output data."""
+        try:
+            input_data = data.get("data")
+            if not isinstance(input_data, np.ndarray):
+                raise ValueError("Input data must be a numpy array")
+
+            conditions = self.params.get("conditions", [])
+            filtered_data = input_data
+            for condition in conditions:
+                field = condition.get("field")
+                operator = condition.get("operator")
+                value = condition.get("value")
+                if field is not None and operator is not None and value is not None:
+                    mask = self._apply_operator(operator, filtered_data[:, field], value)
+                    filtered_data = filtered_data[mask]
+            return {"data": filtered_data}
+        except Exception as e:
+            raise ValueError(f"Filter failed: {str(e)}")
+
+    async def _map_output(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Map output data."""
+        try:
+            input_data = data.get("data")
+            if not isinstance(input_data, np.ndarray):
+                raise ValueError("Input data must be a numpy array")
+
+            mapping = self.params.get("mapping", {})
+            mapped_data = np.copy(input_data)
+            for field, value_map in mapping.items():
+                if isinstance(field, int) and field < input_data.shape[1]:
+                    for old_val, new_val in value_map.items():
+                        mapped_data[:, field][mapped_data[:, field] == old_val] = new_val
+            return {"data": mapped_data}
+        except Exception as e:
+            raise ValueError(f"Mapping failed: {str(e)}")
+
+    def validate_input(self, data: Any) -> bool:
+        """Validate input data."""
+        if not isinstance(data, dict):
+            return False
+        if "data" not in data:
+            return False
+        input_data = data.get("data")
+        if not isinstance(input_data, np.ndarray):
+            return False
+        return True
+
     def get_input_schema(self) -> Dict[str, Any]:
-        """Get input schema
+        """Get input schema.
         
         Returns:
-            JSON schema for input data
+            Dict[str, Any]: JSON schema for input data
         """
-        # Build input schema based on group_by and aggregation fields
-        properties = {
-            self.group_by: {"type": ["string", "number", "boolean"]}
-        }
-        required = [self.group_by]
-        
-        for agg_config in self.aggregations.values():
-            field = agg_config.get('field')
-            if field:
-                properties[field] = {"type": ["number", "null"]}
-                required.append(field)
-        
         return {
             "type": "object",
-            "properties": properties,
-            "required": required
+            "properties": {
+                "data": {
+                    "type": ["object", "array"],
+                    "items": {"type": "object"}
+                }
+            }
         }
 
     def get_output_schema(self) -> Dict[str, Any]:
-        """Get output schema
+        """Get output schema.
         
         Returns:
-            JSON schema for output data
+            Dict[str, Any]: JSON schema for output data
         """
         return {
             "type": "object",
-            "patternProperties": {
-                ".*": {
-                    "type": "object",
-                    "properties": {
-                        field: {"type": "number"}
-                        for field in self.aggregations.keys()
-                    }
+            "properties": {
+                "data": {"type": "object"},
+                "metadata": {"type": "object"},
+                "error": {"type": ["string", "null"]}
+            }
+        }
+
+class AggregateProcessor:
+    """Aggregate processor class."""
+
+    def __init__(self, config: Dict[str, Any]):
+        """Initialize aggregate processor."""
+        self.group_by = config.get("group_by")
+        self.aggregations = config.get("aggregations", {})
+        self._groups: Dict[str, List[Dict[str, Any]]] = {}
+
+    async def process(self, data: Dict[str, Any]) -> ProcessorResult:
+        """Process data using the configured aggregations."""
+        try:
+            # Add data to groups
+            group_key = str(data.get(self.group_by, "default"))
+            if group_key not in self._groups:
+                self._groups[group_key] = []
+            self._groups[group_key].append(data)
+            
+            # Aggregate all groups
+            result = {}
+            for group_key, group_data in self._groups.items():
+                result[group_key] = self._aggregate_group(group_data)
+            
+            # Create metadata
+            metadata = {
+                "group_count": str(len(self._groups)),
+                "total_records": str(sum(len(group) for group in self._groups.values()))
+            }
+            
+            return ProcessorResult(data=result, metadata=metadata)
+        except Exception as e:
+            return ProcessorResult(data={}, metadata={}, error=str(e))
+
+    async def process_data(self, data: Union[Dict[str, Any], List[Dict[str, Any]]]) -> Dict[str, Dict[str, Any]]:
+        """Process input data and apply aggregations."""
+        # Reset groups
+        self._groups = {}
+        
+        # Process data
+        if isinstance(data, list):
+            for item in data:
+                await self.process(item)
+        else:
+            await self.process(data)
+        
+        # Return aggregated results
+        result = {}
+        for group_key, group_data in self._groups.items():
+            result[group_key] = self._aggregate_group(group_data)
+        return result
+
+    def _aggregate_group(self, group_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Aggregate data within a group.
+        
+        Args:
+            group_data: List of data points in the group
+            
+        Returns:
+            Dict[str, Any]: Aggregated results
+        """
+        result = {}
+        
+        for field, agg_type in self.aggregations.items():
+            try:
+                # Extract values for the field
+                values = [item.get(field) for item in group_data if item.get(field) is not None]
+                
+                if not values:
+                    result[field] = None
+                    continue
+                
+                # Apply aggregation
+                if agg_type == "sum":
+                    result[field] = sum(values)
+                elif agg_type == "avg":
+                    result[field] = sum(values) / len(values)
+                elif agg_type == "min":
+                    result[field] = min(values)
+                elif agg_type == "max":
+                    result[field] = max(values)
+                elif agg_type == "count":
+                    result[field] = len(values)
+                elif agg_type == "first":
+                    result[field] = values[0]
+                elif agg_type == "last":
+                    result[field] = values[-1]
+                elif agg_type == "list":
+                    result[field] = values
+                elif agg_type == "set":
+                    result[field] = list(set(values))
+                elif agg_type == "concat":
+                    result[field] = ",".join(str(v) for v in values)
+                elif agg_type == "std":
+                    result[field] = float(np.std(values))
+                elif agg_type == "var":
+                    result[field] = float(np.var(values))
+                elif agg_type == "median":
+                    result[field] = float(np.median(values))
+                else:
+                    result[field] = None
+                    
+            except Exception as e:
+                result[field] = None
+        
+        return result
+
+    def validate_input(self, data: Any) -> bool:
+        """Validate input data.
+        
+        Args:
+            data: Input data to validate
+            
+        Returns:
+            bool: True if valid, False otherwise
+        """
+        if not isinstance(data, (dict, list)):
+            return False
+        if isinstance(data, list):
+            return all(isinstance(item, dict) for item in data)
+        return True
+
+    def get_input_schema(self) -> Dict[str, Any]:
+        """Get input schema.
+        
+        Returns:
+            Dict[str, Any]: JSON schema for input data
+        """
+        return {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": ["object", "array"],
+                    "items": {"type": "object"}
                 }
+            }
+        }
+
+    def get_output_schema(self) -> Dict[str, Any]:
+        """Get output schema.
+        
+        Returns:
+            Dict[str, Any]: JSON schema for output data
+        """
+        return {
+            "type": "object",
+            "properties": {
+                "output": {"type": "object"},
+                "metadata": {"type": "object"},
+                "error": {"type": ["string", "null"]}
             }
         }

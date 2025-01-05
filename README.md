@@ -1,125 +1,108 @@
-# AgentFlow: Dynamic AI Workflow Management System
+# AgentFlow
 
-## Overview
+AgentFlow is a flexible and extensible framework for building and managing AI agents and workflows. It provides a modular architecture for creating, configuring, and orchestrating AI agents.
 
-AgentFlow is an advanced, modular AI Agent Workflow Management System designed to provide flexible, configurable, and visualizable agent interactions.
+## Project Structure
+
+```
+agentflow/
+├── agents/             # Agent implementations
+│   ├── agent.py       # Base agent implementation
+│   └── types/         # Agent type definitions
+├── api/               # API endpoints
+├── core/              # Core framework components
+│   ├── base.py        # Base classes
+│   ├── config.py      # Configuration classes
+│   └── workflow.py    # Workflow engine
+├── models/            # Model implementations
+├── monitoring/        # Monitoring and metrics
+│   └── monitor.py     # System monitor
+├── services/          # Service providers
+│   └── registry.py    # Service registry
+├── strategies/        # Strategy implementations
+├── transformations/   # Data transformation tools
+└── utils/            # Utility functions
+```
 
 ## Features
 
-### 1. Dynamic Configuration
-- JSON-based agent and workflow configuration
-- Flexible parameter substitution
-- Configuration management and versioning
+- Flexible agent architecture
+- Configurable workflows
+- Service provider registry
+- System monitoring and metrics
+- Data transformation tools
+- Async/await support
+- Error handling and retry policies
 
-### 2. Workflow Execution
-- Asynchronous workflow processing
-- Node-based architecture
-- Advanced error handling
-- Real-time monitoring
-
-### 3. Processor Nodes
-- FilterProcessor: Data filtering
-- TransformProcessor: Data transformation
-- AggregateProcessor: Data aggregation
-
-## Quick Start
-
-### Installation
+## Installation
 
 ```bash
 pip install agentflow
 ```
 
-### Basic Usage
-
-#### Creating an Agent Configuration
+## Quick Start
 
 ```python
-from agentflow.core.config_manager import AgentConfig, ModelConfig
+from agentflow import Agent, AgentConfig, WorkflowEngine
 
-agent_config = AgentConfig(
-    id="research-agent",
-    name="Research Agent",
-    type="research",
-    model=ModelConfig(
-        name="gpt-4",
-        provider="openai"
-    ),
-    system_prompt="You are an expert researcher"
-)
-```
-
-#### Creating a Workflow Template
-
-```python
-from agentflow.core.templates import WorkflowTemplate, TemplateParameter
-from agentflow.core.config_manager import WorkflowConfig
-
-research_template = WorkflowTemplate(
-    id="research-workflow",
-    name="Research Workflow Template",
-    parameters=[
-        TemplateParameter(
-            name="domains",
-            description="Research domains",
-            type="list",
-            required=True
-        )
-    ],
-    workflow=WorkflowConfig(
-        id="research-workflow",
-        name="Multi-Domain Research Workflow",
-        agents=[
-            AgentConfig(
-                id="research-agent-{{ domain }}",
-                name="Research Agent for {{ domain }}",
-                type="research",
-                system_prompt="Conduct research on {{ domain }}"
-            ) for domain in "{{ domains }}"
-        ]
-    )
-)
-```
-
-#### Executing a Workflow
-
-```python
-from agentflow.core.workflow_executor import WorkflowExecutor
-
-workflow_config = research_template.instantiate_template(
-    "research-workflow", 
-    {"domains": ["AI", "Robotics"]}
+# Create agent configuration
+config = AgentConfig(
+    name="my_agent",
+    type="generic",
+    parameters={
+        "max_retries": 3,
+        "timeout": 30
+    }
 )
 
-executor = WorkflowExecutor(workflow_config)
-await executor.execute()
+# Create agent
+agent = Agent(config)
+
+# Create workflow engine
+engine = WorkflowEngine()
+
+# Register workflow
+await engine.register_workflow(agent)
+
+# Execute workflow
+result = await engine.execute_workflow(agent.id, {
+    "input": "Hello, World!"
+})
 ```
 
-## Advanced Features
+## Configuration
 
-- Dynamic processor nodes
-- Workflow template management
-- Real-time monitoring
-- Comprehensive error handling
+Agents and workflows can be configured using Python dictionaries or YAML files:
 
-## Testing
+```yaml
+AGENT:
+  name: my_agent
+  type: generic
+  version: 1.0.0
+  parameters:
+    max_retries: 3
+    timeout: 30
 
-```bash
-pytest tests/
+MODEL:
+  name: gpt-3
+  provider: openai
+  version: 1.0.0
+
+WORKFLOW:
+  max_iterations: 100
+  timeout: 3600
+  distributed: false
+  logging_level: INFO
 ```
 
 ## Contributing
 
 1. Fork the repository
-2. Create your feature branch
+2. Create a feature branch
 3. Commit your changes
 4. Push to the branch
 5. Create a Pull Request
 
 ## License
 
-MIT License
-
-## Contact
-
-[Your Contact Information]
+This project is licensed under the MIT License - see the LICENSE file for details.
