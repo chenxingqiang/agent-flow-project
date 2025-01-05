@@ -20,13 +20,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator, ValidationError
 
-from agentflow.core.research_workflow import ResearchDistributedWorkflow
-from agentflow import AgentFlow
+from agentflow.core.research_workflow import ResearchDistributedWorkflow, DistributedConfig
 from agentflow.core.config import AgentConfig
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+# Dictionary to store workflow tasks and their status
+task_refs: Dict[str, Dict[str, Any]] = {}
 
 # Conditionally initialize Ray
 def initialize_ray():
@@ -133,22 +135,27 @@ async def execute_workflow(request: WorkflowRequest):
         # Validate input data
         input_data = request.input_data or {}
         
-        # Transform workflow definition to match expected format
-        workflow_def = {'WORKFLOW': []}
-        if isinstance(request.workflow.get('WORKFLOW'), list):
-            workflow_def['WORKFLOW'] = request.workflow['WORKFLOW']
-        elif isinstance(request.workflow.get('WORKFLOW'), dict):
-            workflow_def['WORKFLOW'] = [request.workflow['WORKFLOW']]
-
         # Generate workflow ID
         workflow_id = str(uuid.uuid4())
+        
+        # Create distributed config from request config
+        dist_config = DistributedConfig(
+            num_workers=request.config.get('num_workers', 4),
+            batch_size=request.config.get('batch_size', 10),
+            timeout=request.config.get('timeout', 30.0),
+            retry_limit=request.config.get('max_retries', 3),
+            worker_init_timeout=request.config.get('worker_init_timeout', 5.0)
+        )
 
-        # Create workflow instance
-        workflow = ResearchDistributedWorkflow(workflow_def, request.config or {})
+        # Create workflow instance with proper name and config
+        workflow = ResearchDistributedWorkflow(
+            name=f"workflow_{workflow_id}",
+            config=dist_config
+        )
         
         # Store workflow info
         task_refs[workflow_id] = {
-            'workflow_def': workflow_def,
+            'workflow_def': request.workflow,
             'config': request.config or {},
             'input_data': input_data,
             'status': 'pending',
@@ -156,70 +163,97 @@ async def execute_workflow(request: WorkflowRequest):
             'error': None
         }
         
-        # Execute workflow with input data
+        # Extract research parameters from input data
+        research_input = {
+            "RESEARCH_TOPIC": input_data.get("STUDENT_NEEDS", {}).get("RESEARCH_TOPIC", ""),
+            "ACADEMIC_LEVEL": input_data.get("STUDENT_NEEDS", {}).get("ACADEMIC_LEVEL", ""),
+            "LANGUAGE": input_data.get("LANGUAGE", {}),
+            "TEMPLATE": input_data.get("TEMPLATE", "")
+        }
+        
+        # Execute workflow with research input
         try:
-            result = workflow.execute(input_data)
+            result = await workflow.execute(research_input)
             task_refs[workflow_id]['status'] = 'completed'
             task_refs[workflow_id]['result'] = result
+            
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "status": "success",
+                    "workflow_id": workflow_id,
+                    "result": result
+                }
+            )
         except Exception as e:
-            task_refs[workflow_id]['status'] = 'running'  # Set to running instead of failed
+            task_refs[workflow_id]['status'] = 'failed'
             task_refs[workflow_id]['error'] = str(e)
             logger.error(f"Error executing workflow: {e}")
+            raise
         
-        # Return workflow ID
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "success",
-                "workflow_id": workflow_id
-            }
-        )
     except Exception as e:
         logger.error(f"Unexpected error in workflow execution: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/workflow/execute_async")
-async def execute_workflow_async(request: WorkflowRequest):
+async def execute_workflow_async(request: WorkflowRequest, background_tasks: BackgroundTasks):
     """Execute workflow asynchronously"""
     logger.info("Received async workflow execution request")
     try:
         # Validate input data
         input_data = request.input_data or {}
         
-        # Transform workflow definition to match expected format
-        workflow_def = {'WORKFLOW': []}
-        if isinstance(request.workflow.get('WORKFLOW'), list):
-            workflow_def['WORKFLOW'] = request.workflow['WORKFLOW']
-        elif isinstance(request.workflow.get('WORKFLOW'), dict):
-            workflow_def['WORKFLOW'] = [request.workflow['WORKFLOW']]
-
         # Generate workflow ID
         workflow_id = str(uuid.uuid4())
+        
+        # Create distributed config from request config
+        dist_config = DistributedConfig(
+            num_workers=request.config.get('num_workers', 4),
+            batch_size=request.config.get('batch_size', 10),
+            timeout=request.config.get('timeout', 30.0),
+            retry_limit=request.config.get('max_retries', 3),
+            worker_init_timeout=request.config.get('worker_init_timeout', 5.0)
+        )
 
-        # Create workflow instance
-        workflow = ResearchDistributedWorkflow(workflow_def, request.config or {})
+        # Create workflow instance with proper name and config
+        workflow = ResearchDistributedWorkflow(
+            name=f"workflow_{workflow_id}",
+            config=dist_config
+        )
+        
+        # Extract research parameters from input data
+        research_input = {
+            "RESEARCH_TOPIC": input_data.get("STUDENT_NEEDS", {}).get("RESEARCH_TOPIC", ""),
+            "ACADEMIC_LEVEL": input_data.get("STUDENT_NEEDS", {}).get("ACADEMIC_LEVEL", ""),
+            "LANGUAGE": input_data.get("LANGUAGE", {}),
+            "TEMPLATE": input_data.get("TEMPLATE", "")
+        }
         
         # Store workflow info
         task_refs[workflow_id] = {
-            'workflow_def': workflow_def,
+            'workflow_def': request.workflow,
             'config': request.config or {},
-            'input_data': input_data,
+            'input_data': research_input,
             'status': 'pending',
             'result': None,
             'error': None,
-            'result_ref': None
+            'workflow': workflow
         }
         
-        # Execute workflow asynchronously
-        try:
-            result_ref = workflow.execute_async(input_data)
-            task_refs[workflow_id]['result_ref'] = result_ref
-            task_refs[workflow_id]['status'] = 'running'
-        except Exception as e:
-            task_refs[workflow_id]['status'] = 'running'  # Set to running instead of failed
-            task_refs[workflow_id]['error'] = str(e)
-            logger.error(f"Error executing workflow: {e}")
+        # Start background task for execution
+        async def execute_workflow_task():
+            try:
+                result = await workflow.execute(research_input)
+                task_refs[workflow_id]['status'] = 'completed'
+                task_refs[workflow_id]['result'] = result
+            except Exception as e:
+                task_refs[workflow_id]['status'] = 'failed'
+                task_refs[workflow_id]['error'] = str(e)
+                logger.error(f"Error executing workflow: {e}")
+        
+        background_tasks.add_task(execute_workflow_task)
+        task_refs[workflow_id]['status'] = 'running'
         
         # Return workflow ID
         return JSONResponse(
@@ -311,8 +345,6 @@ def _format_workflow_result(result: Any) -> Any:
     
     # Otherwise, wrap the entire result
     return {'output': result}
-
-task_refs = {}
 
 # Create a Ray actor for handling async workflow execution
 @ray.remote
