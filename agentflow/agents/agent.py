@@ -1,6 +1,6 @@
 """Agent module."""
 
-from typing import Dict, Any, Optional, Union, List
+from typing import Dict, Any, Optional, Union, List, Type
 from pydantic import BaseModel, Field, PrivateAttr
 import uuid
 import logging
@@ -11,8 +11,39 @@ from ..core.instruction_selector import InstructionSelector
 from ..ell2a.integration import ELL2AIntegration
 from ..ell2a.types.message import Message, MessageRole
 from ..core.types import AgentStatus
+from .agent_types import AgentType
+from ..transformations.advanced_strategies import AdvancedTransformationStrategy
 
 logger = logging.getLogger(__name__)
+
+class TransformationPipeline:
+    """Pipeline for applying multiple transformation strategies in sequence."""
+    
+    def __init__(self):
+        """Initialize transformation pipeline."""
+        self.strategies = []
+        
+    def add_strategy(self, strategy: AdvancedTransformationStrategy) -> None:
+        """Add a transformation strategy to the pipeline.
+        
+        Args:
+            strategy: Strategy to add
+        """
+        self.strategies.append(strategy)
+        
+    def fit_transform(self, data: Any) -> Any:
+        """Apply all transformation strategies in sequence.
+        
+        Args:
+            data: Input data to transform
+            
+        Returns:
+            Transformed data
+        """
+        result = data
+        for strategy in self.strategies:
+            result = strategy.transform(result)
+        return result
 
 class AgentState(BaseModel):
     """Agent state class."""
@@ -29,6 +60,7 @@ class Agent(BaseModel):
     name: str = Field(default="")
     description: Optional[str] = None
     type: str = Field(default="generic")
+    mode: str = Field(default="simple")
     version: str = Field(default="1.0.0")
     config: AgentConfig
     state: AgentState = Field(default_factory=AgentState)
@@ -36,12 +68,18 @@ class Agent(BaseModel):
     history: List[Dict[str, str]] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
     max_errors: int = Field(default=10)
+    domain_config: Dict[str, Any] = Field(default_factory=dict)
     
     # Private attributes
     _ell2a: Optional[ELL2AIntegration] = PrivateAttr(default=None)
     _isa_manager: Optional[ISAManager] = PrivateAttr(default=None)
     _instruction_selector: Optional[InstructionSelector] = PrivateAttr(default=None)
     _initialized: bool = PrivateAttr(default=False)
+    
+    class Config:
+        """Pydantic config."""
+        arbitrary_types_allowed = True
+        extra = "allow"  # Allow extra fields
     
     def add_error(self, error_msg: str):
         """Add error to the list, maintaining max size."""
@@ -82,31 +120,69 @@ class Agent(BaseModel):
     def __init__(self, config: Union[Dict[str, Any], AgentConfig], **data):
         """Initialize agent."""
         if isinstance(config, dict):
+            # Get agent-specific config
+            agent_data = config.get("AGENT", {})
+            
             # Create agent config from dictionary
-            model_config = ModelConfig(**config.get("model", {}))
-            workflow_config = WorkflowConfig(**config.get("workflow", {})) if config.get("workflow") else None
+            model_config = ModelConfig(**config.get("MODEL", {}))
+            
+            # Create workflow config with an id
+            workflow_data = config.get("WORKFLOW", {})
+            if workflow_data:
+                workflow_data["id"] = workflow_data.get("id", str(uuid.uuid4()))
+                workflow_config = WorkflowConfig(**workflow_data)
+            else:
+                workflow_config = None
+            
+            # Get domain config
+            domain_config = config.get("DOMAIN_CONFIG", {})
             
             agent_config = AgentConfig(
-                id=config.get("id", str(uuid.uuid4())),
-                name=config.get("name", ""),
-                description=config.get("description"),
-                type=config.get("type", "generic"),
-                version=config.get("version", "1.0.0"),
-                system_prompt=config.get("system_prompt", ""),
+                id=agent_data.get("id", str(uuid.uuid4())),
+                name=agent_data.get("name", ""),
+                description=agent_data.get("description"),
+                type=agent_data.get("type", "generic"),
+                version=agent_data.get("version", "1.0.0"),
+                system_prompt=agent_data.get("system_prompt", ""),
                 model=model_config,
                 workflow=workflow_config,
-                config=config.get("config", {})
+                config=domain_config  # Pass domain config here
             )
             config = agent_config
+            
+            # Get mode from agent data
+            mode = agent_data.get("mode", "simple")
+            
+            # Get agent-specific attributes
+            agent_type = agent_data.get("type", "generic")
+            if agent_type == AgentType.DATA_SCIENCE.value:
+                metrics = domain_config.get("metrics", [])
+            elif agent_type == AgentType.RESEARCH.value:
+                research_domains = domain_config.get("research_domains", [])
+        else:
+            mode = getattr(config, "mode", "simple")
+            agent_type = config.type
+            if agent_type == AgentType.DATA_SCIENCE.value:
+                metrics = config.config.get("metrics", [])
+            elif agent_type == AgentType.RESEARCH.value:
+                research_domains = config.config.get("research_domains", [])
         
         # Update data with config values
         data.update({
             "id": config.id,
             "name": config.name,
             "description": config.description,
-            "type": config.type,
-            "version": config.version
+            "type": agent_type,
+            "mode": mode,
+            "version": config.version,
+            "domain_config": config.config  # Add domain config to data
         })
+        
+        # Add agent-specific attributes
+        if agent_type == AgentType.DATA_SCIENCE.value:
+            data["metrics"] = metrics
+        elif agent_type == AgentType.RESEARCH.value:
+            data["research_domains"] = research_domains
         
         super().__init__(config=config, **data)
         

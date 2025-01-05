@@ -16,6 +16,8 @@ class TestAdvancedAgents:
             timeout=3600,
             steps=[
                 WorkflowStep(
+                    id="step-1",
+                    name="Research Analysis",
                     type=WorkflowStepType.RESEARCH_EXECUTION,
                     config={"strategy": "text_analysis"}
                 )

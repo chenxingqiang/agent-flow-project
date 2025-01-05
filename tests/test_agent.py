@@ -13,6 +13,7 @@ class TestAgentFramework:
     def setup_agent(self):
         """Set up test environment."""
         self.workflow_config = WorkflowConfig(
+            id="test-workflow-1",
             name="test_workflow",
             max_iterations=5,
             timeout=30,
@@ -36,9 +37,9 @@ class TestAgentFramework:
             id="test-agent-1",
             name="test_agent",
             type=ConfigurationType.DATA_SCIENCE,
-            mode=AgentMode.SEQUENTIAL,
+            mode=AgentMode.SIMPLE,
             version="1.0.0",
-            model_settings=ModelConfig(
+            model=ModelConfig(
                 provider="openai",
                 name="gpt-4",
                 temperature=0.7,
@@ -53,10 +54,10 @@ class TestAgentFramework:
         assert self.agent_config.id == "test-agent-1"
         assert self.agent_config.name == "test_agent"
         assert self.agent_config.type == ConfigurationType.DATA_SCIENCE
-        assert self.agent_config.mode == AgentMode.SEQUENTIAL
+        assert self.agent_config.mode == AgentMode.SIMPLE
         assert self.agent_config.version == "1.0.0"
-        assert isinstance(self.agent_config.model_settings, ModelConfig)
-        assert self.agent_config.model_settings.name == "gpt-4"
+        assert isinstance(self.agent_config.model, ModelConfig)
+        assert self.agent_config.model.name == "gpt-4"
         assert isinstance(self.agent_config.workflow, WorkflowConfig)
 
     @pytest.mark.asyncio
@@ -65,14 +66,16 @@ class TestAgentFramework:
         data = np.random.randn(10, 2)
         result = await self.agent_config.workflow.execute({"data": data})
         assert "step-1" in result
-        assert "data" in result["step-1"]
-        assert isinstance(result["step-1"]["data"], np.ndarray)
-        assert result["step-1"]["data"].shape == data.shape
+        assert "output" in result["step-1"]
+        assert "data" in result["step-1"]["output"]
+        assert isinstance(result["step-1"]["output"]["data"], np.ndarray)
+        assert result["step-1"]["output"]["data"].shape == data.shape
 
     @pytest.mark.asyncio
     async def test_data_science_agent_advanced_transformations(self):
         """Test data science agent with advanced transformations."""
         workflow = WorkflowConfig(
+            id="advanced-workflow-1",
             name="advanced_workflow",
             max_iterations=5,
             timeout=30,
@@ -108,9 +111,9 @@ class TestAgentFramework:
             id="test-agent-2",
             name="test_agent",
             type=ConfigurationType.DATA_SCIENCE,
-            mode=AgentMode.SEQUENTIAL,
+            mode=AgentMode.SIMPLE,
             version="1.0.0",
-            model_settings=ModelConfig(
+            model=ModelConfig(
                 provider="openai",
                 name="gpt-4",
                 temperature=0.7,
@@ -122,7 +125,7 @@ class TestAgentFramework:
         result = await agent.workflow.execute({"data": data})
         assert "step-1" in result
         assert "step-2" in result
-        assert "data" in result["step-2"]
-        assert isinstance(result["step-2"]["data"], np.ndarray)
-        assert result["step-2"]["data"].shape[1] == data.shape[1]  # Same number of features
-        assert result["step-2"]["data"].shape[0] <= data.shape[0]  # Some points may be removed as outliers
+        assert "output" in result["step-2"]
+        assert "data" in result["step-2"]["output"]
+        assert isinstance(result["step-2"]["output"]["data"], np.ndarray)
+        assert result["step-2"]["output"]["data"].shape == data.shape

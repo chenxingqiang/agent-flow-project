@@ -4,8 +4,35 @@ import os
 import json
 from typing import List, Optional, Dict, Any, Union
 from pathlib import Path
+from dataclasses import dataclass, field
 
 from .config import AgentConfig, WorkflowConfig, ModelConfig, ConfigurationType
+
+@dataclass
+class ProcessorConfig:
+    """Configuration for a processor."""
+    name: str
+    type: str
+    params: Dict[str, Any] = field(default_factory=dict)
+    enabled: bool = True
+    timeout: float = 60.0
+    retry_count: int = 3
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "name": self.name,
+            "type": self.type,
+            "params": self.params,
+            "enabled": self.enabled,
+            "timeout": self.timeout,
+            "retry_count": self.retry_count
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ProcessorConfig":
+        """Create from dictionary."""
+        return cls(**data)
 
 class ConfigManager:
     """Configuration manager for agent and workflow configurations."""

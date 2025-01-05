@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     from ..agents.agent_types import AgentConfig, AgentMode, AgentType, AgentStatus
     from ..agents.agent import Agent, AgentState
 
-from .workflow_types import WorkflowConfig, WorkflowStep, WorkflowStepType
+from .workflow_types import WorkflowConfig, StepConfig, WorkflowStepType
 from .workflow_executor import WorkflowExecutor
 from .workflow_state import WorkflowStateManager, WorkflowStatus, StepStatus
 from .exceptions import WorkflowExecutionError, StepExecutionError
@@ -16,24 +16,10 @@ from .workflow import Workflow
 if TYPE_CHECKING:
     from ..agents.agent_types import AgentConfig, AgentMode, AgentType, AgentStatus
 
-# Rebuild models after all imports are done
-WorkflowConfig.model_rebuild()
-
 __all__ = [
     'WorkflowConfig',
-    'WorkflowStep',
+    'StepConfig',
     'WorkflowStepType',
-    'AgentType',
-    'AgentMode',
-    'WorkflowExecutor',
     'WorkflowStateManager',
-    'WorkflowStatus',
-    'StepStatus',
-    'WorkflowExecutionError',
-    'StepExecutionError',
-    'AgentConfig',
-    'AgentMode',
-    'AgentType',
-    'AgentStatus',
-    'Workflow'
+    'WorkflowExecutionError'
 ]

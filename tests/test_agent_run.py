@@ -2,14 +2,16 @@
 
 import pytest
 import numpy as np
-from agentflow.core.config import AgentConfig, ConfigurationType, AgentMode, ModelConfig
+from agentflow.core.config import AgentConfig, ConfigurationType, ModelConfig
 from agentflow.core.workflow_types import WorkflowConfig, WorkflowStep, WorkflowStepType, StepConfig
 from agentflow.core.exceptions import WorkflowExecutionError
+from agentflow.agents.agent_types import AgentMode
 
 @pytest.mark.asyncio
 async def test_agent_run():
     """Test agent run functionality."""
     workflow = WorkflowConfig(
+        id="test-workflow-1",
         name="test_workflow",
         max_iterations=5,
         timeout=30,
@@ -35,7 +37,7 @@ async def test_agent_run():
         type=ConfigurationType.DATA_SCIENCE,
         mode=AgentMode.SEQUENTIAL,
         version="1.0.0",
-        model_settings=ModelConfig(
+        model=ModelConfig(
             provider="openai",
             name="gpt-4",
             temperature=0.7,
@@ -46,14 +48,16 @@ async def test_agent_run():
     data = np.random.randn(10, 2)
     result = await agent.workflow.execute({"data": data})
     assert "step-1" in result
-    assert "data" in result["step-1"]
-    assert isinstance(result["step-1"]["data"], np.ndarray)
-    assert result["step-1"]["data"].shape == data.shape
+    assert "output" in result["step-1"]
+    assert "data" in result["step-1"]["output"]
+    assert isinstance(result["step-1"]["output"]["data"], np.ndarray)
+    assert result["step-1"]["output"]["data"].shape == data.shape
 
 @pytest.mark.asyncio
 async def test_agent_run_with_dependencies():
     """Test agent run with workflow dependencies."""
     workflow = WorkflowConfig(
+        id="test-workflow-2",
         name="dependency_workflow",
         max_iterations=5,
         timeout=30,
@@ -92,7 +96,7 @@ async def test_agent_run_with_dependencies():
         type=ConfigurationType.DATA_SCIENCE,
         mode=AgentMode.SEQUENTIAL,
         version="1.0.0",
-        model_settings=ModelConfig(
+        model=ModelConfig(
             provider="openai",
             name="gpt-4",
             temperature=0.7,
@@ -104,15 +108,17 @@ async def test_agent_run_with_dependencies():
     result = await agent.workflow.execute({"data": data})
     assert "step-1" in result
     assert "step-2" in result
-    assert "data" in result["step-2"]
-    assert isinstance(result["step-2"]["data"], np.ndarray)
-    assert result["step-2"]["data"].shape[1] == data.shape[1]  # Same number of features
-    assert result["step-2"]["data"].shape[0] <= data.shape[0]  # Some points may be removed as outliers
+    assert "output" in result["step-2"]
+    assert "data" in result["step-2"]["output"]
+    assert isinstance(result["step-2"]["output"]["data"], np.ndarray)
+    assert result["step-2"]["output"]["data"].shape[1] == data.shape[1]  # Same number of features
+    assert result["step-2"]["output"]["data"].shape[0] <= data.shape[0]  # Some points may be removed as outliers
 
 @pytest.mark.asyncio
 async def test_agent_run_error_handling():
     """Test agent run error handling."""
     workflow = WorkflowConfig(
+        id="test-workflow-3",
         name="error_workflow",
         max_iterations=5,
         timeout=30,
@@ -134,7 +140,7 @@ async def test_agent_run_error_handling():
         type=ConfigurationType.DATA_SCIENCE,
         mode=AgentMode.SEQUENTIAL,
         version="1.0.0",
-        model_settings=ModelConfig(
+        model=ModelConfig(
             provider="openai",
             name="gpt-4",
             temperature=0.7,

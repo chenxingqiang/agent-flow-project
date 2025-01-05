@@ -43,7 +43,7 @@ class AgentConfig(BaseModel):
     """Agent configuration."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str = Field(default="Default Agent")
-    type: AgentType = Field(default=AgentType.GENERIC)
+    type: AgentType
     version: str = Field(default="1.0.0")
     mode: AgentMode = Field(default=AgentMode.SYNC)
     max_retries: int = Field(default=3)

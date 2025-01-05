@@ -117,7 +117,6 @@ class AgentNode(Node):
 
         return result
 
-    @ell2a_integration.track_function()
     async def _execute_simple_ell2a(self, message: Any) -> Dict[str, Any]:
         """Execute using ELL2A simple mode"""
         try:
@@ -137,7 +136,6 @@ class AgentNode(Node):
             self.logger.error(f"Error executing agent with ELL2A simple: {str(e)}")
             raise
 
-    @ell2a_integration.track_function()
     async def _execute_complex_ell2a(self, message: Any) -> Dict[str, Any]:
         """Execute using ELL2A complex mode"""
         try:
@@ -225,7 +223,6 @@ class ProcessorNode(Node):
 
         return result
 
-    @ell2a_integration.track_function()
     async def _execute_simple_ell2a(self, message: Any) -> Dict[str, Any]:
         """Execute using ELL2A simple mode"""
         try:
@@ -250,7 +247,6 @@ class ProcessorNode(Node):
             self.logger.error(f"Error executing processor with ELL2A simple: {str(e)}")
             raise
 
-    @ell2a_integration.track_function()
     async def _execute_complex_ell2a(self, message: Any) -> Dict[str, Any]:
         """Execute using ELL2A complex mode"""
         try:

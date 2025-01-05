@@ -7,20 +7,33 @@ import uuid
 from .agent_types import AgentConfig, AgentType, AgentMode
 from .agent import Agent
 
-class AgentFactory(BaseModel):
+class AgentFactory:
     """Agent factory class."""
     
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str = Field(default="")
-    description: Optional[str] = None
-    agents: Dict[str, Agent] = Field(default_factory=dict)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    _agent_types: Dict[str, type] = {}
     
-    def create_agent(self, config: Union[Dict[str, Any], AgentConfig]) -> Agent:
+    def __init__(self, name: str = "", description: Optional[str] = None):
+        """Initialize agent factory."""
+        self.id = str(uuid.uuid4())
+        self.name = name
+        self.description = description
+        self.agents: Dict[str, Agent] = {}
+        self.metadata: Dict[str, Any] = {}
+    
+    @classmethod
+    def register_agent(cls, agent_type: str, agent_class: type) -> None:
+        """Register an agent type."""
+        cls._agent_types[agent_type] = agent_class
+    
+    @classmethod
+    def create_agent(cls, config: Union[Dict[str, Any], AgentConfig]) -> Agent:
         """Create an agent."""
-        agent = Agent(config=config)
-        self.agents[agent.id] = agent
-        return agent
+        if isinstance(config, dict):
+            agent_type = config.get("AGENT", {}).get("type")
+            if agent_type and agent_type in cls._agent_types:
+                agent_class = cls._agent_types[agent_type]
+                return agent_class(config=config)
+        return Agent(config=config)
         
     def get_agent(self, agent_id: str) -> Optional[Agent]:
         """Get an agent."""
@@ -48,6 +61,13 @@ class AgentFactory(BaseModel):
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AgentFactory":
         """Create from dictionary."""
-        if "agents" in data:
-            data["agents"] = {k: Agent.from_dict(v) for k, v in data["agents"].items()}
-        return cls(**data)
+        factory = cls(name=data.get("name", ""), description=data.get("description"))
+        factory.id = data.get("id", str(uuid.uuid4()))
+        factory.metadata = data.get("metadata", {})
+        
+        # Load agents
+        for agent_id, agent_data in data.get("agents", {}).items():
+            agent = Agent.from_dict(agent_data)
+            factory.agents[agent_id] = agent
+            
+        return factory

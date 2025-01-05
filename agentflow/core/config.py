@@ -82,6 +82,7 @@ class AgentConfig:
     name: str
     description: Optional[str] = None
     type: Union[ConfigurationType, str] = ConfigurationType.GENERIC
+    mode: Union[AgentMode, str] = AgentMode.SIMPLE
     version: str = "1.0.0"
     system_prompt: str = ""
     model: Union[ModelConfig, Dict[str, Any]] = None
@@ -96,6 +97,13 @@ class AgentConfig:
                 self.type = ConfigurationType(self.type)
             except ValueError:
                 self.type = ConfigurationType.GENERIC
+                
+        # Convert mode to enum if needed
+        if isinstance(self.mode, str):
+            try:
+                self.mode = AgentMode(self.mode)
+            except ValueError:
+                self.mode = AgentMode.SIMPLE
         
         # Convert model dict to ModelConfig if needed
         if isinstance(self.model, dict):

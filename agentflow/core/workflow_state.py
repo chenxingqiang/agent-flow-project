@@ -7,6 +7,101 @@ from pydantic import BaseModel, Field, ConfigDict, computed_field, field_validat
 from dataclasses import dataclass, field
 from .workflow_types import WorkflowStatus, StepStatus
 from ..agents.agent_types import AgentStatus
+from .exceptions import WorkflowStateError
+
+class WorkflowState:
+    """Workflow state class."""
+
+    def __init__(self, workflow_id: str, name: str, status: str = "pending"):
+        """Initialize workflow state.
+        
+        Args:
+            workflow_id: Unique identifier for the workflow
+            name: Name of the workflow
+            status: Initial status of the workflow (default: pending)
+        """
+        self.workflow_id = workflow_id
+        self.name = name
+        self._status = status
+        self.created_at = datetime.now()
+        self.updated_at = None
+        self.error = None
+        self.metadata = {}
+        self.step_states = {}
+        self.status_history = [{"status": status, "timestamp": self.created_at}]
+        self.validate()
+        
+    def validate(self) -> None:
+        """Validate workflow state."""
+        try:
+            WorkflowStatus(self._status)
+        except ValueError:
+            raise WorkflowStateError(f"Invalid workflow status: {self._status}")
+            
+    def update_status(self, status: str) -> None:
+        """Update workflow status.
+        
+        Args:
+            status: New workflow status
+        """
+        try:
+            WorkflowStatus(status)
+        except ValueError:
+            raise WorkflowStateError(f"Invalid workflow status: {status}")
+            
+        self._status = status
+        self.updated_at = datetime.now()
+        self.status_history.append({
+            "status": status,
+            "timestamp": self.updated_at
+        })
+        
+    @property
+    def status(self) -> str:
+        """Get current workflow status."""
+        return self._status
+        
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert workflow state to dictionary."""
+        return {
+            "workflow_id": self.workflow_id,
+            "name": self.name,
+            "status": self._status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "error": self.error,
+            "metadata": self.metadata,
+            "status_history": [
+                {
+                    "status": h["status"],
+                    "timestamp": h["timestamp"].isoformat()
+                }
+                for h in self.status_history
+            ]
+        }
+        
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowState":
+        """Create workflow state from dictionary.
+        
+        Args:
+            data: Dictionary containing workflow state data
+            
+        Returns:
+            WorkflowState instance
+        """
+        state = cls(
+            workflow_id=data["workflow_id"],
+            name=data["name"],
+            status=data["status"]
+        )
+        if data.get("created_at"):
+            state.created_at = datetime.fromisoformat(data["created_at"])
+        if data.get("updated_at"):
+            state.updated_at = datetime.fromisoformat(data["updated_at"])
+        state.error = data.get("error")
+        state.metadata = data.get("metadata", {})
+        return state
 
 class StepState:
     """Step state class."""
@@ -112,48 +207,6 @@ class AgentState:
         self.retry_count += 1
         if self.retry_count >= self.max_retries:
             self.status = AgentStatus.FAILED
-
-class WorkflowState:
-    """Workflow state class."""
-
-    def __init__(self, step_states: Optional[Dict[str, StepState]] = None):
-        """Initialize workflow state."""
-        self.status = WorkflowStatus.PENDING
-        self.start_time = None
-        self.end_time = None
-        self.error = None
-        self.metadata = {}
-        self.step_states = step_states or {}
-        
-    def start(self) -> None:
-        """Start workflow execution."""
-        self.start_time = datetime.now().timestamp()
-        self.status = WorkflowStatus.RUNNING
-        
-    def fail(self, error: str) -> None:
-        """Fail workflow execution."""
-        self.end_time = datetime.now().timestamp()
-        self.status = WorkflowStatus.FAILED
-        self.error = error
-
-    def complete(self) -> None:
-        """Complete workflow execution."""
-        self.end_time = datetime.now().timestamp()
-        self.status = WorkflowStatus.COMPLETED
-
-    def get_step_state(self, step_id: str) -> Optional[StepState]:
-        """Get step state."""
-        return self.step_states.get(step_id)
-
-    def add_step_state(self, step_id: str, state: StepState) -> None:
-        """Add step state."""
-        self.step_states[step_id] = state
-
-    def get_execution_time(self) -> Optional[float]:
-        """Get execution time in seconds."""
-        if self.start_time and self.end_time:
-            return self.end_time - self.start_time
-        return None
 
 class WorkflowStateManager:
     """Workflow state manager class."""
