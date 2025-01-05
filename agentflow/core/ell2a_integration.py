@@ -2,7 +2,7 @@
 
 from typing import Dict, Any, Optional, List, Callable
 from functools import wraps
-from ..ell2a import ELL, Message
+from ..ell2a import ELL, Message, MessageRole
 
 class ELL2AIntegration:
     """Singleton class for ELL2A integration."""
@@ -32,11 +32,15 @@ class ELL2AIntegration:
                 "retry_delay": 1.0,
                 "timeout": 60.0,
                 "stream": True,
-                "track_performance": True
+                "track_performance": True,
+                "track_memory": True
             }
         }
         self.ell = ELL(model_name=self.config["default_model"], config=self.config)
         self._is_initialized = True
+        self._workflows = {}
+        self._messages = []
+        self._metrics = {}
     
     def configure(self, config: Dict[str, Any]) -> None:
         """Configure ELL2A integration.
@@ -93,6 +97,87 @@ class ELL2AIntegration:
         mode_config = self.config.get(mode, {})
         return {**base_config, **mode_config}
     
+    def create_message(self, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Create a message.
+        
+        Args:
+            role: Message role
+            content: Message content
+            metadata: Optional metadata
+            
+        Returns:
+            Created message
+        """
+        message = {
+            "role": role,
+            "content": content,
+            "metadata": metadata or {}
+        }
+        return message
+    
+    def add_message(self, message: Dict[str, Any]) -> None:
+        """Add message to context.
+        
+        Args:
+            message: Message to add
+        """
+        self._messages.append(message)
+    
+    def get_messages(self) -> List[Dict[str, Any]]:
+        """Get all messages.
+        
+        Returns:
+            List of messages
+        """
+        return self._messages.copy()
+    
+    def get_context(self) -> Dict[str, Any]:
+        """Get current context.
+        
+        Returns:
+            Current context
+        """
+        return {
+            "messages": self._messages.copy()
+        }
+    
+    def clear_context(self) -> None:
+        """Clear current context."""
+        self._messages.clear()
+    
+    def register_workflow(self, workflow_id: str, workflow: Any) -> None:
+        """Register a workflow.
+        
+        Args:
+            workflow_id: Workflow ID
+            workflow: Workflow instance
+        """
+        self._workflows[workflow_id] = workflow
+    
+    def unregister_workflow(self, workflow_id: str) -> None:
+        """Unregister a workflow.
+        
+        Args:
+            workflow_id: Workflow ID
+        """
+        self._workflows.pop(workflow_id, None)
+    
+    def list_workflows(self) -> List[str]:
+        """List registered workflows.
+        
+        Returns:
+            List of workflow IDs
+        """
+        return list(self._workflows.keys())
+    
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get metrics.
+        
+        Returns:
+            Current metrics
+        """
+        return self._metrics.copy()
+    
     @staticmethod
     def with_ell2a(mode: str = "simple"):
         """Decorator to enable ELL2A for any function.
@@ -111,7 +196,7 @@ class ELL2AIntegration:
                 
                 # Create message from function call
                 message = Message(
-                    role="user",
+                    role=MessageRole.USER,
                     content=str(args[0]) if args else "",
                     metadata={
                         "mode": mode,
@@ -122,7 +207,7 @@ class ELL2AIntegration:
                 
                 # Process with ELL2A
                 result = await ell2a.process_message(message)
-                return result
+                return {"result": result.content}
                 
             return wrapper
         return decorator
@@ -138,30 +223,27 @@ class ELL2AIntegration:
             @wraps(func)
             async def wrapper(*args, **kwargs):
                 ell2a = ELL2AIntegration()
+                func_name = func.__name__
                 
-                # Track function execution
-                message = Message(
-                    role="function",
-                    content=f"Executing {func.__name__}",
-                    metadata={
-                        "function": func.__name__,
-                        "args": str(args),
-                        "kwargs": str(kwargs)
+                # Initialize metrics for function if not exists
+                if func_name not in ell2a._metrics:
+                    ell2a._metrics[func_name] = {
+                        "calls": 0,
+                        "total_time": 0.0,
+                        "errors": 0
                     }
-                )
                 
                 try:
+                    # Track function execution
+                    import time
+                    start_time = time.time()
                     result = await func(*args, **kwargs)
-                    message.metadata["status"] = "success"
-                    message.metadata["result"] = str(result)
+                    ell2a._metrics[func_name]["calls"] += 1
+                    ell2a._metrics[func_name]["total_time"] += time.time() - start_time
+                    return result
                 except Exception as e:
-                    message.metadata["status"] = "error"
-                    message.metadata["error"] = str(e)
+                    ell2a._metrics[func_name]["errors"] += 1
                     raise
-                finally:
-                    await ell2a.process_message(message)
-                
-                return result
                 
             return wrapper
         return decorator
