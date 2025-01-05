@@ -1,7 +1,7 @@
 """Instructions package."""
 
 from .base import BaseInstruction
-from .advanced import ImageProcessingInstruction
+from .image import ImageProcessingInstruction
 
 __all__ = [
     "BaseInstruction",

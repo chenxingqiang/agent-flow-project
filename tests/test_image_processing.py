@@ -4,7 +4,7 @@ from PIL import Image
 import numpy as np
 from unittest.mock import Mock, patch, MagicMock
 import ray
-from agentflow.core.instructions.advanced import ImageProcessingInstruction
+from agentflow.core.instructions.image import ImageProcessingInstruction
 from transformers import ViTImageProcessor, ViTForImageClassification
 
 pytestmark = pytest.mark.asyncio
@@ -57,8 +57,8 @@ class TestImageProcessingInstruction:
         self.mock_model = MagicMock()
         self.mock_model.return_value = MagicMock(logits=torch.randn(1, 1000))
         
-        with patch('agentflow.core.instructions.advanced.ViTImageProcessor.from_pretrained', return_value=self.mock_processor), \
-             patch('agentflow.core.instructions.advanced.ViTForImageClassification.from_pretrained', return_value=self.mock_model):
+        with patch('agentflow.core.instructions.image.ViTImageProcessor.from_pretrained', return_value=self.mock_processor), \
+             patch('agentflow.core.instructions.image.ViTForImageClassification.from_pretrained', return_value=self.mock_model):
             self.instruction = ImageProcessingInstruction.remote(use_mock=True)
             self.test_image = torch.randn(3, 224, 224)  # Mock image tensor
         
