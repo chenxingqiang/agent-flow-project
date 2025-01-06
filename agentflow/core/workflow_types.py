@@ -17,6 +17,11 @@ class WorkflowStepType(Enum):
     AGGREGATE = "aggregate"
     CUSTOM = "custom"
     RESEARCH_EXECUTION = "research_execution"
+    DOCUMENT_GENERATION = "document_generation"
+    CODE_GENERATION = "code_generation"
+    FIGURE_GENERATION = "figure_generation"
+    VIDEO_GENERATION = "video_generation"
+    VOICE_GENERATION = "voice_generation"
 
 class WorkflowStatus(Enum):
     """Status of a workflow."""
@@ -97,6 +102,41 @@ class WorkflowStep:
                     f"Invalid strategy for research execution step: {self.config.strategy}. "
                     f"Valid strategies are: {', '.join(valid_strategies)}"
                 )
+        elif self.type == WorkflowStepType.DOCUMENT_GENERATION:
+            valid_strategies = {"markdown", "latex", "html", "pdf"}
+            if self.config.strategy not in valid_strategies:
+                raise WorkflowExecutionError(
+                    f"Invalid strategy for document generation step: {self.config.strategy}. "
+                    f"Valid strategies are: {', '.join(valid_strategies)}"
+                )
+        elif self.type == WorkflowStepType.CODE_GENERATION:
+            valid_strategies = {"python", "javascript", "typescript", "java", "cpp", "custom"}
+            if self.config.strategy not in valid_strategies:
+                raise WorkflowExecutionError(
+                    f"Invalid strategy for code generation step: {self.config.strategy}. "
+                    f"Valid strategies are: {', '.join(valid_strategies)}"
+                )
+        elif self.type == WorkflowStepType.FIGURE_GENERATION:
+            valid_strategies = {"matplotlib", "plotly", "seaborn", "custom"}
+            if self.config.strategy not in valid_strategies:
+                raise WorkflowExecutionError(
+                    f"Invalid strategy for figure generation step: {self.config.strategy}. "
+                    f"Valid strategies are: {', '.join(valid_strategies)}"
+                )
+        elif self.type == WorkflowStepType.VIDEO_GENERATION:
+            valid_strategies = {"animation", "slideshow", "screen_recording", "custom"}
+            if self.config.strategy not in valid_strategies:
+                raise WorkflowExecutionError(
+                    f"Invalid strategy for video generation step: {self.config.strategy}. "
+                    f"Valid strategies are: {', '.join(valid_strategies)}"
+                )
+        elif self.type == WorkflowStepType.VOICE_GENERATION:
+            valid_strategies = {"text_to_speech", "voice_cloning", "custom"}
+            if self.config.strategy not in valid_strategies:
+                raise WorkflowExecutionError(
+                    f"Invalid strategy for voice generation step: {self.config.strategy}. "
+                    f"Valid strategies are: {', '.join(valid_strategies)}"
+                )
 
 @dataclass
 class WorkflowConfig:
@@ -106,6 +146,27 @@ class WorkflowConfig:
     max_iterations: int = 10
     timeout: float = 300.0
     steps: List[WorkflowStep] = field(default_factory=list)
+    use_ell2a: bool = False
+    ell2a_mode: str = "simple"
+    ell2a_config: Dict[str, Any] = field(default_factory=lambda: {
+        "model": "gpt-4",
+        "max_tokens": 2000,
+        "temperature": 0.7,
+        "tools": [],
+        "stream": False,
+        "simple": {
+            "max_retries": 3,
+            "retry_delay": 1.0,
+            "timeout": 30.0
+        },
+        "complex": {
+            "max_retries": 3,
+            "retry_delay": 1.0,
+            "timeout": 60.0,
+            "track_performance": True,
+            "track_memory": True
+        }
+    })
     
     def _validate_dependencies(self) -> None:
         """Validate step dependencies."""

@@ -58,6 +58,29 @@ class WorkflowConfig(BaseModel):
     timeout: float = 300.0
     parallel: bool = False
     error_handling: str = "retry"
+    use_ell2a: bool = False
+    ell2a_mode: str = "simple"
+    ell2a_config: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "model": "gpt-4",
+            "max_tokens": 2000,
+            "temperature": 0.7,
+            "tools": [],
+            "stream": False,
+            "simple": {
+                "max_retries": 3,
+                "retry_delay": 1.0,
+                "timeout": 30.0
+            },
+            "complex": {
+                "max_retries": 3,
+                "retry_delay": 1.0,
+                "timeout": 60.0,
+                "track_performance": True,
+                "track_memory": True
+            }
+        }
+    )
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -72,6 +95,9 @@ class WorkflowConfig(BaseModel):
             "timeout": self.timeout,
             "parallel": self.parallel,
             "error_handling": self.error_handling,
+            "use_ell2a": self.use_ell2a,
+            "ell2a_mode": self.ell2a_mode,
+            "ell2a_config": self.ell2a_config,
             "type": ConfigurationType.WORKFLOW.value
         }
 

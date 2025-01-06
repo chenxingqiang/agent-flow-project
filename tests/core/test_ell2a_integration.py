@@ -8,6 +8,13 @@ from agentflow.core.config import WorkflowConfig
 from agentflow.ell2a.lmp import LMPType
 from agentflow.ell2a.workflow import ELL2AWorkflow
 
+@pytest.fixture(autouse=True)
+def cleanup_ell2a():
+    """Clean up ELL2A integration state before each test."""
+    ell2a_integration.cleanup()
+    yield
+    ell2a_integration.cleanup()
+
 @pytest.fixture
 def sample_workflow_config():
     """Create a sample workflow configuration."""

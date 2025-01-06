@@ -1,9 +1,31 @@
-"""Instructions package."""
+"""Instructions module."""
 
 from .base import BaseInstruction
-from .image import ImageProcessingInstruction
+from .advanced import (
+    AdvancedInstruction,
+    ControlFlowInstruction,
+    StateManagerInstruction,
+    LLMInteractionInstruction,
+    ResourceManagerInstruction,
+    CompositeInstruction,
+    ConditionalInstruction,
+    ParallelInstruction,
+    IterativeInstruction,
+    AdaptiveInstruction,
+    DataProcessingInstruction
+)
 
 __all__ = [
-    "BaseInstruction",
-    "ImageProcessingInstruction"
+    'BaseInstruction',
+    'AdvancedInstruction',
+    'ControlFlowInstruction',
+    'StateManagerInstruction',
+    'LLMInteractionInstruction',
+    'ResourceManagerInstruction',
+    'CompositeInstruction',
+    'ConditionalInstruction',
+    'ParallelInstruction',
+    'IterativeInstruction',
+    'AdaptiveInstruction',
+    'DataProcessingInstruction'
 ] 

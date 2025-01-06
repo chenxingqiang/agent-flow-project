@@ -54,6 +54,7 @@ class ISAManager:
         """Initialize ISA manager."""
         self.instructions: Dict[str, Instruction] = {}
         self.execution_history: List[Dict[str, Any]] = []
+        self.dependency_graph = nx.DiGraph()
         self._initialized = False
         
         if config_path:

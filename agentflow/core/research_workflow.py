@@ -32,6 +32,34 @@ class DistributedConfig:
 class ResearchDistributedWorkflow(WorkflowEngine):
     """Research distributed workflow class."""
     
+    @classmethod
+    async def create_remote_workflow(cls, workflow_def: Dict[str, Any], config: Dict[str, Any]) -> Any:
+        """Create a remote workflow instance.
+        
+        Args:
+            workflow_def: Workflow definition
+            config: Workflow configuration
+            
+        Returns:
+            Remote workflow instance
+        """
+        import ray
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True)
+            
+        # Create distributed config
+        dist_config = DistributedConfig(
+            num_workers=config.get("num_workers", 1),
+            batch_size=config.get("batch_size", 1),
+            max_retries=config.get("max_retries", 3),
+            timeout=config.get("timeout", 3600.0)
+        )
+        
+        # Create and return remote actor
+        workflow = cls(dist_config)
+        remote_workflow = ray.remote(cls).remote(dist_config)
+        return remote_workflow
+    
     def __init__(self, config: Optional[DistributedConfig] = None):
         """Initialize research distributed workflow.
         
@@ -88,11 +116,18 @@ class ResearchDistributedWorkflow(WorkflowEngine):
             
         Returns:
             Execution result
+            
+        Raises:
+            ray.exceptions.RayTaskError: If input data is invalid or execution fails
         """
         if not self._initialized:
             await self.initialize()
             
         try:
+            # Validate input data
+            if not isinstance(input_data, dict):
+                raise ValueError("Input data must be a dictionary")
+                
             # Process input data in batches
             batch_size = self.config.batch_size
             batches = [
@@ -112,12 +147,9 @@ class ResearchDistributedWorkflow(WorkflowEngine):
             }
             
         except Exception as e:
+            import ray
             logger.error(f"Workflow execution failed: {str(e)}")
-            return {
-                "status": "failed",
-                "error": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
+            raise ray.exceptions.RayTaskError(str(e))
             
     async def cleanup(self) -> None:
         """Clean up workflow resources."""
@@ -131,3 +163,30 @@ class ResearchDistributedWorkflow(WorkflowEngine):
         
         # Clean up base class
         await super().cleanup()
+        
+    async def execute_async(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute workflow asynchronously.
+        
+        Args:
+            input_data: Input data for workflow
+            
+        Returns:
+            Execution result
+        """
+        return await self.execute(input_data)
+        
+    async def set_distributed_steps(self, steps: List[str]) -> None:
+        """Set distributed steps.
+        
+        Args:
+            steps: List of step IDs to distribute
+        """
+        self.distributed_steps = steps
+        
+    async def get_distributed_steps(self) -> List[str]:
+        """Get distributed steps.
+        
+        Returns:
+            List of distributed step IDs
+        """
+        return getattr(self, "distributed_steps", [])
