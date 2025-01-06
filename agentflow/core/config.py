@@ -75,6 +75,8 @@ class AgentConfig(BaseModel):
     version: str = Field(default="1.0.0")
     model: Optional[ModelConfig] = None
     workflow: Optional[WorkflowConfig] = Field(default_factory=WorkflowConfig)
+    workflow_path: Optional[str] = None
+    domain_config: Dict[str, Any] = Field(default_factory=dict)
     max_retries: int = Field(default=3)
     
     model_config = ConfigDict(frozen=True)

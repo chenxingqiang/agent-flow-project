@@ -55,6 +55,54 @@ class WorkflowEngine:
         self.workflow_def = workflow_def
         self.workflow_config = workflow_config
         self.state_manager = {}
+        self.metrics = {}
+        
+    async def _create_agent(self, agent_config: Dict[str, Any]) -> Any:
+        """Create an agent from configuration.
+        
+        Args:
+            agent_config: Agent configuration
+            
+        Returns:
+            Created agent
+        """
+        # For testing purposes, we'll just return a mock agent
+        # In a real implementation, this would create actual agent instances
+        return agent_config
+        
+    def _validate_input(self, context: Dict[str, Any]) -> None:
+        """Validate workflow input.
+        
+        Args:
+            context: Input context
+            
+        Raises:
+            ValueError: If input validation fails
+        """
+        required_fields = self.workflow_def.get("required_fields", [])
+        validation_rules = self.workflow_def.get("validation_rules", {})
+        missing_input_error = self.workflow_def.get("missing_input_error", "Missing required fields")
+        
+        # Check required fields
+        for field in required_fields:
+            if field not in context:
+                raise ValueError(missing_input_error)
+                
+        # Validate field types
+        for field, rules in validation_rules.items():
+            if field in context:
+                value = context[field]
+                if rules.get("type") == "string" and not isinstance(value, str):
+                    raise ValueError("Invalid input")
+        
+    def _update_metrics(self, context: Dict[str, Any]) -> None:
+        """Update workflow metrics.
+        
+        Args:
+            context: Execution context
+        """
+        if "metrics" in context:
+            self.metrics.update(context["metrics"])
         
     async def execute(self, context: Dict[str, Any], max_retries: int = 3) -> Dict[str, Any]:
         """Execute workflow.
@@ -67,18 +115,41 @@ class WorkflowEngine:
             Execution result
             
         Raises:
-            ValueError: If max_retries is invalid
+            ValueError: If max_retries is invalid or input validation fails
         """
         if max_retries <= 0:
             raise ValueError("max_retries must be greater than 0")
             
+        # Validate input
+        self._validate_input(context)
+        
+        # Update metrics
+        self._update_metrics(context)
+        
+        # Get workflow mode
+        mode = self.workflow_def["COLLABORATION"].get("MODE", "SEQUENTIAL")
+        
+        # Initialize result with input context
+        result = {**context}
+        
         # Execute workflow steps
-        result = {}
-        for step in self.workflow_def["COLLABORATION"]["WORKFLOW"]:
-            step_id = step["id"]
-            step_result = await self._execute_step(step, context)
-            result[step_id] = step_result
-            context.update(step_result)
+        if mode == "SEQUENTIAL":
+            for step in self.workflow_def["COLLABORATION"]["WORKFLOW"]:
+                step_result = await self._execute_step(step, context)
+                result[step["name"]] = step_result
+                context.update(step_result)
+        else:  # PARALLEL
+            tasks = []
+            for step in self.workflow_def["COLLABORATION"]["WORKFLOW"]:
+                tasks.append(self._execute_step(step, context.copy()))
+            step_results = await asyncio.gather(*tasks)
+            for step, step_result in zip(self.workflow_def["COLLABORATION"]["WORKFLOW"], step_results):
+                result[step["name"]] = step_result
+                context.update(step_result)
+                
+        # Add metrics to result
+        if self.metrics:
+            result["metrics"] = self.metrics
             
         return result
         
@@ -92,5 +163,13 @@ class WorkflowEngine:
         Returns:
             Step execution result
         """
-        # For now, just return a simple result
-        return {"status": "success", "output": {}}
+        # Create agent for step
+        agent = await self._create_agent(step)
+        
+        # Execute agent
+        if hasattr(agent, "execute"):
+            result = await agent.execute(context)
+        else:
+            result = {"result": f"{agent['name']}_result"}
+            
+        return result
