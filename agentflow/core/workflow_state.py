@@ -9,13 +9,6 @@ from .workflow_types import WorkflowStatus, StepStatus
 from ..agents.agent_types import AgentStatus
 from .exceptions import WorkflowStateError
 
-class AgentStatus(Enum):
-    """Agent status enumeration."""
-    IDLE = "idle"
-    RUNNING = "running"
-    FAILED = "failed"
-    TERMINATED = "terminated"
-
 class WorkflowState:
     """Workflow state class."""
 

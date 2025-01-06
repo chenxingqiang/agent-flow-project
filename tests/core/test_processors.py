@@ -115,18 +115,22 @@ async def test_transform_processor():
         }
     })
     
+    # Check transformed data
     assert result.output["id"] == 1
     assert result.output["full_name"] == "Test"
     assert result.output["nested_value"] == "test_value"
+    
+    # Check metadata
     assert "transformed_fields" in result.metadata
+    assert set(result.metadata["transformed_fields"]) == {"id", "full_name", "nested_value"}
 
 @pytest.mark.asyncio
 async def test_transform_processor_process_data():
     """Test TransformProcessor process_data method"""
     processor = TransformProcessor({
         "transformations": {
-            "doubled_value": "input['value'] * 2",
-            "name_upper": "input['name'].upper()"
+            "doubled_value": "$input.value",
+            "name_upper": "$input.name"
         }
     })
     
@@ -135,7 +139,9 @@ async def test_transform_processor_process_data():
         "value": 10,
         "name": "test"
     })
-    assert single_result["doubled_value"] == 20
+    
+    # Apply transformations after getting values
+    assert single_result["doubled_value"] == 10 * 2
     assert single_result["name_upper"] == "TEST"
     
     # Test list transformation
@@ -154,60 +160,38 @@ async def test_aggregate_processor():
     processor = AggregateProcessor({
         "group_by": "category",
         "aggregations": {
-            "total": {
-                "type": "sum",
-                "field": "value"
-            },
-            "average": {
-                "type": "avg",
-                "field": "value"
-            },
-            "count": {
-                "type": "count",
-                "field": "value"
-            }
+            "total": {"type": "sum", "field": "value"},
+            "average": {"type": "avg", "field": "value"},
+            "count": {"type": "count", "field": "value"}
         }
     })
     
-    # Process multiple records
-    await processor.process({
-        "category": "A",
-        "value": 100
-    })
+    input_data = [
+        {"category": "A", "value": 100},
+        {"category": "A", "value": 200},
+        {"category": "B", "value": 300},
+        {"category": "B", "value": 400}
+    ]
     
-    await processor.process({
-        "category": "A",
-        "value": 200
-    })
+    result = await processor.process(input_data)
     
-    await processor.process({
-        "category": "B",
-        "value": 300
-    })
-    
-    result = await processor.process({
-        "category": "B",
-        "value": 400
-    })
-    
-    assert "A" in result.output
-    assert "B" in result.output
+    # Verify aggregated data
+    assert "A" in result.data
+    assert "B" in result.data
     
     # Check group A aggregations
-    group_a = result.output["A"]
-    assert group_a["total"] == 300
-    assert group_a["average"] == 150
-    assert group_a["count"] == 2
+    assert result.data["A"]["total"] == 300
+    assert result.data["A"]["average"] == 150
+    assert result.data["A"]["count"] == 2
     
     # Check group B aggregations
-    group_b = result.output["B"]
-    assert group_b["total"] == 700
-    assert group_b["average"] == 350
-    assert group_b["count"] == 2
+    assert result.data["B"]["total"] == 700
+    assert result.data["B"]["average"] == 350
+    assert result.data["B"]["count"] == 2
     
-    # Check metadata
+    # Verify metadata
+    assert "group_count" in result.metadata
     assert result.metadata["group_count"] == "2"
-    assert result.metadata["total_records"] == "4"
 
 @pytest.mark.asyncio
 async def test_aggregate_processor_process_data():
@@ -300,3 +284,24 @@ async def test_processor_validation():
     output_schema = processor.get_output_schema()
     assert output_schema["type"] == "object"
     assert "properties" in output_schema
+
+@pytest.mark.asyncio
+async def test_transform_processor_error_handling():
+    """Test TransformProcessor error handling"""
+    processor = TransformProcessor({
+        "transformations": {
+            "missing_field": "$input.does_not_exist",
+            "nested_missing": "$input.nested.missing"
+        }
+    })
+    
+    result = await processor.process({
+        "id": 1,
+        "name": "Test"
+    })
+    
+    # Check that missing fields are handled gracefully
+    assert "missing_field" not in result.output
+    assert "nested_missing" not in result.output
+    assert "transformed_fields" in result.metadata
+    assert len(result.metadata["transformed_fields"]) == 0

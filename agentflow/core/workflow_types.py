@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import asyncio
 import networkx as nx
 import uuid
+from pydantic import BaseModel, Field, ConfigDict
 
 from .exceptions import WorkflowExecutionError
 
@@ -138,18 +139,19 @@ class WorkflowStep:
                     f"Valid strategies are: {', '.join(valid_strategies)}"
                 )
 
-@dataclass
-class WorkflowConfig:
+class WorkflowConfig(BaseModel):
     """Configuration for a workflow."""
-    name: str
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    max_iterations: int = 10
-    max_retries: int = 3
-    timeout: float = 300.0
-    steps: List[WorkflowStep] = field(default_factory=list)
-    use_ell2a: bool = False
-    ell2a_mode: str = "simple"
-    ell2a_config: Dict[str, Any] = field(default_factory=lambda: {
+    model_config = ConfigDict(frozen=False, validate_assignment=True)
+    
+    name: str = Field(default="")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    max_iterations: int = Field(default=10)
+    max_retries: int = Field(default=3)
+    timeout: float = Field(default=300.0)
+    steps: List[WorkflowStep] = Field(default_factory=list)
+    use_ell2a: bool = Field(default=False)
+    ell2a_mode: str = Field(default="simple")
+    ell2a_config: Dict[str, Any] = Field(default_factory=lambda: {
         "model": "gpt-4",
         "max_tokens": 2000,
         "temperature": 0.7,
@@ -168,6 +170,15 @@ class WorkflowConfig:
             "track_memory": True
         }
     })
+    required_fields: List[str] = Field(default_factory=list)
+    error_handling: Dict[str, Any] = Field(default_factory=dict)
+    retry_policy: Optional[Dict[str, Any]] = Field(default=None)
+    error_policy: Optional[Dict[str, Any]] = Field(default=None)
+    is_distributed: bool = Field(default=False)
+    distributed: bool = Field(default=False)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    agents: Dict[str, Any] = Field(default_factory=dict)
+    logging_level: str = Field(default="INFO")
     
     def _validate_dependencies(self) -> None:
         """Validate step dependencies."""

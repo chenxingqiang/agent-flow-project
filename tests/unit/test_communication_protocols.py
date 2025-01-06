@@ -2,7 +2,7 @@ import pytest
 import asyncio
 from typing import Dict, Any
 from agentflow.core.workflow import WorkflowEngine
-from agentflow.core.workflow_config import WorkflowConfig
+from agentflow.core.workflow_types import WorkflowConfig
 from agentflow.core.metric_type import MetricType
 
 @pytest.mark.asyncio

@@ -22,25 +22,31 @@ def setup_ray():
 def test_workflow_def() -> Dict[str, Any]:
     """Test workflow definition."""
     return {
-        "INPUT": ["test_input"],
-        "OUTPUT": ["test_output"],
-        "WORKFLOW": {
-            "step_1": {
-                "step": 1,
-                "name": "Test Step 1",
-                "description": "First test step",
-                "input": ["test_input"],
-                "type": WorkflowStepType.RESEARCH_EXECUTION,
-                "agent_config": {}
+        "COLLABORATION": {
+            "MODE": "SEQUENTIAL",
+            "COMMUNICATION_PROTOCOL": {
+                "TYPE": "HIERARCHICAL"
             },
-            "step_2": {
-                "step": 2,
-                "name": "Test Step 2",
-                "description": "Second test step",
-                "input": ["test_input"],
-                "dependencies": ["step_1"],
-                "type": WorkflowStepType.DOCUMENT_GENERATION,
-                "agent_config": {}
+            "WORKFLOW": {
+                "step_1": {
+                    "id": "step_1",
+                    "name": "First test step",
+                    "description": "First test step",
+                    "input": ["test_input"],
+                    "output": ["test_output"],
+                    "agent_config": {},
+                    "type": "research_execution"
+                },
+                "step_2": {
+                    "id": "step_2",
+                    "name": "Second test step",
+                    "description": "Second test step",
+                    "input": ["test_input"],
+                    "output": ["test_output"],
+                    "agent_config": {},
+                    "dependencies": ["step_1"],
+                    "type": "research_execution"
+                }
             }
         }
     }
@@ -50,18 +56,22 @@ def workflow_config() -> Dict[str, Any]:
     """Test configuration."""
     return {
         "max_retries": 3,
-        "retry_delay": 0.1,
-        "retry_backoff": 1.5,
-        "step_1_config": {
+        "timeout": 3600,
+        "max_iterations": 5,
+        "logging_level": "INFO",
+        "required_fields": [],
+        "error_handling": {},
+        "retry_policy": {
             "max_retries": 3,
             "retry_delay": 0.1,
             "retry_backoff": 1.5
         },
-        "step_2_config": {
-            "max_retries": 3,
-            "retry_delay": 0.1,
-            "retry_backoff": 1.5
-        }
+        "error_policy": None,
+        "is_distributed": True,
+        "distributed": True,
+        "steps": [],
+        "metadata": {},
+        "agents": {}
     }
 
 @pytest.mark.asyncio

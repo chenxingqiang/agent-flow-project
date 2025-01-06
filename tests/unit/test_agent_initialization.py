@@ -1,8 +1,8 @@
 import pytest
 import ray
 from agentflow.core.config import AgentConfig, ConfigurationType
-from agentflow.agents.agent import Agent
-from agentflow.core.workflow_state import AgentState, AgentStatus
+from agentflow.agents.agent import Agent, AgentState
+from agentflow.core.workflow_state import AgentStatus
 from pathlib import Path
 import json
 
@@ -173,7 +173,7 @@ def test_agent_state_initialization():
     agent = Agent(config_data)
     assert hasattr(agent, 'state')
     assert isinstance(agent.state, AgentState)
-    assert agent.state.status == AgentStatus.INITIALIZED
+    assert agent.state.status == AgentStatus.IDLE
 
 def test_agent_invalid_initialization():
     """Test agent initialization with invalid config"""

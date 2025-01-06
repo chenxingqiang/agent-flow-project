@@ -4,8 +4,20 @@ import os
 import json
 from typing import List, Optional, Dict, Any, Union
 from pathlib import Path
+from pydantic import BaseModel, Field, ConfigDict
 
 from .config import AgentConfig
+
+class ProcessorConfig(BaseModel):
+    """Configuration for a processor."""
+    model_config = ConfigDict(frozen=False, validate_assignment=True)
+    
+    id: str
+    type: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class ConfigManager:
     """Configuration manager for agent and workflow configurations."""

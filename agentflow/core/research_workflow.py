@@ -10,6 +10,7 @@ from .workflow import WorkflowEngine, WorkflowInstance
 from .types import AgentStatus
 from ..agents.agent import Agent
 from .exceptions import WorkflowExecutionError
+from .workflow_types import WorkflowConfig
 
 logger = logging.getLogger(__name__)
 
@@ -70,10 +71,19 @@ class ResearchDistributedWorkflow(WorkflowEngine):
             workflow_def: Workflow definition
             workflow_config: Workflow configuration
         """
-        super().__init__()
-        self.config = config or DistributedConfig()
-        self.workflow_def = workflow_def or {}
-        self.workflow_config = workflow_config or {}
+        # Initialize distributed config
+        self.dist_config = config or DistributedConfig()
+        
+        # Convert workflow_config dict to WorkflowConfig if needed
+        if workflow_config is not None and isinstance(workflow_config, dict):
+            workflow_config = WorkflowConfig(**workflow_config)
+        else:
+            workflow_config = WorkflowConfig()
+            
+        # Initialize base class with required arguments
+        super().__init__(workflow_def or {"COLLABORATION": {"WORKFLOW": {}}}, workflow_config)
+        
+        # Initialize additional attributes
         self.workers: List[Agent] = []
         self.steps: List[ResearchStep] = []
         self.results: Dict[str, Any] = {}
