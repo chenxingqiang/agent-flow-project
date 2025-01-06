@@ -12,6 +12,7 @@ from ..ell2a.integration import ELL2AIntegration
 from ..ell2a.types.message import Message, MessageRole
 from .isa.isa_manager import ISAManager
 from .instruction_selector import InstructionSelector
+from .workflow_types import WorkflowConfig
 
 if TYPE_CHECKING:
     from ..agents.agent import Agent
@@ -32,157 +33,64 @@ class WorkflowInstance:
 class WorkflowEngine:
     """Workflow engine class."""
     
-    def __init__(self):
-        """Initialize workflow engine."""
-        self._initialized = False
-        self.workflows: Dict[str, WorkflowInstance] = {}
-        self._ell2a: Optional[ELL2AIntegration] = None
-        self._isa_manager: Optional[ISAManager] = None
-        self._instruction_selector: Optional[InstructionSelector] = None
-    
-    async def initialize(self) -> None:
-        """Initialize workflow engine."""
-        if self._initialized:
-            return
-            
-        if not self._ell2a:
-            self._ell2a = ELL2AIntegration()
-            
-        if not self._isa_manager:
-            self._isa_manager = ISAManager()
-            await self._isa_manager.initialize()
-            
-        if not self._instruction_selector:
-            self._instruction_selector = InstructionSelector()
-            await self._instruction_selector.initialize()
-            
-        self._initialized = True
-    
-    async def register_workflow(self, agent: 'Agent') -> str:
-        """Register a workflow with an agent.
+    def __init__(self, workflow_def: Dict[str, Any], workflow_config: 'WorkflowConfig'):
+        """Initialize workflow engine.
         
         Args:
-            agent: Agent to register
+            workflow_def: Workflow definition
+            workflow_config: Workflow configuration
             
-        Returns:
-            Workflow ID
+        Raises:
+            ValueError: If workflow_config is not an instance of WorkflowConfig
+            ValueError: If workflow definition is invalid
         """
-        if not self._initialized:
-            await self.initialize()
+        if not isinstance(workflow_config, WorkflowConfig):
+            raise ValueError("workflow_config must be an instance of WorkflowConfig")
             
-        workflow_id = str(uuid.uuid4())
-        self.workflows[workflow_id] = WorkflowInstance(
-            id=workflow_id,
-            agent=agent
-        )
-        return workflow_id
-    
-    async def execute_workflow(
-        self,
-        workflow_id: str,
-        input_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Execute a workflow.
+        if not workflow_def or not isinstance(workflow_def, dict) or \
+           "COLLABORATION" not in workflow_def or \
+           "WORKFLOW" not in workflow_def["COLLABORATION"]:
+            raise ValueError("Workflow definition must contain COLLABORATION.WORKFLOW")
+            
+        self.workflow_def = workflow_def
+        self.workflow_config = workflow_config
+        self.state_manager = {}
+        
+    async def execute(self, context: Dict[str, Any], max_retries: int = 3) -> Dict[str, Any]:
+        """Execute workflow.
         
         Args:
-            workflow_id: Workflow ID
-            input_data: Input data for workflow
+            context: Execution context
+            max_retries: Maximum number of retries
             
         Returns:
             Execution result
             
         Raises:
-            Exception: If workflow execution fails
+            ValueError: If max_retries is invalid
         """
-        if not self._initialized:
-            await self.initialize()
+        if max_retries <= 0:
+            raise ValueError("max_retries must be greater than 0")
             
-        if workflow_id not in self.workflows:
-            raise ValueError(f"Workflow {workflow_id} not found")
+        # Execute workflow steps
+        result = {}
+        for step in self.workflow_def["COLLABORATION"]["WORKFLOW"]:
+            step_id = step["id"]
+            step_result = await self._execute_step(step, context)
+            result[step_id] = step_result
+            context.update(step_result)
             
-        workflow = self.workflows[workflow_id]
-        workflow.start_time = datetime.now()
-        workflow.status = "running"
+        return result
         
-        try:
-            # Create message from input data
-            message = input_data.get("message", "")
-            if not isinstance(message, str):
-                message = str(message)
-                
-            # Process message with agent
-            result = await workflow.agent.process_message(message)
-            
-            # Create response
-            response = {
-                "workflow_id": workflow_id,
-                "content": result,
-                "status": "success",
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            workflow.status = "completed"
-            workflow.end_time = datetime.now()
-            workflow.result = response
-            return response
-            
-        except Exception as e:
-            error_msg = str(e)
-            workflow.status = "failed"
-            workflow.error = error_msg
-            workflow.end_time = datetime.now()
-            raise
-    
-    async def get_workflow_status(self, workflow_id: str) -> Dict[str, Any]:
-        """Get workflow status.
+    async def _execute_step(self, step: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a workflow step.
         
         Args:
-            workflow_id: Workflow ID
+            step: Step configuration
+            context: Execution context
             
         Returns:
-            Status information
+            Step execution result
         """
-        if workflow_id not in self.workflows:
-            raise ValueError(f"Workflow {workflow_id} not found")
-            
-        workflow = self.workflows[workflow_id]
-        return {
-            "id": workflow.id,
-            "status": workflow.status,
-            "error": workflow.error,
-            "start_time": workflow.start_time.isoformat() if workflow.start_time else None,
-            "end_time": workflow.end_time.isoformat() if workflow.end_time else None,
-            "agent_status": workflow.agent.state.status.value
-        }
-    
-    async def cleanup(self) -> None:
-        """Clean up workflow engine resources."""
-        if not self._initialized:
-            return
-            
-        # Clean up workflows
-        for workflow in self.workflows.values():
-            await workflow.agent.cleanup()
-        self.workflows.clear()
-        
-        # Clean up components
-        if self._ell2a:
-            await self._ell2a.cleanup()
-            
-        if self._isa_manager:
-            await self._isa_manager.cleanup()
-            
-        if self._instruction_selector:
-            await self._instruction_selector.cleanup()
-            
-        self._initialized = False
-    
-    def __aiter__(self):
-        """Return async iterator."""
-        return self
-        
-    async def __anext__(self):
-        """Return next value from async iterator."""
-        if not self._initialized:
-            await self.initialize()
-        return self
+        # For now, just return a simple result
+        return {"status": "success", "output": {}}

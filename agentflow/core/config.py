@@ -2,8 +2,7 @@
 
 from enum import Enum
 from typing import Dict, Any, Optional, List, Union
-from dataclasses import dataclass, field
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class ConfigurationType(Enum):
     """Configuration type enumeration."""
@@ -16,6 +15,7 @@ class ConfigurationType(Enum):
     CREATIVE = "creative"
     TECHNICAL = "technical"
     DATA_SCIENCE = "data_science"
+    TEST = "test"
 
 class AgentMode(Enum):
     """Agent mode enumeration."""
@@ -26,136 +26,86 @@ class AgentMode(Enum):
 class ModelConfig(BaseModel):
     """Model configuration."""
     
-    provider: str = Field(default="default")
-    name: str = Field(default="gpt-3.5-turbo")
+    provider: str = Field(default="openai")
+    name: str = Field(default="gpt-4")
     temperature: float = Field(default=0.7)
     max_tokens: Optional[int] = None
     top_p: Optional[float] = None
     frequency_penalty: Optional[float] = None
     presence_penalty: Optional[float] = None
     
-    def to_dict(self) -> dict:
+    model_config = ConfigDict(frozen=True)
+    
+    @property
+    def dict(self) -> dict:
         """Convert to dictionary."""
-        return {
-            "provider": self.provider,
-            "name": self.name,
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            "top_p": self.top_p,
-            "frequency_penalty": self.frequency_penalty,
-            "presence_penalty": self.presence_penalty
-        }
+        return self.model_dump()
+
+class WorkflowStep(BaseModel):
+    """Workflow step configuration."""
+    type: str
+    config: Dict[str, Any] = Field(default_factory=dict)
+    
+    model_config = ConfigDict(frozen=True)
 
 class WorkflowConfig(BaseModel):
     """Workflow configuration."""
-    id: str
-    name: str
-    description: Optional[str] = None
-    agents: List[Any] = Field(default_factory=list)
-    processors: List[Any] = Field(default_factory=list)
-    connections: List[Any] = Field(default_factory=list)
-    max_steps: int = 100
-    timeout: float = 300.0
-    parallel: bool = False
-    error_handling: str = "retry"
-    use_ell2a: bool = False
-    ell2a_mode: str = "simple"
-    ell2a_config: Dict[str, Any] = Field(
-        default_factory=lambda: {
-            "model": "gpt-4",
-            "max_tokens": 2000,
-            "temperature": 0.7,
-            "tools": [],
-            "stream": False,
-            "simple": {
-                "max_retries": 3,
-                "retry_delay": 1.0,
-                "timeout": 30.0
-            },
-            "complex": {
-                "max_retries": 3,
-                "retry_delay": 1.0,
-                "timeout": 60.0,
-                "track_performance": True,
-                "track_memory": True
-            }
-        }
-    )
+    max_iterations: int = Field(default=10)
+    timeout: float = Field(default=3600)
+    logging_level: str = Field(default="INFO")
+    required_fields: List[str] = Field(default_factory=list)
+    error_handling: Dict[str, str] = Field(default_factory=dict)
+    retry_policy: Dict[str, Any] = Field(default_factory=lambda: {"max_retries": 3, "retry_delay": 1.0})
+    error_policy: Dict[str, bool] = Field(default_factory=lambda: {"ignore_warnings": False, "fail_fast": True})
+    steps: List[WorkflowStep] = Field(default_factory=list)
     
-    def to_dict(self) -> Dict[str, Any]:
+    model_config = ConfigDict(frozen=True)
+    
+    @property
+    def dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
-        return {
-            "id": self.id,
-            "name": self.name,
-            "description": self.description,
-            "agents": [agent.to_dict() if hasattr(agent, 'to_dict') else agent for agent in self.agents],
-            "processors": self.processors,
-            "connections": self.connections,
-            "max_steps": self.max_steps,
-            "timeout": self.timeout,
-            "parallel": self.parallel,
-            "error_handling": self.error_handling,
-            "use_ell2a": self.use_ell2a,
-            "ell2a_mode": self.ell2a_mode,
-            "ell2a_config": self.ell2a_config,
-            "type": ConfigurationType.WORKFLOW.value
-        }
+        return self.model_dump()
 
-@dataclass
-class AgentConfig:
+class AgentConfig(BaseModel):
     """Agent configuration."""
-    id: str
-    name: str
+    id: Optional[str] = None
+    name: Optional[str] = None
+    type: str = Field(default="research")
     description: Optional[str] = None
-    type: Union[ConfigurationType, str] = ConfigurationType.GENERIC
-    mode: Union[AgentMode, str] = AgentMode.SIMPLE
-    version: str = "1.0.0"
-    system_prompt: str = ""
-    model: Union[ModelConfig, Dict[str, Any]] = None
-    workflow: Optional[Union[WorkflowConfig, Dict[str, Any]]] = None
-    config: Dict[str, Any] = field(default_factory=dict)
+    version: str = Field(default="1.0.0")
+    model: Optional[ModelConfig] = None
+    workflow: Optional[WorkflowConfig] = Field(default_factory=WorkflowConfig)
+    max_retries: int = Field(default=3)
     
-    def __post_init__(self):
-        """Post initialization."""
-        # Convert type to enum if needed
-        if isinstance(self.type, str):
-            try:
-                self.type = ConfigurationType(self.type)
-            except ValueError:
-                self.type = ConfigurationType.GENERIC
-                
-        # Convert mode to enum if needed
-        if isinstance(self.mode, str):
-            try:
-                self.mode = AgentMode(self.mode)
-            except ValueError:
-                self.mode = AgentMode.SIMPLE
-        
-        # Convert model dict to ModelConfig if needed
-        if isinstance(self.model, dict):
-            self.model = ModelConfig(**self.model)
-        elif self.model is None:
-            self.model = ModelConfig()
-            
-        # Convert workflow dict to WorkflowConfig if needed
-        if isinstance(self.workflow, dict):
-            self.workflow = WorkflowConfig(**self.workflow)
-            
-        # Initialize config if needed
-        if self.config is None:
-            self.config = {}
+    model_config = ConfigDict(frozen=True)
     
-    def to_dict(self) -> Dict[str, Any]:
+    @property
+    def dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
-        return {
-            "id": self.id,
-            "name": self.name,
-            "description": self.description,
-            "type": ConfigurationType.AGENT.value,
-            "agent_type": self.type.value,
-            "version": self.version,
-            "system_prompt": self.system_prompt,
-            "model": self.model.to_dict() if self.model else None,
-            "workflow": self.workflow.to_dict() if self.workflow else None,
-            "config": self.config
-        }
+        return self.model_dump()
+    
+    def __init__(self, **data):
+        """Initialize agent configuration."""
+        # Set default model if not provided
+        if "model" not in data:
+            data["model"] = ModelConfig()
+            
+        # Validate provider
+        if "model" in data and isinstance(data["model"], dict) and "provider" in data["model"]:
+            provider = data["model"]["provider"]
+            if provider not in ["openai", "anthropic"]:
+                raise ValueError(f"Unsupported provider: {provider}")
+        
+        # Validate type
+        if "type" in data and data["type"] not in ["research", "analysis", "creative", "technical", "data_science"]:
+            raise ValueError(f"Invalid agent type: {data['type']}")
+            
+        # Convert workflow dict to WorkflowConfig
+        if "workflow" in data and isinstance(data["workflow"], dict):
+            data["workflow"] = WorkflowConfig(**data["workflow"])
+            
+        # Convert model dict to ModelConfig
+        if "model" in data and isinstance(data["model"], dict):
+            data["model"] = ModelConfig(**data["model"])
+            
+        super().__init__(**data)

@@ -144,6 +144,7 @@ class WorkflowConfig:
     name: str
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     max_iterations: int = 10
+    max_retries: int = 3
     timeout: float = 300.0
     steps: List[WorkflowStep] = field(default_factory=list)
     use_ell2a: bool = False
