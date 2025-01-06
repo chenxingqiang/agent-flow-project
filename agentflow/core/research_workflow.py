@@ -83,10 +83,19 @@ class ResearchDistributedWorkflow(WorkflowEngine):
         # Initialize base class with required arguments
         super().__init__(workflow_def or {"COLLABORATION": {"WORKFLOW": {}}}, workflow_config)
         
+        # Store the workflow config as self.config for compatibility
+        self.config = workflow_config
+        
         # Initialize additional attributes
         self.workers: List[Agent] = []
         self.steps: List[ResearchStep] = []
         self.results: Dict[str, Any] = {}
+        self._initialized = False
+        
+    async def initialize(self) -> None:
+        """Initialize workflow."""
+        await super().initialize()
+        self._initialized = True
         
     async def initialize_workers(self, num_workers: Optional[int] = None) -> None:
         """Initialize worker nodes.
@@ -149,11 +158,12 @@ class ResearchDistributedWorkflow(WorkflowEngine):
             
             # Get execution order based on dependencies
             execution_order = []
-            remaining_steps = set(self.workflow_def["WORKFLOW"].keys())
+            workflow = self.workflow_def["COLLABORATION"]["WORKFLOW"]
+            remaining_steps = set(workflow.keys())
             
             # First, add steps with no dependencies
             for step_id in list(remaining_steps):
-                step_info = self.workflow_def["WORKFLOW"][step_id]
+                step_info = workflow[step_id]
                 if not step_info.get("dependencies"):
                     execution_order.append(step_id)
                     remaining_steps.remove(step_id)
@@ -162,7 +172,7 @@ class ResearchDistributedWorkflow(WorkflowEngine):
             while remaining_steps:
                 steps_added = False
                 for step_id in list(remaining_steps):
-                    step_info = self.workflow_def["WORKFLOW"][step_id]
+                    step_info = workflow[step_id]
                     dependencies = step_info.get("dependencies", [])
                     if all(dep in execution_order for dep in dependencies):
                         execution_order.append(step_id)
@@ -175,14 +185,17 @@ class ResearchDistributedWorkflow(WorkflowEngine):
             
             # Execute steps in order
             for step_id in execution_order:
-                step_info = self.workflow_def["WORKFLOW"][step_id]
+                step_info = workflow[step_id]
                 retry_count = 0
                 max_retries = self.config.max_retries
                 
                 # Get step-specific retry config
-                step_config = self.workflow_config.get(f"{step_id}_config", {})
-                if step_config:
-                    max_retries = step_config.get("max_retries", max_retries)
+                step_config_key = f"{step_id}_config"
+                step_config = {}
+                if hasattr(self.workflow_config, step_config_key):
+                    step_config = getattr(self.workflow_config, step_config_key)
+                    if hasattr(step_config, "max_retries"):
+                        max_retries = step_config.max_retries
                 
                 while retry_count <= max_retries:
                     try:
@@ -205,7 +218,10 @@ class ResearchDistributedWorkflow(WorkflowEngine):
                             raise WorkflowExecutionError(
                                 f"Step {step_id} failed after {retry_count} retries: {str(e)}"
                             )
-                        await asyncio.sleep(step_config.get("retry_delay", 0.1))
+                        retry_delay = 0.1
+                        if hasattr(step_config, "retry_delay"):
+                            retry_delay = step_config.retry_delay
+                        await asyncio.sleep(retry_delay)
             
             return {
                 "status": "success",
