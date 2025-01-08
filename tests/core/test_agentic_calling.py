@@ -5,7 +5,7 @@ import asyncio
 from unittest.mock import Mock, patch
 from typing import Dict, Any
 
-from agentflow.core.workflow import WorkflowEngine, WorkflowInstance
+from agentflow.core.workflow import WorkflowEngine, WorkflowInstance, WorkflowStep, WorkflowStepType, StepConfig
 from agentflow.core.types import AgentStatus
 from agentflow.agents.agent import Agent
 from agentflow.core.config import AgentConfig, ModelConfig, WorkflowConfig
@@ -13,7 +13,25 @@ from agentflow.core.config import AgentConfig, ModelConfig, WorkflowConfig
 @pytest.fixture
 async def workflow_engine():
     """Create a workflow engine for testing."""
-    engine = WorkflowEngine()
+    default_workflow_def = {
+        "COLLABORATION": {
+            "WORKFLOW": [
+                {"name": "test_step", "type": "transform"}
+            ]
+        }
+    }
+    default_workflow_config = WorkflowConfig(
+        name="test_workflow",
+        steps=[
+            {
+                "id": "test-step-1", 
+                "name": "test_step", 
+                "type": WorkflowStepType.TRANSFORM,
+                "config": {"strategy": "default"}
+            }
+        ]
+    )
+    engine = WorkflowEngine(workflow_def=default_workflow_def, workflow_config=default_workflow_config)
     await engine.initialize()
     try:
         yield engine

@@ -31,4 +31,21 @@ class AgentConfig(BaseModel):
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
     stop: Optional[List[str]] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict) 
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    system_prompt: Optional[str] = None
+    
+    @classmethod
+    def from_dict(cls, config_dict: Dict[str, Any]) -> 'AgentConfig':
+        """Create AgentConfig from a dictionary, extracting system prompt from AGENT config."""
+        # Create a copy to avoid modifying the original dictionary
+        config_copy = config_dict.copy()
+        
+        # Extract system prompt from AGENT config if not directly specified
+        if 'AGENT' in config_copy and 'system_prompt' in config_copy['AGENT']:
+            config_copy['system_prompt'] = config_copy['AGENT']['system_prompt']
+            config_copy['name'] = config_copy['AGENT'].get('name', '')
+        
+        # Remove nested AGENT configuration to prevent conflicts
+        config_copy.pop('AGENT', None)
+        
+        return cls(**config_copy)

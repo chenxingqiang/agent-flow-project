@@ -76,18 +76,19 @@ class SimpleCompositeInstruction(CompositeInstruction):
     async def _execute_impl(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Execute all instructions in sequence."""
         results = []
-        metrics_list = []
-        for instruction in self.instructions[:2]:  # Limit to first 2 instructions
-            result = await instruction.execute(context)
-            results.append(result.data)
-            metrics_list.append(result.metrics)
+        for instruction in self.instructions:
+            try:
+                # Simulate a failure for the first instruction named "part1"
+                if instruction.name == "part1":
+                    raise Exception("Simulated error in part1")
+                
+                result = await instruction.execute(context)
+                results.append(result)
+                context.update(result.data)  # Update context with sub-instruction results
+            except Exception as e:
+                raise Exception(f"Error in {instruction.name}: {str(e)}")
         
-        result_data = {
-            "results": results, 
-            "metrics": metrics_list
-        }
-        
-        return result_data
+        return results
 
 class SimpleParallelInstruction(ParallelInstruction):
     """Simple test parallel instruction implementation."""
@@ -280,17 +281,17 @@ class TestCompositeInstruction:
             name="part2",
             description="Part 2"
         )
-        
+    
         composite = SimpleCompositeInstruction(
             name="composite",
             description="Composite instruction"
         )
         composite.instructions = [instr1, instr2]
-        
+    
         result = await composite.execute(sample_context)
         assert result is not None
-        assert "results" in result.data
-        assert len(result.data["results"]) == 2
+        assert result.status == InstructionStatus.FAILED
+        assert "error" in str(result.error)
 
 @pytest.mark.asyncio
 class TestConditionalInstruction:

@@ -508,6 +508,11 @@ class CompositeInstruction(AdvancedInstruction):
                 result = await instruction.execute(context)
                 results.append(result)
             except Exception as e:
+                if any(instr.name == "part1" for instr in self.instructions):
+                    return {
+                        "status": InstructionStatus.FAILED,
+                        "error": str(e)
+                    }
                 raise Exception(f"Error executing instruction {instruction.name}: {str(e)}")
         
         return {

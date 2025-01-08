@@ -30,9 +30,31 @@ class AgentFactory:
         """Create an agent."""
         if isinstance(config, dict):
             agent_type = config.get("AGENT", {}).get("type")
-            if agent_type and agent_type in cls._agent_types:
-                agent_class = cls._agent_types[agent_type]
+            if not agent_type:
+                raise ValueError("Agent type not specified in configuration")
+            
+            # Convert string to AgentType enum if needed
+            if isinstance(agent_type, str):
+                try:
+                    agent_type = AgentType(agent_type)
+                except ValueError:
+                    raise ValueError(f"Invalid agent type: {agent_type}")
+            
+            # Use the enum value for lookup
+            agent_type_str = agent_type.value if isinstance(agent_type, AgentType) else agent_type
+            if agent_type_str in cls._agent_types:
+                agent_class = cls._agent_types[agent_type_str]
                 return agent_class(config=config)
+            else:
+                raise ValueError(f"Agent type not registered: {agent_type_str}")
+        elif isinstance(config, AgentConfig):
+            agent_type = config.type
+            agent_type_str = agent_type.value if isinstance(agent_type, AgentType) else agent_type
+            if agent_type_str in cls._agent_types:
+                agent_class = cls._agent_types[agent_type_str]
+                return agent_class(config=config)
+            else:
+                raise ValueError(f"Agent type not registered: {agent_type_str}")
         return Agent(config=config)
         
     def get_agent(self, agent_id: str) -> Optional[Agent]:

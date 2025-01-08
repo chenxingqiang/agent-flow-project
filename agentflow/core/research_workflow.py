@@ -1,6 +1,6 @@
 """Research workflow module."""
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 import logging
 import asyncio
 from dataclasses import dataclass
@@ -10,7 +10,8 @@ from .workflow import WorkflowEngine, WorkflowInstance
 from .types import AgentStatus
 from ..agents.agent import Agent
 from .exceptions import WorkflowExecutionError
-from .workflow_types import WorkflowConfig
+from .workflow_types import WorkflowStepType
+from .config import WorkflowConfig
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ class ResearchDistributedWorkflow(WorkflowEngine):
     """Research distributed workflow class."""
     
     @classmethod
-    async def create_remote_workflow(cls, workflow_def: Dict[str, Any], config: Dict[str, Any]) -> Any:
+    async def create_remote_workflow(cls, workflow_def: Dict[str, Any], config: Union[Dict[str, Any], WorkflowConfig, None] = None) -> Any:
         """Create a remote workflow instance.
         
         Args:
@@ -49,53 +50,41 @@ class ResearchDistributedWorkflow(WorkflowEngine):
         if not ray.is_initialized():
             ray.init(ignore_reinit_error=True)
             
-        # Create distributed config
-        dist_config = DistributedConfig(
-            num_workers=config.get("num_workers", 1),
-            batch_size=config.get("batch_size", 1),
-            max_retries=config.get("max_retries", 3),
-            timeout=config.get("timeout", 3600.0)
-        )
+        # Create a remote actor
+        RemoteWorkflow = ray.remote(cls)
         
-        # Create and return remote actor
-        remote_workflow = ray.remote(cls).remote(dist_config, workflow_def, config)
-        return remote_workflow
+        # Convert config to dictionary for serialization
+        if isinstance(config, WorkflowConfig):
+            config_dict = config.model_dump()
+        elif isinstance(config, dict):
+            config_dict = config
+        else:
+            config_dict = None
+            
+        workflow = RemoteWorkflow.remote(workflow_def=workflow_def, workflow_config=config_dict)
+        
+        return workflow
     
-    def __init__(self, config: Optional[DistributedConfig] = None, 
-                workflow_def: Optional[Dict[str, Any]] = None,
-                workflow_config: Optional[Dict[str, Any]] = None):
-        """Initialize research distributed workflow.
+    def __init__(self, workflow_def: Dict[str, Any], workflow_config: Union[Dict[str, Any], WorkflowConfig, None] = None):
+        """Initialize research workflow.
         
         Args:
-            config: Distributed configuration
             workflow_def: Workflow definition
             workflow_config: Workflow configuration
         """
-        # Initialize distributed config
-        self.dist_config = config or DistributedConfig()
-        
-        # Convert workflow_config dict to WorkflowConfig if needed
-        if workflow_config is not None and isinstance(workflow_config, dict):
-            workflow_config = WorkflowConfig(**workflow_config)
-        else:
-            workflow_config = WorkflowConfig()
-            
         # Initialize base class with required arguments
         super().__init__(workflow_def or {"COLLABORATION": {"WORKFLOW": {}}}, workflow_config)
         
-        # Store the workflow config as self.config for compatibility
-        self.config = workflow_config
+        # Initialize distributed config
+        self.dist_config = DistributedConfig()
         
         # Initialize additional attributes
         self.workers: List[Agent] = []
-        self.steps: List[ResearchStep] = []
-        self.results: Dict[str, Any] = {}
-        self._initialized = False
+        self.step_results: Dict[str, Any] = {}
         
     async def initialize(self) -> None:
         """Initialize workflow."""
         await super().initialize()
-        self._initialized = True
         
     async def initialize_workers(self, num_workers: Optional[int] = None) -> None:
         """Initialize worker nodes.
@@ -103,10 +92,7 @@ class ResearchDistributedWorkflow(WorkflowEngine):
         Args:
             num_workers: Number of workers to initialize
         """
-        if not self._initialized:
-            await self.initialize()
-            
-        n_workers = num_workers or self.config.num_workers
+        n_workers = num_workers or self.dist_config.num_workers
         for _ in range(n_workers):
             worker = Agent()
             await worker.initialize()
@@ -145,9 +131,6 @@ class ResearchDistributedWorkflow(WorkflowEngine):
         Raises:
             ray.exceptions.RayTaskError: If input data is invalid or execution fails
         """
-        if not self._initialized:
-            await self.initialize()
-            
         try:
             # Validate input data
             if not isinstance(input_data, dict):
@@ -187,7 +170,7 @@ class ResearchDistributedWorkflow(WorkflowEngine):
             for step_id in execution_order:
                 step_info = workflow[step_id]
                 retry_count = 0
-                max_retries = self.config.max_retries
+                max_retries = self.dist_config.max_retries
                 
                 # Get step-specific retry config
                 step_config_key = f"{step_id}_config"
@@ -265,9 +248,6 @@ class ResearchDistributedWorkflow(WorkflowEngine):
         
     async def cleanup(self) -> None:
         """Clean up workflow resources."""
-        if not self._initialized:
-            return
-            
         # Clean up workers
         for worker in self.workers:
             await worker.cleanup()

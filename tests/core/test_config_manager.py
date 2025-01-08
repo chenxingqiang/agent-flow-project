@@ -6,8 +6,7 @@ import os
 import json
 import pytest
 import tempfile
-
-from agentflow.core.config import AgentConfig, ModelConfig, ConfigurationType, WorkflowConfig
+from agentflow.core.config import AgentConfig, ModelConfig, ConfigurationType, WorkflowConfig, load_global_config
 from agentflow.core.config_manager import ConfigManager
 
 @pytest.fixture
@@ -172,3 +171,36 @@ def test_export_and_import_config(config_manager):
         assert imported_config is not None
         assert imported_config.id == "export-import-agent"
         assert imported_config.name == "Export Import Agent"
+
+def test_agent_config_from_yaml():
+    """Test loading agent configuration from YAML."""
+    config = AgentConfig.from_yaml()
+    
+    assert config.name == "default_agent"
+    assert config.type == "generic"
+    assert hasattr(config, 'capabilities')
+    assert hasattr(config, 'optimization')
+
+def test_workflow_config_from_yaml():
+    """Test loading workflow configuration from YAML."""
+    config = WorkflowConfig.from_yaml()
+    
+    assert config.name == "default_workflow"
+    assert config.max_iterations == 10
+    assert config.timeout == 3600
+
+def test_model_config_from_yaml():
+    """Test loading model configuration from YAML."""
+    config = ModelConfig.from_yaml()
+    
+    assert config.name == "gpt-4"
+    assert config.provider == "openai"
+
+def test_global_config():
+    """Test loading global configuration."""
+    global_config = load_global_config()
+    
+    assert 'global' in global_config
+    assert 'system' in global_config
+    assert 'logging_level' in global_config.global_
+    assert 'resource_limits' in global_config.system

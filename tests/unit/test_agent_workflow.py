@@ -20,18 +20,24 @@ def setup_ray():
 def test_workflow_def() -> Dict[str, Any]:
     """Test workflow definition."""
     return {
-        "INPUT": ["test_input"],
-        "OUTPUT": ["test_output"],
-        "WORKFLOW": {
-            "step_1": {
-                "step": 1,
-                "name": "Test Step 1",
-                "description": "First test step",
-                "input": ["test_input"],
-                "type": WorkflowStepType.RESEARCH_EXECUTION,
-                "agent_config": {}
+        "COLLABORATION": {
+            "MODE": "SEQUENTIAL",
+            "COMMUNICATION_PROTOCOL": {
+                "TYPE": "HIERARCHICAL"
+            },
+            "WORKFLOW": {
+                "step_1": {
+                    "step": 1,
+                    "name": "Test Step 1",
+                    "description": "First test step",
+                    "input": ["test_input"],
+                    "type": WorkflowStepType.RESEARCH_EXECUTION,
+                    "agent_config": {}
+                }
             }
-        }
+        },
+        "INPUT": ["test_input"],
+        "OUTPUT": ["test_output"]
     }
 
 @pytest.fixture

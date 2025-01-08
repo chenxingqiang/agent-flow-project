@@ -2,8 +2,10 @@
 
 import pytest
 import numpy as np
-from agentflow.core.config import AgentConfig, ConfigurationType, AgentMode, ModelConfig
-from agentflow.core.workflow_types import WorkflowConfig, WorkflowStep, WorkflowStepType, StepConfig
+from agentflow.core.config import (
+    AgentConfig, ConfigurationType, AgentMode, ModelConfig,
+    WorkflowConfig, WorkflowStep, StepConfig, WorkflowStepType
+)
 from agentflow.core.exceptions import WorkflowExecutionError
 
 class TestAgentFramework:
@@ -51,6 +53,8 @@ class TestAgentFramework:
     @pytest.mark.asyncio
     async def test_agent_initialization(self):
         """Test agent initialization."""
+        print("Workflow type:", type(self.agent_config.workflow))
+        print("Workflow:", self.agent_config.workflow)
         assert self.agent_config.id == "test-agent-1"
         assert self.agent_config.name == "test_agent"
         assert self.agent_config.type == ConfigurationType.DATA_SCIENCE

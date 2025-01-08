@@ -1,0 +1,18 @@
+# Default Model Configuration
+name: gpt-4
+provider: openai
+version: latest
+
+parameters:
+  temperature: 0.7
+  max_tokens: 4096
+  top_p: 0.9
+
+inference_settings:
+  cache_responses: true
+  rate_limit: 60  # requests per minute
+  timeout: 30  # seconds
+
+security:
+  encryption: true
+  access_level: restricted

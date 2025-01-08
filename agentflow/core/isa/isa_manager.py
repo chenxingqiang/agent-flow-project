@@ -65,8 +65,33 @@ class ISAManager:
         if self._initialized:
             return self
             
-        # Initialize instruction store
-        self.instructions = {}
+        # Preserve existing instructions if any
+        if not self.instructions:
+            # Initialize instruction store with default instructions
+            self.instructions = {
+                "init": Instruction(
+                    id="init",
+                    name="initialize",
+                    type=InstructionType.CONTROL,
+                    params={"init_param": "value"},
+                    description="Initialize system"
+                ),
+                "process": Instruction(
+                    id="process",
+                    name="process_data",
+                    type=InstructionType.COMPUTATION,
+                    params={"data_param": "value"},
+                    description="Process input data"
+                ),
+                "validate": Instruction(
+                    id="validate",
+                    name="validate_result",
+                    type=InstructionType.VALIDATION,
+                    params={"threshold": 0.9},
+                    description="Validate results"
+                )
+            }
+        
         self.execution_history = []
         
         self._initialized = True

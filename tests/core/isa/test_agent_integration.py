@@ -3,8 +3,9 @@
 import pytest
 import os
 from agentflow.agents.agent import Agent, AgentConfig
-from agentflow.core.isa.isa_manager import Instruction, InstructionType
+from agentflow.core.isa.isa_manager import Instruction, InstructionType, InstructionStatus
 from agentflow.core.isa.types import AgentType
+from datetime import datetime
 
 @pytest.fixture
 def sample_config():
@@ -12,7 +13,8 @@ def sample_config():
     return {
         "AGENT": {
             "name": "TestAgent",
-            "type": AgentType.RESEARCH.value
+            "type": AgentType.RESEARCH.value,
+            "system_prompt": "You are a test agent designed to help with integration testing."
         },
         "MODEL": {
             "name": "gpt-4",
@@ -88,15 +90,28 @@ class TestAgentISAIntegration:
         config = AgentConfig.from_dict(sample_config)
         agent = Agent(config)
         await agent.initialize()
-        
+
         # Select and execute instructions
         input_data = {"task": "init and process", "params": {"x": 1, "data": "test"}, "text": "initialize and process data"}
         selected = agent.instruction_selector.select_instructions(input_data, agent.isa_manager.instructions)
-        
+
+        # Prepare context for instruction execution
+        context = {
+            "input_data": input_data,
+            "agent_config": config.to_dict(),
+            "timestamp": datetime.now().isoformat()
+        }
+
+        results = []
         for instruction_id in selected:
             instruction = agent.isa_manager.get_instruction(instruction_id)
-            result = agent.isa_manager.execute_instruction(instruction)
-            assert result is not None
+            result = await agent.isa_manager.execute_instruction(instruction, context)
+            results.append(result)
+
+        # Verify results
+        assert len(results) > 0
+        for result in results:
+            assert result.status == InstructionStatus.SUCCESS
             
     @pytest.mark.asyncio
     async def test_error_handling(self, sample_config):
@@ -121,18 +136,28 @@ class TestAgentISAIntegration:
         config = AgentConfig.from_dict(sample_config)
         agent = Agent(config)
         await agent.initialize()
-        
+
         # Test optimization strategy
         input_data = {"task": "complex task", "params": {"data": "test"}, "text": "complex task requiring multiple steps"}
         selected = agent.instruction_selector.select_instructions(input_data, agent.isa_manager.instructions)
-        
+
+        # Prepare context for instruction execution
+        context = {
+            "input_data": input_data,
+            "agent_config": config.to_dict(),
+            "timestamp": datetime.now().isoformat()
+        }
+
         # Execute instructions and collect rewards
         rewards = []
         for instruction_id in selected:
             instruction = agent.isa_manager.get_instruction(instruction_id)
-            result = agent.isa_manager.execute_instruction(instruction)
-            reward = agent.instruction_selector.get_reward(result)
-            rewards.append(reward)
+            result = await agent.isa_manager.execute_instruction(instruction, context)
             
-        assert all(isinstance(r, (int, float)) for r in rewards)
-        assert len(rewards) == len(selected)
+            # Calculate reward based on instruction execution result
+            reward = 1.0 if result.status == InstructionStatus.SUCCESS else -1.0
+            rewards.append(reward)
+
+        # Verify rewards and optimization
+        assert len(rewards) > 0
+        assert all(reward >= 0 for reward in rewards)

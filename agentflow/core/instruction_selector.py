@@ -26,6 +26,8 @@ class InstructionSelector:
     
     def __init__(self):
         self.vectorizer = TfidfVectorizer()
+        # Fit with a dummy document to ensure it's always fitted
+        self.vectorizer.fit(["dummy document"])
         self.instruction_vectors = {}
         self.instruction_history = {}
         
@@ -53,7 +55,7 @@ class InstructionSelector:
         """Train the selector on available instructions"""
         if not instructions:
             # Initialize with a dummy document to avoid empty vocabulary error
-            self.instruction_vectors = self.vectorizer.fit_transform(['dummy'])
+            self.instruction_vectors = self.vectorizer.transform(['dummy'])
             self.instruction_vectors = None  # Clear the vectors after initialization
             return
 
@@ -61,16 +63,18 @@ class InstructionSelector:
         descriptions = [instr.description or "" for instr in instructions.values()]
         if not descriptions:
             descriptions = ['dummy']  # Use dummy doc if no descriptions
-        self.instruction_vectors = self.vectorizer.fit_transform(descriptions)
+        self.instruction_vectors = self.vectorizer.transform(descriptions)
         
-        # Initialize history
+        # Initialize history for ALL instructions
         for name in instructions:
-            self.instruction_history[name] = {
-                "total_executions": 0,
-                "successful_executions": 0,
-                "cache_hits": 0,
-                "avg_execution_time": 0.0
-            }
+            # Ensure history exists for each instruction
+            if name not in self.instruction_history:
+                self.instruction_history[name] = {
+                    "total_executions": 0,
+                    "successful_executions": 0,
+                    "cache_hits": 0,
+                    "avg_execution_time": 0.0
+                }
     
     async def initialize(self):
         """Initialize the instruction selector"""
@@ -121,6 +125,15 @@ class InstructionSelector:
     
     def _calculate_success_rate(self, instruction_name: str) -> float:
         """Calculate historical success rate"""
+        # If instruction history doesn't exist, initialize it
+        if instruction_name not in self.instruction_history:
+            self.instruction_history[instruction_name] = {
+                "total_executions": 0,
+                "successful_executions": 0,
+                "cache_hits": 0,
+                "avg_execution_time": 0.0
+            }
+        
         history = self.instruction_history[instruction_name]
         total = history["total_executions"]
         if total == 0:

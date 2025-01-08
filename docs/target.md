@@ -452,7 +452,7 @@ This example demonstrates how the CO-STAR framework structures and manages compl
 
 #### 3. Style (S)
 
-- 通过工作流程定义交互模式：
+- 通过工作流程定义交互模式[json yaml markdown格式都支持]：
 
   ```json
   "WORKFLOW": [

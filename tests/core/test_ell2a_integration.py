@@ -19,20 +19,18 @@ def cleanup_ell2a():
 def sample_workflow_config():
     """Create a sample workflow configuration."""
     return WorkflowConfig(
-        id="test-workflow",
         name="Test Workflow",
-        use_ell2a=True,
-        ell2a_mode="complex",
+        max_iterations=10,
+        timeout=3600,
+        logging_level='INFO',
+        required_fields=[],
+        error_policy={'ignore_warnings': False, 'fail_fast': True},
+        retry_policy={'max_retries': 3, 'retry_delay': 1.0},
+        steps=[],
         ell2a_config={
+            "mode": "simple",
             "model": "test-model",
-            "max_tokens": 1000,
-            "temperature": 0.7,
-            "tools": [],
-            "stream": False,
             "complex": {
-                "max_retries": 3,
-                "retry_delay": 1.0,
-                "timeout": 30.0,
                 "track_performance": True,
                 "track_memory": True
             }

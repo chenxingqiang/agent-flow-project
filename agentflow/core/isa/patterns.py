@@ -23,6 +23,7 @@ class PatternMetrics:
     frequency: int
     confidence: float
     support: float
+    significance: float = 0.0
     lift: float = 1.0
     conviction: float = 1.0
     leverage: float = 0.0
@@ -40,6 +41,12 @@ class Pattern:
     context: Dict[str, Any] = None
     constraints: Dict[str, Any] = None
     metadata: Dict[str, Any] = None
+
+    def __len__(self):
+        return len(self.instructions)
+
+    def __iter__(self):
+        return iter(self.instructions)
 
 class PatternMiner:
     """Advanced pattern mining system."""
@@ -265,6 +272,7 @@ class PatternMiner:
             frequency=self._calculate_frequency(instructions),
             confidence=self._calculate_confidence(instructions),
             support=self._calculate_support(instructions),
+            significance=self._calculate_significance(instructions),
             lift=self._calculate_lift(instructions),
             conviction=self._calculate_conviction(instructions),
             leverage=self._calculate_leverage(instructions),

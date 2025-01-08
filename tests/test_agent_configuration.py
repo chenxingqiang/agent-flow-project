@@ -56,8 +56,8 @@ class TestAgentConfiguration(unittest.TestCase):
                 "version": "1.0.0"
             },
             "MODEL": {
-                "provider": "default",
-                "name": "default",
+                "provider": "openai",
+                "name": "gpt-4",
                 "temperature": 0.7
             },
             "WORKFLOW": {
@@ -90,8 +90,8 @@ class TestAgentConfiguration(unittest.TestCase):
                 "version": "1.0.0"
             },
             "MODEL": {
-                "provider": "default",
-                "name": "default",
+                "provider": "openai",
+                "name": "gpt-4",
                 "temperature": 0.7
             },
             "WORKFLOW": {
@@ -162,8 +162,8 @@ class TestAgentConfiguration(unittest.TestCase):
                 "version": "1.0.0"
             },
             "MODEL": {
-                "provider": "default",
-                "name": "default",
+                "provider": "openai",
+                "name": "gpt-4",
                 "temperature": 0.7
             },
             "WORKFLOW": {

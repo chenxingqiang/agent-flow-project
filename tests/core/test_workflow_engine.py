@@ -15,8 +15,11 @@ def valid_workflow_def():
                 {
                     "id": "step1",
                     "name": "test_step",
-                    "type": ConfigurationType.TEST.value,
-                    "config": {}
+                    "type": WorkflowStepType.TRANSFORM.value,
+                    "config": {
+                        "strategy": "test",
+                        "params": {}
+                    }
                 }
             ]
         }
@@ -46,8 +49,8 @@ def test_workflow_engine_initialization(workflow_engine):
 
 def test_invalid_workflow_config():
     """Test WorkflowEngine initialization with invalid config."""
-    with pytest.raises(ValueError, match="workflow_config must be an instance of WorkflowConfig"):
-        WorkflowEngine(None, "invalid_config")
+    with pytest.raises(ValueError, match="workflow_config must be an instance of WorkflowConfig, a dictionary, or None"):
+        WorkflowEngine({"COLLABORATION": {"WORKFLOW": []}}, "invalid_config")
 
 def test_invalid_workflow_definition():
     """Test WorkflowEngine initialization with invalid workflow definition."""

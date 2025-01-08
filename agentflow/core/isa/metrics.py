@@ -35,6 +35,7 @@ class ValidationResult(BaseModel):
     """Result of instruction validation."""
     model_config = ConfigDict(frozen=True)
 
+    type: str = Field(description="Type of validation")
     is_valid: bool = Field(description="Whether validation passed")
     score: float = Field(description="Overall validation score")
     metrics: Dict[str, float] = Field(default_factory=dict, description="Validation metrics")
@@ -231,6 +232,7 @@ class Validator:
         score = self._calculate_validation_score(metrics)
         
         return ValidationResult(
+            type="instruction_validation",
             is_valid=len(violations) == 0,
             score=score,
             metrics=metrics,

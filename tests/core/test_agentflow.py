@@ -10,7 +10,7 @@ import time
 from typing import Dict, Any, Optional
 
 from agentflow.agents.agent import Agent
-from agentflow.core.config import AgentConfig, ModelConfig, WorkflowConfig
+from agentflow.core.config import AgentConfig, ModelConfig, WorkflowConfig, WorkflowStep, StepConfig, WorkflowStepType
 from agentflow.core.workflow import WorkflowEngine
 from agentflow.ell2a.integration import ELL2AIntegration
 from agentflow.ell2a.types.message import Message, MessageRole
@@ -126,12 +126,27 @@ async def agent(agent_config, mock_ell2a):
         await _agent.cleanup()
 
 @pytest.fixture
-async def workflow_engine(mock_ell2a, mock_isa_manager, mock_instruction_selector):
-    """Create workflow engine with mocked components."""
-    engine = WorkflowEngine()
-    engine._ell2a = mock_ell2a
-    engine._isa_manager = mock_isa_manager
-    engine._instruction_selector = mock_instruction_selector
+async def workflow_engine():
+    """Create a workflow engine for testing."""
+    default_workflow_def = {
+        "COLLABORATION": {
+            "WORKFLOW": [
+                {"name": "test_step", "type": "transform"}
+            ]
+        }
+    }
+    default_workflow_config = WorkflowConfig(
+        name="test_workflow",
+        steps=[
+            {
+                "id": "test-step-1", 
+                "name": "test_step", 
+                "type": WorkflowStepType.TRANSFORM,
+                "config": {"strategy": "default"}
+            }
+        ]
+    )
+    engine = WorkflowEngine(workflow_def=default_workflow_def, workflow_config=default_workflow_config)
     await engine.initialize()
     try:
         yield engine

@@ -1,6 +1,6 @@
 """Advanced validation and verification system for instruction validation."""
 
-from typing import Dict, List, Optional, Set, Any, Callable
+from typing import Dict, List, Optional, Set, Any, Callable, Union
 from dataclasses import dataclass, field
 from enum import Enum, auto
 import re
@@ -92,36 +92,57 @@ class BaseValidator(BaseModel):
         """
         raise NotImplementedError("Subclasses must implement validate method")
     
-    def _aggregate_results(self, results: List[ValidationResult]) -> ValidationResult:
-        """Aggregate multiple validation results into a single result.
+    def _aggregate_results(self, results: List[Union[ValidationResult, List[ValidationResult]]]) -> ValidationResult:
+        """Aggregate validation results.
         
         Args:
-            results (List[ValidationResult]): List of validation results
+            results (List[Union[ValidationResult, List[ValidationResult]]]): Validation results to aggregate
             
         Returns:
-            ValidationResult: Aggregated result
+            ValidationResult: Aggregated validation result
         """
-        if not results:
-            return ValidationResult(is_valid=True, score=1.0, metrics={}, violations=[], recommendations=[], type=ValidationType.STATIC)
-            
-        is_valid = all(r.is_valid for r in results)
-        avg_score = sum(r.score for r in results) / len(results)
-        all_metrics = {}
-        all_violations = []
-        all_recommendations = []
+        # Flatten results in case of nested lists
+        flattened_results = []
+        for result in results:
+            if isinstance(result, list):
+                flattened_results.extend(result)
+            else:
+                flattened_results.append(result)
         
-        for r in results:
-            all_metrics.update(r.metrics)
-            all_violations.extend(r.violations)
-            all_recommendations.extend(r.recommendations)
-            
+        # If no results, return a default valid result
+        if not flattened_results:
+            return ValidationResult(
+                type=self.validation_type,
+                is_valid=True,
+                score=1.0,
+                metrics={},
+                violations=[],
+                recommendations=[]
+            )
+        
+        # Aggregate metrics and violations
+        is_valid = all(r.is_valid for r in flattened_results)
+        score = sum(r.score for r in flattened_results) / len(flattened_results)
+        
+        # Combine metrics from all results
+        metrics = {}
+        for result in flattened_results:
+            metrics.update(result.metrics)
+        
+        # Collect all violations and recommendations
+        violations = []
+        recommendations = []
+        for result in flattened_results:
+            violations.extend(result.violations)
+            recommendations.extend(result.recommendations)
+        
         return ValidationResult(
+            type=self.validation_type,
             is_valid=is_valid,
-            score=avg_score,
-            metrics=all_metrics,
-            violations=all_violations,
-            recommendations=all_recommendations,
-            type=ValidationType.STATIC
+            score=score,
+            metrics=metrics,
+            violations=violations,
+            recommendations=recommendations
         )
     
     def _check_types(self, instructions: List[FormalInstruction]) -> ValidationResult:
@@ -144,11 +165,13 @@ class BaseValidator(BaseModel):
             metrics={"type_check": 1.0 if len(violations) == 0 else 0.0},
             violations=[ValidationViolation(type=ViolationType.TYPE, message=v) for v in violations],
             recommendations=["Review instruction types"] if violations else [],
-            type=ValidationType.STATIC
+            type=self.validation_type
         )
 
 class StaticValidator(BaseValidator):
     """Static validator for instruction validation."""
+    
+    validation_type: str = 'static'
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize static validator."""
@@ -199,25 +222,33 @@ class StaticValidator(BaseValidator):
             instructions (List[FormalInstruction]): Instructions to check
             
         Returns:
-            ValidationResult: Syntax check result
+            ValidationResult: Syntax validation result
         """
         violations = []
         for instruction in instructions:
-            if not instruction.id or not instruction.name:
-                violations.append(f"Missing required fields in instruction {instruction.id}")
-                
+            # Check for empty content
+            if not instruction.content:
+                violations.append(f"Empty content in instruction {instruction.id}")
+            
+            # Check for valid parameter types
+            for param_name, param_value in instruction.params.items():
+                if not isinstance(param_value, (str, int, float, bool, dict, list, type(None))):
+                    violations.append(f"Invalid parameter type for {param_name} in instruction {instruction.id}")
+        
         return ValidationResult(
+            type=self.validation_type,
             is_valid=len(violations) == 0,
             score=1.0 if len(violations) == 0 else 0.0,
-            metrics={"syntax_check": 1.0 if len(violations) == 0 else 0.0},
-            violations=[ValidationViolation(type=ViolationType.SYNTAX, message=v) for v in violations],
-            recommendations=["Fix syntax errors"] if violations else [],
-            type=ValidationType.STATIC
+            metrics={'syntax_check': 1.0 if len(violations) == 0 else 0.0},
+            violations=violations,
+            recommendations=["Review instruction syntax"] if violations else []
         )
 
 class SecurityValidator(BaseValidator):
     """Security validator for instruction validation."""
 
+    validation_type: str = 'security'
+    
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize security validator."""
         super().__init__(config=config)
@@ -228,45 +259,35 @@ class SecurityValidator(BaseValidator):
         }
 
     def validate(self, instructions: List[FormalInstruction], context: Optional[ValidationContext] = None) -> ValidationResult:
-        """Validate instructions for security concerns."""
+        """Validate security aspects of instructions.
+        
+        Args:
+            instructions (List[FormalInstruction]): Instructions to validate
+            context (ValidationContext): Validation context
+            
+        Returns:
+            ValidationResult: Security validation result
+        """
+        # Perform different security checks
         results = []
         
-        # Check access control
-        if self.rules.get('access_control'):
-            access_violations = self._check_access_control(instructions)
-            results.append(access_violations)
-        
         # Check data privacy
-        if self.rules.get('data_privacy'):
-            privacy_violations = self._check_data_privacy(instructions)
-            results.append(privacy_violations)
+        if self.rules.get('data_privacy', False):
+            data_privacy_result = self._check_data_privacy(instructions)
+            results.append(data_privacy_result)
         
         # Check input validation
-        if self.rules.get('input_validation'):
-            input_violations = self._check_input_validation(instructions)
-            results.append(input_violations)
+        if self.rules.get('input_validation', False):
+            input_validation_result = self._check_input_validation(instructions)
+            results.append(input_validation_result)
         
+        # Check access control
+        if self.rules.get('access_control', False):
+            access_control_result = self._check_access_control(instructions)
+            results.append(access_control_result)
+        
+        # Aggregate results
         return self._aggregate_results(results)
-    
-    def _check_access_control(self, instructions: List[FormalInstruction]) -> ValidationResult:
-        """Check for access control violations."""
-        violations = []
-        for instruction in instructions:
-            # Check for sensitive operations
-            if any(op in instruction.name.lower() for op in ['delete', 'remove', 'drop', 'truncate']):
-                violations.append(f"Sensitive operation detected in instruction {instruction.id}: {instruction.name}")
-            # Check for privileged access
-            if instruction.params.get('privileged', False):
-                violations.append(f"Privileged access requested in instruction {instruction.id}")
-                
-        return ValidationResult(
-            is_valid=len(violations) == 0,
-            score=1.0 if len(violations) == 0 else 0.0,
-            metrics={"access_control": 1.0 if len(violations) == 0 else 0.0},
-            violations=[ValidationViolation(type=ViolationType.SECURITY, message=v) for v in violations],
-            recommendations=["Review access control settings"] if violations else [],
-            type=ValidationType.SECURITY
-        )
     
     def _check_data_privacy(self, instructions: List[FormalInstruction]) -> ValidationResult:
         """Check for data privacy concerns."""
@@ -285,14 +306,14 @@ class SecurityValidator(BaseValidator):
                     violations.append(f"Sensitive data detected in instruction {instruction.id}: {param_name}")
                 if isinstance(param_value, str) and any(pattern in param_value.lower() for pattern in sensitive_patterns):
                     violations.append(f"Sensitive data detected in parameter value in instruction {instruction.id}")
-                    
+    
         return ValidationResult(
+            type=self.validation_type,
             is_valid=len(violations) == 0,
             score=1.0 if len(violations) == 0 else 0.0,
             metrics={"data_privacy": 1.0 if len(violations) == 0 else 0.0},
-            violations=[ValidationViolation(type=ViolationType.SECURITY, message=v) for v in violations],
-            recommendations=["Review data privacy measures"] if violations else [],
-            type=ValidationType.SECURITY
+            violations=violations,
+            recommendations=["Review data privacy measures"] if violations else []
         )
     
     def _check_input_validation(self, instructions: List[FormalInstruction]) -> ValidationResult:
@@ -307,18 +328,51 @@ class SecurityValidator(BaseValidator):
                 if isinstance(param_value, str):
                     if any(char in param_value for char in ['\'', '"', ';', '--', '/*', '*/']):
                         violations.append(f"Potential injection vulnerability in instruction {instruction.id}: {param_name}")
-                        
+    
         return ValidationResult(
+            type=self.validation_type,
             is_valid=len(violations) == 0,
             score=1.0 if len(violations) == 0 else 0.0,
             metrics={"input_validation": 1.0 if len(violations) == 0 else 0.0},
-            violations=[ValidationViolation(type=ViolationType.SECURITY, message=v) for v in violations],
-            recommendations=["Implement proper input validation"] if violations else [],
-            type=ValidationType.SECURITY
+            violations=violations,
+            recommendations=["Implement proper input validation"] if violations else []
+        )
+    
+    def _check_access_control(self, instructions: List[FormalInstruction]) -> ValidationResult:
+        """Check for access control issues."""
+        violations = []
+        for instruction in instructions:
+            # Check for missing access control
+            if not instruction.params.get('access_level'):
+                violations.append(f"Missing access level in instruction {instruction.id}")
+        
+        return ValidationResult(
+            type=self.validation_type,
+            is_valid=len(violations) == 0,
+            score=1.0 if len(violations) == 0 else 0.0,
+            metrics={"access_control": 1.0 if len(violations) == 0 else 0.0},
+            violations=violations,
+            recommendations=["Implement proper access control"] if violations else []
         )
 
-class ResourceTelemetry:
+class ResourceTelemetry(BaseModel):
     """Advanced resource telemetry tracking and profiling."""
+    
+    model_config = ConfigDict(
+        frozen=False,
+        validate_assignment=True,
+        arbitrary_types_allowed=True
+    )
+    
+    logger: Optional[logging.Logger] = Field(default=None)
+    telemetry_data: Dict[str, List[float]] = Field(default_factory=lambda: {
+        'memory': [],
+        'cpu': [],
+        'io': [],
+        'total_executions': 0,
+        'error_count': 0
+    })
+    start_time: float = Field(default_factory=time.time)
     
     def __init__(self, logger: Optional[logging.Logger] = None):
         """Initialize resource telemetry tracker.
@@ -327,15 +381,7 @@ class ResourceTelemetry:
             logger: Optional logger for detailed tracking. If not provided, 
                     uses the default logger for the module.
         """
-        self.logger = logger or logging.getLogger(__name__)
-        self.telemetry_data = {
-            'memory': [],
-            'cpu': [],
-            'io': [],
-            'total_executions': 0,
-            'error_count': 0
-        }
-        self.start_time = time.time()
+        super().__init__(logger=logger or logging.getLogger(__name__))
     
     def record_resource_usage(self, 
                                resource_type: str, 
@@ -396,21 +442,17 @@ class ResourceTelemetry:
             'io_stats': calculate_stats(self.telemetry_data['io'])
         }
 
-class ResourceProfiler:
+class ResourceProfiler(BaseModel):
     """Advanced resource profiling and prediction mechanism."""
     
-    def __init__(self, learning_rate: float = 0.1):
-        """Initialize resource profiler.
-        
-        Args:
-            learning_rate: Rate at which the profiler adapts to new data
-        """
-        self.learning_rate = learning_rate
-        self.resource_profiles = {
-            'memory': {'baseline': 1024 * 1024, 'adaptive_threshold': 1024 * 1024 * 10},
-            'cpu': {'baseline_complexity': 3, 'adaptive_complexity': 4},
-            'io': {'baseline_ops': 500, 'adaptive_ops_limit': 1000}
-        }
+    model_config = ConfigDict(frozen=False, validate_assignment=True)
+    
+    learning_rate: float = Field(default=0.1)
+    resource_profiles: Dict[str, Dict[str, float]] = Field(default_factory=lambda: {
+        'memory': {'baseline': 1024 * 1024, 'adaptive_threshold': 1024 * 1024 * 10},
+        'cpu': {'baseline_complexity': 3, 'adaptive_complexity': 4},
+        'io': {'baseline_ops': 500, 'adaptive_ops_limit': 1000}
+    })
     
     def update_profile(self, resource_type: str, actual_usage: float):
         """Update resource profile based on observed usage.
@@ -441,36 +483,26 @@ class ResourceProfiler:
         """
         return self.resource_profiles.get(resource_type, {}).get('adaptive_threshold', float('inf'))
 
-class ResourceAnomalyDetector:
+class ResourceAnomalyDetector(BaseModel):
     """Advanced anomaly detection for resource usage patterns."""
     
-    def __init__(self, contamination: float = 0.1, random_state: int = 42):
-        """Initialize anomaly detector.
-        
-        Args:
-            contamination: Expected proportion of outliers
-            random_state: Seed for reproducibility
-        """
-        self.memory_detector = IsolationForest(
-            contamination=contamination, 
-            random_state=random_state
-        )
-        self.cpu_detector = IsolationForest(
-            contamination=contamination, 
-            random_state=random_state
-        )
-        self.io_detector = IsolationForest(
-            contamination=contamination, 
-            random_state=random_state
-        )
-        
-        self.memory_scaler = StandardScaler()
-        self.cpu_scaler = StandardScaler()
-        self.io_scaler = StandardScaler()
-        
-        self.memory_history = []
-        self.cpu_history = []
-        self.io_history = []
+    model_config = ConfigDict(
+        frozen=False,
+        validate_assignment=True,
+        arbitrary_types_allowed=True
+    )
+    
+    memory_detector: Any = Field(default_factory=lambda: IsolationForest(contamination=0.1, random_state=42))
+    cpu_detector: Any = Field(default_factory=lambda: IsolationForest(contamination=0.1, random_state=42))
+    io_detector: Any = Field(default_factory=lambda: IsolationForest(contamination=0.1, random_state=42))
+    
+    memory_scaler: Any = Field(default_factory=StandardScaler)
+    cpu_scaler: Any = Field(default_factory=StandardScaler)
+    io_scaler: Any = Field(default_factory=StandardScaler)
+    
+    memory_history: List[float] = Field(default_factory=list)
+    cpu_history: List[float] = Field(default_factory=list)
+    io_history: List[float] = Field(default_factory=list)
     
     def update(self, resource_type: str, value: float):
         """Update anomaly detector with new resource usage data.
@@ -528,8 +560,18 @@ class ResourceAnomalyDetector:
         
         return anomalies
 
-class PredictiveResourceManager:
+class PredictiveResourceManager(BaseModel):
     """Predictive resource management with statistical forecasting."""
+    
+    model_config = ConfigDict(frozen=False, validate_assignment=True)
+    
+    memory_window: int = Field(default=10)
+    cpu_window: int = Field(default=10)
+    io_window: int = Field(default=10)
+    
+    memory_history: List[float] = Field(default_factory=list)
+    cpu_history: List[float] = Field(default_factory=list)
+    io_history: List[float] = Field(default_factory=list)
     
     def __init__(self, 
                  memory_window: int = 10, 
@@ -542,13 +584,11 @@ class PredictiveResourceManager:
             cpu_window: Historical window size for CPU predictions
             io_window: Historical window size for I/O predictions
         """
+        super().__init__(memory_window=memory_window, cpu_window=cpu_window, io_window=io_window)
+        
         self.memory_history = []
         self.cpu_history = []
         self.io_history = []
-        
-        self.memory_window = memory_window
-        self.cpu_window = cpu_window
-        self.io_window = io_window
     
     def update(self, resource_type: str, value: float):
         """Update resource usage history.
@@ -614,7 +654,34 @@ class PredictiveResourceManager:
 
 class ResourceValidator(BaseValidator):
     """Advanced resource validator with predictive capabilities."""
-
+    
+    validation_type: str = 'resource'
+    
+    model_config = ConfigDict(
+        frozen=False,
+        validate_assignment=True,
+        arbitrary_types_allowed=True
+    )
+    
+    telemetry: Optional[ResourceTelemetry] = Field(default=None)
+    profiler: Optional[ResourceProfiler] = Field(default=None)
+    anomaly_detector: Optional[ResourceAnomalyDetector] = Field(default=None)
+    predictive_manager: Optional[PredictiveResourceManager] = Field(default=None)
+    predictive_config: Dict[str, Dict[str, float]] = Field(default_factory=lambda: {
+        'memory': {
+            'anomaly_threshold': 1.5,  # Standard deviations
+            'prediction_confidence_threshold': 0.7
+        },
+        'cpu': {
+            'anomaly_threshold': 1.5,
+            'prediction_confidence_threshold': 0.7
+        },
+        'io': {
+            'anomaly_threshold': 1.5,
+            'prediction_confidence_threshold': 0.7
+        }
+    })
+    
     def __init__(self, 
                  config: Optional[Dict[str, Any]] = None, 
                  telemetry: Optional[ResourceTelemetry] = None,
@@ -638,22 +705,6 @@ class ResourceValidator(BaseValidator):
         self.anomaly_detector = anomaly_detector or ResourceAnomalyDetector()
         self.predictive_manager = predictive_manager or PredictiveResourceManager()
         
-        # Predictive configuration extension
-        self.predictive_config = {
-            'memory': {
-                'anomaly_threshold': 1.5,  # Standard deviations
-                'prediction_confidence_threshold': 0.7
-            },
-            'cpu': {
-                'anomaly_threshold': 1.5,
-                'prediction_confidence_threshold': 0.7
-            },
-            'io': {
-                'anomaly_threshold': 1.5,
-                'prediction_confidence_threshold': 0.7
-            }
-        }
-    
     def validate(self, 
                  instructions: List[FormalInstruction], 
                  context: Optional[ValidationContext] = None,
@@ -826,7 +877,9 @@ class ResourceValidator(BaseValidator):
 
 class BehavioralValidator(BaseValidator):
     """Behavioral validator for instruction validation."""
-
+    
+    validation_type: str = 'behavioral'
+    
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize behavioral validator."""
         super().__init__(config=config)
@@ -884,7 +937,7 @@ class BehavioralValidator(BaseValidator):
             metrics={"state_transitions": 1.0 if len(violations) == 0 else 0.0},
             violations=[ValidationViolation(type=ViolationType.STATE, message=v) for v in violations],
             recommendations=["Review state transition logic"] if violations else [],
-            type=ValidationType.BEHAVIORAL
+            type=self.validation_type
         )
     
     def _check_side_effects(self, instructions: List[FormalInstruction]) -> ValidationResult:
@@ -909,7 +962,7 @@ class BehavioralValidator(BaseValidator):
             metrics={"side_effects": 1.0 if len(violations) == 0 else 0.0},
             violations=[ValidationViolation(type=ViolationType.STATE, message=v) for v in violations],
             recommendations=["Review side effects"] if violations else [],
-            type=ValidationType.BEHAVIORAL
+            type=self.validation_type
         )
     
     def _check_dependencies(self, instructions: List[FormalInstruction]) -> ValidationResult:
@@ -940,7 +993,7 @@ class BehavioralValidator(BaseValidator):
             metrics={"dependencies": 1.0 if len(violations) == 0 else 0.0},
             violations=[ValidationViolation(type=ViolationType.STATE, message=v) for v in violations],
             recommendations=["Review instruction dependencies"] if violations else [],
-            type=ValidationType.BEHAVIORAL
+            type=self.validation_type
         )
     
     def _is_valid_transition(self, current_state: str, next_state: str) -> bool:
@@ -956,6 +1009,8 @@ class BehavioralValidator(BaseValidator):
 
 class DynamicValidator(BaseValidator):
     """Dynamic validator class."""
+    
+    validation_type: str = 'dynamic'
     
     config: Dict[str, Any] = Field(default_factory=dict)
     rules: Dict[str, Any] = Field(default_factory=dict)
@@ -993,6 +1048,7 @@ class DynamicValidator(BaseValidator):
         
         # Create validation result
         return ValidationResult(
+            type=self.validation_type,
             is_valid=len(violations) == 0,
             score=score,
             metrics=metrics,
@@ -1090,6 +1146,8 @@ class DynamicValidator(BaseValidator):
 class ValidationEngine(BaseModel):
     """Advanced validation engine coordinating multiple validators."""
     
+    model_config = ConfigDict(frozen=False, validate_assignment=True)
+    
     config: Dict[str, Any] = Field(default_factory=dict)
     validators: Dict[str, Any] = Field(default_factory=dict)
     
@@ -1124,6 +1182,7 @@ class ValidationEngine(BaseModel):
             except Exception as e:
                 # Create error result
                 results.append(ValidationResult(
+                    is_valid=False,
                     type=validator_type,
                     violations=[
                         f"Validator error: {str(e)}"
@@ -1138,37 +1197,47 @@ class ValidationEngine(BaseModel):
         """Combine multiple validation results.
         
         Args:
-            results: List of validation results.
+            results (List[ValidationResult]): List of validation results to combine
             
         Returns:
-            ValidationResult: Combined result.
+            ValidationResult: Aggregated validation result
         """
+        # Validate input
         if not results:
             return ValidationResult(
+                type='validation',
                 is_valid=True,
                 score=1.0,
                 metrics={},
                 violations=[],
                 recommendations=[]
             )
-            
+        
         # Combine metrics
-        all_metrics = {}
+        combined_metrics = {}
         for result in results:
-            all_metrics.update(result.metrics)
-            
+            combined_metrics.update(result.metrics)
+        
+        # Aggregate score (weighted average)
+        total_score = sum(result.score for result in results)
+        avg_score = total_score / len(results)
+        
         # Combine violations
-        all_violations = []
+        violations = []
         for result in results:
-            all_violations.extend(result.violations)
-            
-        # Calculate confidence
-        avg_score = sum(r.score for r in results) / len(results)
+            violations.extend(result.violations)
+        
+        # Combine recommendations
+        recommendations = []
+        for result in results:
+            if result.recommendations:
+                recommendations.extend(result.recommendations)
         
         return ValidationResult(
-            is_valid=len(all_violations) == 0,
+            type='validation',
+            is_valid=all(result.is_valid for result in results),
             score=avg_score,
-            metrics=all_metrics,
-            violations=all_violations,
-            recommendations=[]
+            metrics=combined_metrics,
+            violations=violations,
+            recommendations=recommendations
         )

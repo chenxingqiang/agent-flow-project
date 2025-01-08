@@ -176,18 +176,18 @@ async def test_aggregate_processor():
     result = await processor.process(input_data)
     
     # Verify aggregated data
-    assert "A" in result.data
-    assert "B" in result.data
+    assert "A" in result.output
+    assert "B" in result.output
     
     # Check group A aggregations
-    assert result.data["A"]["total"] == 300
-    assert result.data["A"]["average"] == 150
-    assert result.data["A"]["count"] == 2
+    assert result.output["A"]["total"] == 300
+    assert result.output["A"]["average"] == 150
+    assert result.output["A"]["count"] == 2
     
     # Check group B aggregations
-    assert result.data["B"]["total"] == 700
-    assert result.data["B"]["average"] == 350
-    assert result.data["B"]["count"] == 2
+    assert result.output["B"]["total"] == 700
+    assert result.output["B"]["average"] == 350
+    assert result.output["B"]["count"] == 2
     
     # Verify metadata
     assert "group_count" in result.metadata

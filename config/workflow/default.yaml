@@ -1,0 +1,27 @@
+# Default Workflow Configuration
+name: default_workflow
+max_iterations: 10
+timeout: 3600  # 1 hour
+logging_level: INFO
+
+steps:
+  - name: initialization
+    type: setup
+    required: true
+
+  - name: processing
+    type: transform
+    optional: false
+
+  - name: validation
+    type: check
+    optional: true
+
+execution_strategy:
+  parallel_processing: true
+  max_concurrent_steps: 4
+
+error_handling:
+  retry_strategy: cascade
+  max_retries: 3
+  fallback_mechanism: true

@@ -22,10 +22,9 @@ class AgentMode(str, Enum):
 class AgentStatus(str, Enum):
     """Agent status enum."""
     IDLE = "idle"
-    RUNNING = "running"
-    COMPLETED = "completed"
+    PROCESSING = "processing"
     FAILED = "failed"
-    STOPPED = "stopped"
+    COMPLETED = "completed"
 
 class ModelConfig(BaseModel):
     """Model configuration."""
@@ -63,6 +62,7 @@ class AgentConfig(BaseModel):
     workflow_policies: Dict[str, Any] = Field(default_factory=dict)
     error_handling: Dict[str, Any] = Field(default_factory=dict)
     retry_policy: Dict[str, Any] = Field(default_factory=dict)
+    status: AgentStatus = Field(default=AgentStatus.IDLE)
 
     def __init__(self, **data):
         # Lazily import to avoid circular imports
@@ -95,5 +95,6 @@ class AgentConfig(BaseModel):
             "provider": self.provider,
             "workflow_policies": self.workflow_policies,
             "error_handling": self.error_handling,
-            "retry_policy": self.retry_policy
+            "retry_policy": self.retry_policy,
+            "status": self.status.value
         }

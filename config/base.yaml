@@ -1,0 +1,20 @@
+defaults:
+  - _self_
+  - agent: default
+  - workflow: default
+  - model: default
+
+# Global configuration settings
+global:
+  logging_level: INFO
+  error_handling:
+    max_retries: 3
+    timeout: 3600  # 1 hour default timeout
+
+# Common system-wide configurations
+system:
+  resource_limits:
+    cpu: 4.0
+    memory: 16G
+    gpu: 0
+    network_bandwidth: 100Mbps

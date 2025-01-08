@@ -1,14 +1,15 @@
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Dict, Optional
 
+@dataclass
 class ProcessorResult:
-    """Result from processor execution."""
-    
-    def __init__(
-        self,
-        output: Dict[str, Any] = None,
-        metadata: Dict[str, Any] = None,
-        error: Optional[str] = None
-    ):
-        self.output = output or {}
-        self.metadata = metadata or {}
-        self.error = error 
+    """Processor result."""
+    data: Dict[str, Any]
+    metadata: Dict[str, str] = None
+    error: str = None
+    output: Dict[str, Any] = None
+
+    def __post_init__(self):
+        """Ensure backward compatibility."""
+        if self.output is None:
+            self.output = self.data

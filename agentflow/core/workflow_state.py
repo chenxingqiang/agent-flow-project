@@ -57,9 +57,20 @@ class WorkflowState:
         })
         
     @property
-    def status(self) -> str:
+    def status(self) -> WorkflowStatus:
         """Get current workflow status."""
         return self._status
+
+    @status.setter
+    def status(self, value: WorkflowStatus) -> None:
+        """Set workflow status and update status history."""
+        if value != self._status:
+            self._status = value
+            self.status_history.append({
+                "status": value,
+                "timestamp": datetime.now()
+            })
+            self.updated_at = datetime.now()
         
     def to_dict(self) -> Dict[str, Any]:
         """Convert workflow state to dictionary."""
@@ -219,7 +230,9 @@ class WorkflowStateManager:
 
     def initialize_workflow(self, workflow_id: str) -> None:
         """Initialize workflow state."""
-        self.workflow_states[workflow_id] = WorkflowState()
+        # Try to get the name from the workflow configuration if available
+        name = workflow_id  # Fallback to using workflow_id as name
+        self.workflow_states[workflow_id] = WorkflowState(workflow_id=workflow_id, name=name)
 
     def update_workflow_status(self, workflow_id: str, status: WorkflowStatus) -> None:
         """Update workflow status."""

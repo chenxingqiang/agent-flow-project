@@ -16,6 +16,8 @@ import logging
 import re
 import hashlib
 import secrets
+import hydra
+from omegaconf import OmegaConf, DictConfig, ListConfig
 
 class ConfigurationError(Exception):
     """Custom exception for configuration-related errors."""
@@ -25,35 +27,68 @@ class ConfigSecurityManager:
     """Enhanced security management for configurations."""
     
     @classmethod
-    def mask_sensitive_fields(cls, config: Union[Dict[str, Any], dict], sensitive_keywords=None) -> Union[Dict[str, Any], dict]:
+    def mask_sensitive_fields(cls, config: Union[Dict[str, Any], dict, DictConfig, ListConfig], sensitive_keywords=None) -> Union[Dict[str, Any], dict, DictConfig, ListConfig]:
         """
-        Recursively mask sensitive fields in a configuration dictionary.
-
+        Mask sensitive fields in a configuration.
+        
         Args:
             config: Configuration to mask
-            sensitive_keywords: List of keywords to identify sensitive fields
-
+            sensitive_keywords: Optional list of additional sensitive keywords
+        
         Returns:
             Configuration with sensitive fields masked
         """
+        # Default sensitive keywords
         if sensitive_keywords is None:
-            sensitive_keywords = ['password', 'token', 'secret', 'key', 'credential']
-
-        def _mask_recursive(item):
-            # Handle dictionary-like configurations
-            if isinstance(item, dict):
-                masked_config = {}
-                for k, v in item.items():
-                    if any(sensitive in str(k).lower() for sensitive in sensitive_keywords):
-                        masked_config[k] = '***MASKED***'
-                    elif isinstance(v, dict):
-                        masked_config[k] = _mask_recursive(v)
-                    else:
-                        masked_config[k] = v
-                return masked_config
+            sensitive_keywords = [
+                'password', 'secret', 'key', 'token', 
+                'credentials', 'api_key', 'access_token', 
+                'private_key', 'client_secret', 'email', 'phone', 'username',
+                'auth', 'authorization', 'bearer', 'jwt', 'session', 'cookie',
+                'database', 'host', 'port', 'url', 'endpoint', 'bucket', 'storage'
+            ]
+        
+        # Create a mutable copy of the config
+        config_copy = OmegaConf.create(config)
+        
+        def is_sensitive_key(key):
+            """Check if a key is sensitive."""
+            return any(sensitive in str(key).lower() for sensitive in sensitive_keywords)
+        
+        def mask_recursive(item):
+            """Recursively mask sensitive fields."""
+            # If item is a dictionary-like config
+            if OmegaConf.is_config(item):
+                # Check if any key is sensitive
+                def has_sensitive_key(d):
+                    for key in d.keys():
+                        if is_sensitive_key(key):
+                            return True
+                        # Recursively check nested configs
+                        if OmegaConf.is_config(d[key]) and has_sensitive_key(d[key]):
+                            return True
+                    return False
+                
+                # If any key is sensitive, mask the entire config
+                if has_sensitive_key(item):
+                    masked_dict = OmegaConf.create({})
+                    for key in item.keys():
+                        masked_dict[key] = '***MASKED***'
+                    return masked_dict
+                
+                # Recursively process nested configs
+                for key in item.keys():
+                    item[key] = mask_recursive(item[key])
+                
+                return item
+            
+            # For non-config items, mask if sensitive
+            if isinstance(item, str) and any(sensitive in item.lower() for sensitive in sensitive_keywords):
+                return '***MASKED***'
+            
             return item
-
-        return _mask_recursive(config)
+        
+        return mask_recursive(config_copy)
 
     @classmethod
     def hash_sensitive_data(cls, data, salt=None):
@@ -156,8 +191,9 @@ class ConfigTypeConverter:
             return default if default is not None else value
 
 class ConfigurationInheritanceResolver:
-    """Advanced configuration inheritance resolver with comprehensive merging."""
-    
+    """
+    Resolver for configuration inheritance with advanced merging capabilities.
+    """
     @classmethod
     def _load_yaml_config(cls, config_path: str) -> Dict[str, Any]:
         """
@@ -190,74 +226,39 @@ class ConfigurationInheritanceResolver:
         """
         base_config = cls._load_yaml_config(os.path.join(config_path, f"{config_name}.yaml"))
         env_config = cls._load_yaml_config(os.path.join(config_path, f"{config_name}.{environment}.yaml"))
-        return cls.resolve_inheritance(base_config, env_config)
+        
+        # Convert to OmegaConf for merging
+        base_config_obj = OmegaConf.create(base_config)
+        env_config_obj = OmegaConf.create(env_config)
+        
+        # Resolve inheritance
+        merged_config = cls.resolve_inheritance(base_config_obj, env_config_obj)
+        
+        # Convert back to dictionary
+        return OmegaConf.to_container(merged_config)
 
     @classmethod
-    def resolve_inheritance(cls, base_config: Dict[str, Any], override_config: Dict[str, Any]) -> Dict[str, Any]:
+    def resolve_inheritance(cls, base_config: Dict[str, Any], override_config: Dict[str, Any]) -> DictConfig:
         """
-        Resolve configuration inheritance with deep merging.
+        Resolve configuration inheritance with Hydra's OmegaConf deep merging.
         
         Args:
             base_config: Base configuration
             override_config: Configuration to override base
         
         Returns:
-            Merged configuration
+            Merged configuration as OmegaConf DictConfig
         """
-        # Create a deep copy to avoid modifying original configurations
-        merged_config = copy.deepcopy(base_config)
+        # Ensure both configs are OmegaConf instances
+        if not isinstance(base_config, DictConfig):
+            base_config = OmegaConf.create(base_config)
+        if not isinstance(override_config, DictConfig):
+            override_config = OmegaConf.create(override_config)
         
-        # Recursively merge configurations
-        def merge_dict(base, override):
-            for key, value in override.items():
-                if isinstance(value, dict) and key in base and isinstance(base[key], dict):
-                    # Recursively merge nested dictionaries
-                    base[key] = merge_dict(base[key], value)
-                else:
-                    # Override or add new key-value pairs
-                    base[key] = value
-            return base
-        
-        # Merge configurations
-        merged_config = merge_dict(merged_config, override_config)
+        # Perform deep merge
+        merged_config = OmegaConf.merge(base_config, override_config)
         
         return merged_config
-
-class DynamicConfigGenerator:
-    """
-    Utility class for generating dynamic configurations with advanced features.
-    """
-    
-    @classmethod
-    def generate_config_from_function(cls, config_generator: Callable[[], Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Generate a configuration by calling a configuration generator function.
-        
-        Args:
-            config_generator (callable): A function that returns a configuration dictionary
-        
-        Returns:
-            dict: Generated configuration
-        """
-        return config_generator()
-    
-    @classmethod
-    def generate_timestamped_config(cls, base_config: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Generate a timestamped configuration by adding metadata to a base configuration.
-        
-        Args:
-            base_config (dict): Base configuration dictionary
-        
-        Returns:
-            dict: Configuration with added metadata
-        """
-        timestamped_config = copy.deepcopy(base_config)
-        timestamped_config['_metadata'] = {
-            'generated_at': datetime.now().isoformat(),
-            'version': str(uuid.uuid4())[:8]
-        }
-        return timestamped_config
 
 class BaseAgentConfig(BaseModel):
     """
@@ -326,9 +327,9 @@ class BaseAgentConfig(BaseModel):
         
         # Try multiple file naming conventions
         config_file_variants = [
-            os.path.join(config_path, f'{config_name}_{environment}.yaml'),
-            os.path.join(config_path, f'{config_name}.yaml'),
-            os.path.join(config_path, f'{config_name}.yml')
+            os.path.join(config_path, f"{config_name}_{environment}.yaml"),
+            os.path.join(config_path, f"{config_name}.yaml"),
+            os.path.join(config_path, f"{config_name}.yml")
         ]
         
         config_file = None
@@ -488,20 +489,24 @@ class ModelConfig(BaseModel):
     def from_yaml(cls, config_path: str = None, config_name: str = 'base') -> 'ModelConfig':
         """
         Load model configuration from YAML using Hydra.
-        
+
         Args:
             config_path: Path to configuration directory
             config_name: Name of the configuration file
-        
+
         Returns:
             ModelConfig instance
         """
         if config_path is None:
-            config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config')
-        
-        with hydra.initialize(config_path=config_path):
-            cfg = hydra.compose(config_name=config_name)
-            return cls(**cfg.model)
+            config_path = os.path.join('..', '..', 'config')
+
+        try:
+            with hydra.initialize(config_path=config_path, version_base=None):
+                cfg = hydra.compose(config_name=config_name)
+                return cls(**cfg.model)
+        except Exception as e:
+            logging.error(f"Error loading model configuration: {e}")
+            raise ConfigurationError(f"Failed to load model configuration: {e}")
 
 class StepConfig(BaseModel):
     """Step configuration."""
@@ -550,6 +555,12 @@ class WorkflowStep(BaseModel):
 
 class WorkflowConfig(BaseModel):
     """Workflow configuration."""
+    model_config = ConfigDict(
+        extra='allow',
+        use_enum_values=True
+    )
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str = Field(default="default_workflow")
     max_iterations: int = Field(default=10)
     timeout: int = Field(default=3600)
@@ -559,25 +570,36 @@ class WorkflowConfig(BaseModel):
     retry_policy: Dict[str, Any] = Field(default_factory=lambda: {"max_retries": 3, "retry_delay": 1.0})
     error_policy: Dict[str, bool] = Field(default_factory=lambda: {"ignore_warnings": False, "fail_fast": True})
     steps: List[WorkflowStep] = Field(default_factory=list)
+    ell2a_config: Optional[Dict[str, Any]] = Field(default=None)
     
     @classmethod
-    def from_yaml(cls, config_path: str = None, config_name: str = 'base') -> 'WorkflowConfig':
+    def from_yaml(cls, config_path: str = None, config_name: str = 'base_workflow') -> 'WorkflowConfig':
         """
         Load workflow configuration from YAML using Hydra.
-        
+
         Args:
             config_path: Path to configuration directory
             config_name: Name of the configuration file
-        
+
         Returns:
             WorkflowConfig instance
         """
         if config_path is None:
-            config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config')
-        
-        with hydra.initialize(config_path=config_path):
-            cfg = hydra.compose(config_name=config_name)
-            return cls(**cfg.workflow)
+            config_path = os.path.join('..', '..', 'config')
+
+        try:
+            with hydra.initialize(config_path=config_path, version_base=None):
+                cfg = hydra.compose(config_name=config_name)
+                return cls(**cfg.workflow)
+        except Exception as e:
+            logging.error(f"Error loading workflow configuration: {e}")
+            # Return a default configuration if loading fails
+            return cls(
+                name="default_workflow",
+                max_iterations=10,
+                timeout=3600,
+                logging_level='INFO'
+            )
 
     async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Execute workflow.
@@ -606,6 +628,7 @@ class AgentConfig(BaseAgentConfig):
     name: str = Field(default="default_agent")
     type: str = Field(default="generic")
     version: str = Field(default="1.0.0")
+    system_prompt: Optional[str] = Field(default=None)
     
     @classmethod
     def from_yaml(cls, 
@@ -621,21 +644,49 @@ class AgentConfig(BaseAgentConfig):
         Returns:
             AgentConfig instance
         """
+        # Determine the relative path from the current file
         if config_path is None:
-            config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'agents')
+            config_path = os.path.join('..', '..', 'config', 'agents')
         
-        # Construct full path to the YAML file
-        yaml_file = os.path.join(config_path, f'{config_name}.yaml')
-        
-        # Read YAML file directly
-        with open(yaml_file, 'r', encoding='utf-8') as f:
-            config_dict = yaml.safe_load(f)
-        
-        # Extract agent configuration
-        agent_config = config_dict.get('agent', config_dict)
-        
-        return cls(**agent_config)
-    
+        try:
+            # Ensure the path is relative to the current file
+            base_dir = os.path.dirname(__file__)
+            relative_config_path = os.path.relpath(
+                os.path.normpath(os.path.join(base_dir, config_path)), 
+                base_dir
+            )
+            
+            with hydra.initialize(config_path=relative_config_path, version_base=None):
+                config_dict = hydra.compose(config_name=config_name)
+                
+                # Convert to dictionary to ensure mutability
+                config_dict = OmegaConf.to_container(config_dict, resolve=True)
+                
+                # Set default values for missing attributes
+                config_dict['name'] = config_dict.get('name', 'default_agent')
+                config_dict['type'] = config_dict.get('type', 'generic')
+                config_dict['version'] = config_dict.get('version', '1.0.0')
+                
+                # Add default capabilities if not present
+                config_dict['capabilities'] = config_dict.get('capabilities', ['generic_agent_capability'])
+                
+                # Add default optimization and other attributes
+                config_dict['optimization'] = config_dict.get('optimization', {
+                    'strategy': 'default_optimization',
+                    'goals': []
+                })
+                
+                # Add default workflow if not present
+                config_dict['workflow'] = config_dict.get('workflow', {
+                    'steps': [],
+                    'default_mode': 'sequential'
+                })
+                
+                return cls.from_dict(config_dict)
+        except Exception as e:
+            logging.error(f"Error loading agent configuration: {e}")
+            raise ConfigurationError(f"Failed to load agent configuration: {e}")
+
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'AgentConfig':
         """
@@ -661,23 +712,41 @@ class AgentConfig(BaseAgentConfig):
             if v is not None
         }
 
-def load_global_config(config_path: Optional[str] = None, config_name: str = 'base') -> ConfigDict:
+def load_global_config(config_path: Optional[str] = None, config_name: str = 'base') -> DictConfig:
     """
     Load the global configuration using Hydra with enhanced error handling.
-    
+
     Args:
         config_path: Path to configuration directory
         config_name: Name of the configuration file
-    
+
     Returns:
-        Global configuration as a ConfigDict
+        Global configuration as a DictConfig
     """
     if config_path is None:
-        config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config')
+        config_path = os.path.join('..', '..', 'config')
     
     try:
-        with hydra.initialize(config_path=config_path):
-            return hydra.compose(config_name=config_name)
+        # Ensure the path is relative to the current file
+        base_dir = os.path.dirname(__file__)
+        relative_config_path = os.path.relpath(
+            os.path.normpath(os.path.join(base_dir, config_path)), 
+            base_dir
+        )
+        
+        with hydra.initialize(config_path=relative_config_path, version_base=None):
+            config = hydra.compose(config_name=config_name)
+            
+            # Convert to dictionary to ensure mutability
+            config_dict = OmegaConf.to_container(config, resolve=True)
+            
+            # Create a new dictionary with the 'global_' key
+            config_dict['global_'] = {
+                'logging_level': config_dict.get('logging_level', 'INFO')
+            }
+            
+            # Convert back to OmegaConf
+            return OmegaConf.create(config_dict)
     except Exception as e:
         logging.error(f"Error loading global configuration: {e}")
         raise ConfigurationError(f"Failed to load global configuration: {e}")
@@ -702,7 +771,7 @@ def _parse_publication_goals(goals: Dict[str, Any]) -> Dict[str, Any]:
 
 class ConfigSecurityManagerHydra:
     @classmethod
-    def mask_sensitive_fields(cls, config: Union[Dict, ConfigDict, Any]) -> Dict:
+    def mask_sensitive_fields(cls, config: Union[Dict, DictConfig, Any]) -> Dict:
         """
         Mask sensitive fields in a configuration dictionary.
         
@@ -712,7 +781,7 @@ class ConfigSecurityManagerHydra:
         Returns:
             Configuration with sensitive fields masked
         """
-        sensitive_keys = ['password', 'key', 'secret', 'token']
+        sensitive_keys = ['password', 'key', 'secret', 'token', 'credentials', 'api_key', 'access_token', 'private_key', 'client_secret', 'email', 'phone', 'username', 'auth', 'authorization', 'bearer', 'jwt', 'session', 'cookie']
         
         def mask_recursive(cfg):
             if isinstance(cfg, dict):
@@ -720,17 +789,17 @@ class ConfigSecurityManagerHydra:
                 for k, v in cfg.items():
                     if any(sens_key in k.lower() for sens_key in sensitive_keys):
                         masked[k] = '***MASKED***'
-                    elif isinstance(v, (dict, ConfigDict)):
+                    elif isinstance(v, (dict, DictConfig)):
                         masked[k] = mask_recursive(v)
                     else:
                         masked[k] = v
                 return masked
-            elif isinstance(cfg, ConfigDict):
+            elif isinstance(cfg, DictConfig):
                 masked = {}
                 for k, v in cfg.items():
                     if any(sens_key in k.lower() for sens_key in sensitive_keys):
                         masked[k] = '***MASKED***'
-                    elif isinstance(v, (dict, ConfigDict)):
+                    elif isinstance(v, (dict, DictConfig)):
                         masked[k] = mask_recursive(v)
                     else:
                         masked[k] = v
@@ -755,7 +824,7 @@ class ConfigTypeConverterHydra:
             Converted value or original value
         """
         # If using Hydra's OmegaConf, leverage its type conversion
-        if isinstance(value, (ConfigDict, ListConfig)):
+        if isinstance(value, (DictConfig, ListConfig)):
             value = OmegaConf.to_container(value, resolve=True)
         
         def _convert_single_value(val, expected_type):
@@ -842,7 +911,7 @@ class ConfigTypeConverterHydra:
 
 class ConfigurationInheritanceResolverHydra:
     @classmethod
-    def resolve_inheritance(cls, base_config: Dict[str, Any], override_config: Dict[str, Any]) -> Dict[str, Any]:
+    def resolve_inheritance(cls, base_config: Dict[str, Any], override_config: Dict[str, Any]) -> DictConfig:
         """
         Resolve configuration inheritance with Hydra's OmegaConf deep merging.
         
@@ -851,32 +920,18 @@ class ConfigurationInheritanceResolverHydra:
             override_config: Configuration to override base
         
         Returns:
-            Merged configuration
+            Merged configuration as OmegaConf DictConfig
         """
         # Ensure both configs are OmegaConf instances
-        if not isinstance(base_config, ConfigDict):
-            base_config = ConfigDict(base_config)
-        if not isinstance(override_config, ConfigDict):
-            override_config = ConfigDict(override_config)
+        if not isinstance(base_config, DictConfig):
+            base_config = OmegaConf.create(base_config)
+        if not isinstance(override_config, DictConfig):
+            override_config = OmegaConf.create(override_config)
         
         # Perform deep merge
-        merged_config = ConfigDict({**base_config, **override_config})
+        merged_config = OmegaConf.merge(base_config, override_config)
         
-        # Convert to dictionary to ensure compatibility
-        merged_dict = dict(merged_config)
-        
-        # Create a custom dictionary with dot notation access
-        class DotDict(dict):
-            __getattr__ = dict.get
-            __setattr__ = dict.__setitem__
-            __delattr__ = dict.__delitem__
-        
-        def _convert_to_dot_dict(item):
-            if isinstance(item, dict):
-                return DotDict({k: _convert_to_dot_dict(v) for k, v in item.items()})
-            return item
-        
-        return _convert_to_dot_dict(merged_dict)
+        return merged_config
 
 class BaseAgentConfigHydra(BaseModel):
     """Base configuration for agents with Hydra integration."""
@@ -957,7 +1012,7 @@ class BaseAgentConfigHydra(BaseModel):
         """
         try:
             # Convert dictionary to OmegaConf for type resolution
-            cfg = ConfigDict(config_dict)
+            cfg = DictConfig(config_dict)
 
             # Validate and convert configuration
             validated_config = ConfigTypeConverterHydra.convert_value(
@@ -1010,3 +1065,54 @@ class DynamicConfigGenerator:
             'version': str(uuid.uuid4())[:8]
         }
         return timestamped_config
+
+from omegaconf import OmegaConf, DictConfig, ListConfig
+import logging
+
+def convert_type(value, target_type, schema=None, strict: bool = False) -> Any:
+    """
+    Convert a value to the specified target type with Hydra-enhanced type conversion.
+
+    Args:
+        value: The value to convert
+        target_type: The target type for conversion
+        schema: Schema for nested type validation
+        strict: If True, raises exceptions on conversion failures
+
+    Returns:
+        Converted value or original value
+    """
+    # If using Hydra's OmegaConf, leverage its type conversion
+    if isinstance(value, (DictConfig, ListConfig)):
+        try:
+            # Convert OmegaConf to a standard dictionary or list
+            value = OmegaConf.to_object(value)
+        except Exception as e:
+            logging.warning(f"Could not convert OmegaConf to object: {e}")
+    
+    # If the value is already of the target type, return it
+    if isinstance(value, target_type):
+        return value
+    
+    try:
+        # Handle nested type conversion for dictionaries
+        if target_type is dict and isinstance(value, dict):
+            if schema:
+                # Validate and convert nested dictionary according to schema
+                return {k: convert_type(v, schema.get(k, type(v)), strict=strict) for k, v in value.items()}
+            return value
+        
+        # Handle list type conversion
+        if target_type is list and isinstance(value, list):
+            return value
+        
+        # Attempt direct type conversion
+        return target_type(value)
+    
+    except (TypeError, ValueError) as e:
+        if strict:
+            raise TypeError(f"Could not convert {value} to {target_type}: {e}")
+        
+        # If conversion fails and strict is False, return the original value
+        logging.warning(f"Type conversion failed for {value} to {target_type}: {e}")
+        return value
