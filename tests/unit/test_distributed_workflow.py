@@ -6,9 +6,8 @@ from typing import Dict, Any
 import asyncio
 
 from agentflow.core.research_workflow import ResearchDistributedWorkflow
-from agentflow.core.workflow_types import WorkflowStepType
+from agentflow.core.workflow_types import WorkflowStepType, WorkflowConfig, ErrorPolicy
 from agentflow.core.exceptions import WorkflowExecutionError
-from agentflow.core.config import WorkflowConfig
 
 @pytest.fixture
 def setup_ray():
@@ -55,25 +54,20 @@ def test_workflow_def() -> Dict[str, Any]:
 @pytest.fixture
 def workflow_config() -> WorkflowConfig:
     """Test configuration."""
-    return WorkflowConfig(
-        id="test_workflow",
-        name="Test Distributed Workflow",
-        max_iterations=5,
-        timeout=3600,
-        logging_level="INFO",
-        required_fields=["test_input"],
-        error_handling={},
-        retry_policy={
-            "max_retries": 3,
-            "retry_delay": 0.1,
-            "retry_backoff": 1.5
-        },
-        error_policy={
-            "ignore_warnings": False,
-            "fail_fast": True
-        },
-        steps=[]
-    )
+    data = {
+        "id": "test_workflow",
+        "name": "Test Distributed Workflow",
+        "max_iterations": 5,
+        "timeout": 3600,
+        "logging_level": "INFO",
+        "error_policy": ErrorPolicy(
+            ignore_warnings=False,
+            fail_fast=True
+        ),
+        "distributed": True,
+        "steps": []
+    }
+    return WorkflowConfig.model_validate(data, context={"distributed": True})
 
 @pytest.mark.asyncio
 async def test_distributed_workflow_execution(setup_ray, test_workflow_def, workflow_config):

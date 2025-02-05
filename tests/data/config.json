@@ -1,1 +1,1 @@
-{"AGENT": {"name": "FileAgent", "type": "research", "version": "1.0.0", "workflow_path": "/Users/xingqiangchen/TASK/APOS/tests/data/workflow.json"}, "MODEL": {"provider": "openai", "name": "gpt-4"}, "WORKFLOW": {"max_iterations": 5, "steps": []}}
+{"name": "FileAgent", "type": "research", "version": "1.0.0", "mode": "sequential", "is_distributed": false, "model": {"provider": "openai", "name": "gpt-4"}, "workflow": {"max_iterations": 10, "distributed": false, "steps": []}}

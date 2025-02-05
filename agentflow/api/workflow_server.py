@@ -12,16 +12,18 @@ import ray
 import time
 import asyncio
 import traceback
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, validator, ValidationError
+from pydantic import BaseModel, Field, field_validator, ValidationError
 
-from agentflow.core.research_workflow import ResearchDistributedWorkflow, DistributedConfig
+from agentflow.core.distributed_workflow import ResearchDistributedWorkflow, DistributedConfig
 from agentflow.core.config import AgentConfig
+from agentflow.core.workflow import WorkflowEngine
+from agentflow.core.workflow_types import WorkflowConfig
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -67,39 +69,19 @@ app.add_middleware(
 )
 
 class WorkflowRequest(BaseModel):
-    """Workflow request model"""
-    workflow: Dict[str, Any] = Field(
-        default_factory=dict, 
-        description="Workflow configuration dictionary"
-    )
-    config: Dict[str, Any] = Field(
-        default_factory=dict, 
-        description="Workflow configuration options"
-    )
-    input_data: Dict[str, Any] = Field(
-        default_factory=dict, 
-        description="Input data for the workflow"
-    )
-
-    @validator('workflow')
-    def validate_workflow(cls, workflow):
-        """Validate workflow configuration"""
-        # Accept either 'workflow_steps' or 'WORKFLOW'
-        workflow_steps = workflow.get('workflow_steps') or workflow.get('WORKFLOW')
-        
-        if not workflow_steps:
-            raise ValueError("No workflow steps found")
-        
-        if not isinstance(workflow_steps, list):
-            raise ValueError("Workflow steps must be a list")
-        
-        for step in workflow_steps:
-            if not all(k in step for k in ['step', 'input', 'output']):
-                raise ValueError(f"Invalid step configuration: {step}")
-        
-        # Normalize workflow configuration
-        workflow['WORKFLOW'] = workflow_steps
-        return workflow
+    """Workflow request model."""
+    workflow: Dict[str, Any] = Field(description="Workflow configuration")
+    config: Dict[str, Any] = Field(default_factory=dict, description="Workflow configuration options")
+    input_data: Dict[str, Any] = Field(default_factory=dict, description="Input data for workflow")
+    
+    @field_validator('workflow')
+    def validate_workflow(cls, v):
+        """Validate workflow configuration."""
+        try:
+            WorkflowConfig(**v)
+            return v
+        except Exception as e:
+            raise ValueError(f"Invalid workflow configuration: {str(e)}")
 
 @app.exception_handler(ValidationError)
 async def validation_exception_handler(request: Request, exc: ValidationError):
@@ -135,8 +117,8 @@ async def execute_workflow(request: WorkflowRequest):
         # Validate input data
         input_data = request.input_data or {}
         
-        # Generate workflow ID
-        workflow_id = str(uuid.uuid4())
+        # Generate workflow ID if not provided
+        workflow_id = request.workflow.get('id', str(uuid.uuid4()))
         
         # Create distributed config from request config
         dist_config = DistributedConfig(
@@ -149,8 +131,9 @@ async def execute_workflow(request: WorkflowRequest):
 
         # Create workflow instance with proper name and config
         workflow = ResearchDistributedWorkflow(
-            name=f"workflow_{workflow_id}",
-            config=dist_config
+            name=request.workflow.get('name', f"workflow_{workflow_id}"),
+            config=dist_config.model_dump(),
+            steps=request.workflow.get('steps', [])
         )
         
         # Store workflow info
@@ -163,17 +146,9 @@ async def execute_workflow(request: WorkflowRequest):
             'error': None
         }
         
-        # Extract research parameters from input data
-        research_input = {
-            "RESEARCH_TOPIC": input_data.get("STUDENT_NEEDS", {}).get("RESEARCH_TOPIC", ""),
-            "ACADEMIC_LEVEL": input_data.get("STUDENT_NEEDS", {}).get("ACADEMIC_LEVEL", ""),
-            "LANGUAGE": input_data.get("LANGUAGE", {}),
-            "TEMPLATE": input_data.get("TEMPLATE", "")
-        }
-        
-        # Execute workflow with research input
+        # Execute workflow with input data
         try:
-            result = await workflow.execute(research_input)
+            result = await workflow.execute(input_data)
             task_refs[workflow_id]['status'] = 'completed'
             task_refs[workflow_id]['result'] = result
             
@@ -204,8 +179,8 @@ async def execute_workflow_async(request: WorkflowRequest, background_tasks: Bac
         # Validate input data
         input_data = request.input_data or {}
         
-        # Generate workflow ID
-        workflow_id = str(uuid.uuid4())
+        # Generate workflow ID if not provided
+        workflow_id = request.workflow.get('id', str(uuid.uuid4()))
         
         # Create distributed config from request config
         dist_config = DistributedConfig(
@@ -218,23 +193,16 @@ async def execute_workflow_async(request: WorkflowRequest, background_tasks: Bac
 
         # Create workflow instance with proper name and config
         workflow = ResearchDistributedWorkflow(
-            name=f"workflow_{workflow_id}",
-            config=dist_config
+            name=request.workflow.get('name', f"workflow_{workflow_id}"),
+            config=dist_config.model_dump(),
+            steps=request.workflow.get('steps', [])
         )
-        
-        # Extract research parameters from input data
-        research_input = {
-            "RESEARCH_TOPIC": input_data.get("STUDENT_NEEDS", {}).get("RESEARCH_TOPIC", ""),
-            "ACADEMIC_LEVEL": input_data.get("STUDENT_NEEDS", {}).get("ACADEMIC_LEVEL", ""),
-            "LANGUAGE": input_data.get("LANGUAGE", {}),
-            "TEMPLATE": input_data.get("TEMPLATE", "")
-        }
         
         # Store workflow info
         task_refs[workflow_id] = {
             'workflow_def': request.workflow,
             'config': request.config or {},
-            'input_data': research_input,
+            'input_data': input_data,
             'status': 'pending',
             'result': None,
             'error': None,
@@ -244,7 +212,7 @@ async def execute_workflow_async(request: WorkflowRequest, background_tasks: Bac
         # Start background task for execution
         async def execute_workflow_task():
             try:
-                result = await workflow.execute(research_input)
+                result = await workflow.execute(input_data)
                 task_refs[workflow_id]['status'] = 'completed'
                 task_refs[workflow_id]['result'] = result
             except Exception as e:

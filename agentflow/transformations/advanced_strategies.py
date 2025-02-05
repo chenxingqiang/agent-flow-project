@@ -76,7 +76,7 @@ class OutlierRemovalStrategy(AdvancedTransformationStrategy):
         # Get numeric columns only
         numeric_data = data.select_dtypes(include=[np.number])
         if numeric_data.empty:
-            return data if not is_numpy else data.values
+            return data.values if is_numpy else data
         
         if self.method == 'z_score':
             z_scores = np.abs(StandardScaler().fit_transform(numeric_data))
@@ -99,9 +99,9 @@ class OutlierRemovalStrategy(AdvancedTransformationStrategy):
             mask = predictions == 1  # 1 for inliers, -1 for outliers
         else:
             raise ValueError(f"Unknown outlier removal method: {self.method}")
-        
+            
         result = data[mask]
-        return result if not is_numpy else result.values
+        return result.values if is_numpy else result
 
 class FeatureEngineeringStrategy(AdvancedTransformationStrategy):
     """Strategy for feature engineering."""
@@ -145,7 +145,7 @@ class FeatureEngineeringStrategy(AdvancedTransformationStrategy):
         numeric_data = data.select_dtypes(include=[np.number])
         if numeric_data.empty:
             # If no numeric columns, return original data
-            return data
+            return data.values if isinstance(data, pd.DataFrame) else data
         
         if self.strategy == 'standard':
             scaler = StandardScaler()
@@ -156,7 +156,7 @@ class FeatureEngineeringStrategy(AdvancedTransformationStrategy):
             result = data.copy()
             for col in numeric_data.columns:
                 result[col] = transformed_df[col]
-            return result
+            return result.values if isinstance(data, np.ndarray) else result
             
         elif self.strategy == 'polynomial':
             poly = PolynomialFeatures(degree=self.params.get('degree', 2))
@@ -170,7 +170,7 @@ class FeatureEngineeringStrategy(AdvancedTransformationStrategy):
                 result = pd.concat([data[non_numeric_cols], transformed_df], axis=1)
             else:
                 result = transformed_df
-            return result
+            return result.values if isinstance(data, np.ndarray) else result
             
         else:
             raise ValueError(f"Unknown feature engineering strategy: {self.strategy}")

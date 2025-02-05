@@ -1,16 +1,11 @@
 """ISA Manager module."""
 
-from typing import Dict, Any, List, Optional, Union
-from ..config import AgentConfig
-
-class Instruction:
-    """Instruction class."""
-    def __init__(self, id: str, name: str, type: str, params: Dict[str, Any]):
-        """Initialize instruction."""
-        self.id = id
-        self.name = name
-        self.type = type
-        self.params = params
+from typing import Dict, Any, List, Optional, Union, Type, Callable
+from pydantic import BaseModel, Field
+from ..base_types import AgentType, AgentMode, AgentStatus
+from ..agent_config import AgentConfig
+from ..exceptions import ConfigurationError
+from .instruction import Instruction
 
 class ISAManager:
     """Manages the Instruction Set Architecture for agents."""

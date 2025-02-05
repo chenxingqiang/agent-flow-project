@@ -1,13 +1,16 @@
 """Transform executor module."""
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 import asyncio
 from .base_executor import BaseExecutor
 from .workflow_types import WorkflowStep
+from ..transformations.advanced_strategies import FeatureEngineeringStrategy, OutlierRemovalStrategy
+import numpy as np
+import pandas as pd
 
 class TransformExecutor(BaseExecutor):
     """Transform executor."""
 
-    async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, context: Dict[str, Any]) -> Union[pd.DataFrame, np.ndarray]:
         """Execute transform step."""
         try:
             # Get input data
@@ -22,8 +25,7 @@ class TransformExecutor(BaseExecutor):
             # Get execution function if available
             execute_fn = step_config.get("execute")
             if execute_fn and callable(execute_fn):
-                result = await execute_fn(data)
-                return {"data": result}
+                return await execute_fn(data)
 
             # Get strategy and parameters from config
             strategy = step_config.get("strategy")
@@ -35,30 +37,37 @@ class TransformExecutor(BaseExecutor):
 
             # Execute transform based on strategy
             if strategy == "feature_engineering":
-                result = await self._execute_feature_engineering(data, params)
+                return await self._execute_feature_engineering(data, params)
             elif strategy == "outlier_removal":
-                result = await self._execute_outlier_removal(data, params)
+                return await self._execute_outlier_removal(data, params)
             elif strategy == "anomaly_detection":
-                result = await self._execute_anomaly_detection(data, params)
+                return await self._execute_anomaly_detection(data, params)
             else:
                 raise ValueError(f"Unknown transformation strategy: {strategy}")
-
-            return {"data": result}
 
         except Exception as e:
             raise ValueError(f"Transform execution failed: {str(e)}")
 
-    async def _execute_feature_engineering(self, data: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_feature_engineering(self, data: Dict[str, Any], params: Dict[str, Any]) -> Union[pd.DataFrame, np.ndarray]:
         """Execute feature engineering transformation."""
-        # TODO: Implement feature engineering
-        return data
+        strategy = FeatureEngineeringStrategy(strategy=params.get('method', 'standard'), **params)
+        input_data = data.get('data')
+        if not isinstance(input_data, np.ndarray):
+            raise ValueError("Input data must be a numpy array")
+        return strategy.transform(input_data)
 
-    async def _execute_outlier_removal(self, data: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_outlier_removal(self, data: Dict[str, Any], params: Dict[str, Any]) -> Union[pd.DataFrame, np.ndarray]:
         """Execute outlier removal transformation."""
-        # TODO: Implement outlier removal
-        return data
+        strategy = OutlierRemovalStrategy(method=params.get('method', 'z_score'), threshold=params.get('threshold', 3.0))
+        input_data = data.get('data')
+        if not isinstance(input_data, np.ndarray):
+            raise ValueError("Input data must be a numpy array")
+        return strategy.transform(input_data)
 
-    async def _execute_anomaly_detection(self, data: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_anomaly_detection(self, data: Dict[str, Any], params: Dict[str, Any]) -> Union[pd.DataFrame, np.ndarray]:
         """Execute anomaly detection transformation."""
         # TODO: Implement anomaly detection
-        return data
+        input_data = data.get('data')
+        if not isinstance(input_data, (np.ndarray, pd.DataFrame)):
+            raise ValueError("Input data must be a numpy array or pandas DataFrame")
+        return input_data

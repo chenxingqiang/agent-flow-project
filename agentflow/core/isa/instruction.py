@@ -12,30 +12,13 @@ class InstructionType(str, Enum):
     SYSTEM = "SYSTEM"
 
 class Instruction:
-    """Represents an executable instruction."""
-
-    def __init__(
-        self,
-        id: str,
-        name: str,
-        type: InstructionType,
-        params: Optional[Dict[str, Any]] = None,
-        description: Optional[str] = None
-    ):
-        """
-        Initialize instruction.
-
-        Args:
-            id: Unique identifier
-            name: Instruction name
-            type: Instruction type
-            params: Parameter definitions
-            description: Optional description
-        """
+    """Instruction class."""
+    def __init__(self, id: str, name: str, type: str, params: Dict[str, Any], description: Optional[str] = None):
+        """Initialize instruction."""
         self.id = id
         self.name = name
         self.type = type
-        self.params = params or {}
+        self.params = params
         self.description = description or ""
 
     def validate_params(self, input_params: Dict[str, Any]) -> bool:

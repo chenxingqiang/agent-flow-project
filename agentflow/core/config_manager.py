@@ -78,7 +78,8 @@ class ConfigManager:
             if isinstance(config_dict, dict):
                 # Special handling for specific keys
                 if 'model' in config_dict:
-                    config_dict['model'] = ModelConfig(**config_dict['model'])
+                    if not isinstance(config_dict['model'], ModelConfig):
+                        config_dict['model'] = ModelConfig(**config_dict['model'])
                 
                 # Recursively convert nested dictionaries
                 for key, value in config_dict.items():

@@ -1,14 +1,22 @@
 """Core types module."""
 
-from enum import Enum
+from .base_types import (
+    AgentType,
+    AgentMode,
+    AgentStatus,
+    DictKeyType,
+    MessageType
+)
+from .workflow_types import WorkflowConfig
+from .agent_config import AgentConfig, ModelConfig
 
-class AgentStatus(Enum):
-    """Agent status enum."""
-    
-    INITIALIZED = "initialized"
-    IDLE = "idle"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    STOPPED = "stopped"
-    TERMINATED = "terminated" 
+__all__ = [
+    'AgentType',
+    'AgentMode',
+    'AgentStatus',
+    'DictKeyType',
+    'MessageType',
+    'WorkflowConfig',
+    'AgentConfig',
+    'ModelConfig'
+] 

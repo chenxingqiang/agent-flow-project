@@ -120,5 +120,14 @@ class MetricsManager:
         """Clear all metrics."""
         self.metrics = {}
 
+    async def cleanup(self) -> None:
+        """Clean up metrics manager resources."""
+        # Clear metrics
+        self.clear_metrics()
+        
+        # Clean up persistence if available
+        if self.persistence and hasattr(self.persistence, 'cleanup'):
+            await self.persistence.cleanup()
+
 # Alias for backward compatibility with existing tests
 MetricsCollector = MetricsManager

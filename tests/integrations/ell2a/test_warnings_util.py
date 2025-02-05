@@ -50,11 +50,15 @@ def test_no_api_key_warning_long_format():
 
 def test_no_api_key_warning_error_mode():
     """Test _no_api_key_warning in error mode."""
-    warning = _no_api_key_warning("gpt-3.5-turbo", None, error=True)
-    
-    # Verify error mode uses red color and ERROR prefix
-    assert "ERROR" in warning
-    assert Fore.RED in warning
+    try:
+        _no_api_key_warning("gpt-3.5-turbo", None, error=True)
+        pytest.fail("Expected ValueError to be raised")
+    except ValueError as e:
+        error_msg = str(e)
+        assert "ERROR" in error_msg
+        assert "No API key found" in error_msg
+        assert "OpenAIClient" in error_msg
+        assert "gpt-3.5-turbo" in error_msg
 
 def test_no_api_key_warning_with_custom_client():
     """Test _no_api_key_warning with a custom client."""
@@ -79,7 +83,8 @@ def test_warnings_unregistered_model(mocker):
     mock_logger = mocker.patch('agentflow.ell2a.util._warnings.logger')
     
     # Call _warnings
-    _warnings("gpt-3.5-turbo", mock_fn, None)
+    decorated_fn = _warnings("gpt-3.5-turbo")(mock_fn)
+    decorated_fn()
     
     # Verify warning was logged
     mock_logger.warning.assert_called_once()
@@ -87,8 +92,7 @@ def test_warnings_unregistered_model(mocker):
     
     assert "WARNING" in warning_msg
     assert "gpt-3.5-turbo" in warning_msg
-    assert "test_function" in warning_msg
-    assert "OpenAIClient" in warning_msg
+    assert "not registered" in warning_msg
     assert Fore.LIGHTYELLOW_EX in warning_msg
 
 def test_autocommit_warning(mocker):

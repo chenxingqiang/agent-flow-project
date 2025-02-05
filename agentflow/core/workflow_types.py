@@ -1,39 +1,66 @@
 """Workflow types and execution logic."""
 
-from enum import Enum
-from typing import List, Dict, Any, Optional, Set
-from dataclasses import dataclass, field
 import asyncio
 import networkx as nx
 import uuid
-from pydantic import BaseModel, Field, ConfigDict
+from enum import Enum
+from typing import Any, Dict, List, Optional, Union, ClassVar, Callable, Set, Coroutine, TypeVar, cast, Type
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict, ValidationInfo, ValidationError, PrivateAttr
+from pydantic.types import StrictBool
+from pydantic.error_wrappers import ValidationError as PydanticValidationError
+from pathlib import Path
+from datetime import datetime
+import os
+import yaml
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import IsolationForest
+import time
+import pandas as pd
 
-from .exceptions import WorkflowExecutionError
+from .exceptions import WorkflowExecutionError, ConfigurationError
+from .retry_policy import RetryPolicy as BaseRetryPolicy
+from .model_config import ModelConfig
 
-class WorkflowStepType(Enum):
-    """Types of workflow steps."""
+T = TypeVar('T', bound='WorkflowStep')
+C = TypeVar('C', bound='WorkflowConfig')
+
+class Message(BaseModel):
+    """Message class for workflow communication."""
+    
+    model_config = ConfigDict(
+        validate_assignment=True,
+        arbitrary_types_allowed=True,
+        use_enum_values=True
+    )
+    
+    content: Any = Field(default=None, description="Message content")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Message metadata")
+    timestamp: datetime = Field(default_factory=datetime.now, description="Message timestamp")
+    
+    def copy(self) -> 'Message':
+        """Create a deep copy of the message."""
+        return Message(
+            content=self.content,
+            metadata=self.metadata.copy(),
+            timestamp=self.timestamp
+        )
+
+class WorkflowStepType(str, Enum):
+    """Workflow step types."""
     TRANSFORM = "transform"
-    ANALYZE = "analyze"
-    VALIDATE = "validate"
+    FILTER = "filter"
     AGGREGATE = "aggregate"
-    CUSTOM = "custom"
+    ANALYZE = "analyze"
     RESEARCH_EXECUTION = "research_execution"
     DOCUMENT_GENERATION = "document_generation"
-    CODE_GENERATION = "code_generation"
-    FIGURE_GENERATION = "figure_generation"
-    VIDEO_GENERATION = "video_generation"
-    VOICE_GENERATION = "voice_generation"
+    AGENT = "agent"
 
-class WorkflowStatus(Enum):
-    """Status of a workflow."""
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    PAUSED = "paused"
+    def __str__(self) -> str:
+        """Return string representation of enum value."""
+        return self.value
 
-class StepStatus(Enum):
+class WorkflowStepStatus(Enum):
     """Status of a workflow step."""
     PENDING = "pending"
     RUNNING = "running"
@@ -43,232 +70,645 @@ class StepStatus(Enum):
     CANCELLED = "cancelled"
     BLOCKED = "blocked"  # Waiting for dependencies
 
-@dataclass
-class StepConfig:
-    """Configuration for a workflow step."""
-    strategy: str
-    params: Dict[str, Any] = field(default_factory=dict)
+class WorkflowStatus(str, Enum):
+    """Workflow status enum."""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SUCCESS = "success"
 
-@dataclass
-class WorkflowStep:
-    """A step in a workflow."""
-    id: str
-    name: str
-    type: WorkflowStepType
-    config: StepConfig
-    dependencies: List[str] = field(default_factory=list)
-    
-    def validate(self) -> None:
-        """Validate step configuration."""
-        # Validate step type
-        if not isinstance(self.type, WorkflowStepType):
-            try:
-                self.type = WorkflowStepType(self.type)
-            except (ValueError, TypeError):
-                raise WorkflowExecutionError(f"Invalid step type: {self.type}")
-            
-        # Validate strategy based on step type
+class RetryPolicy(BaseModel):
+    """Retry policy configuration."""
+    max_retries: int = Field(default=3, ge=0)
+    retry_delay: float = Field(default=1.0, ge=0.0)
+    backoff: float = Field(default=2.0, ge=1.0)
+    max_delay: float = Field(default=60.0, ge=0.0)
+    jitter: bool = True
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return super().model_dump(**kwargs)
+
+class ErrorPolicy(BaseModel):
+    """Error policy configuration."""
+    fail_fast: bool = True
+    ignore_warnings: bool = False
+    max_errors: int = Field(default=10, ge=0)
+    retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
+    continue_on_error: bool = False
+
+    def __getitem__(self, key: str) -> Any:
+        """Get item by key."""
+        if key == "retry_policy":
+            return self.retry_policy.model_dump()
+        return getattr(self, key)
+
+    def __contains__(self, key: str) -> bool:
+        """Check if key exists."""
+        return hasattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get value by key."""
+        try:
+            return self[key]
+        except (KeyError, AttributeError):
+            return default
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        data = super().model_dump(**kwargs)
+        if isinstance(data.get('retry_policy'), RetryPolicy):
+            data['retry_policy'] = data['retry_policy'].model_dump()
+        return data
+
+class StepConfig(BaseModel):
+    """Step configuration."""
+    strategy: str = "standard"
+    params: Dict[str, Any] = Field(default_factory=dict)
+    retry_delay: float = Field(default=1.0, ge=0.0)
+    retry_backoff: float = Field(default=2.0, ge=1.0)
+    max_retries: int = Field(default=3, ge=0)
+    execute: Optional[Callable[..., Coroutine[Any, Any, Dict[str, Any]]]] = None
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        data = super().model_dump(**kwargs)
+        # Skip execute function when dumping
+        if 'execute' in data:
+            del data['execute']
+        return data
+
+class WorkflowStep(BaseModel):
+    """Workflow step configuration."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = Field(default="")
+    type: WorkflowStepType = Field(default=WorkflowStepType.TRANSFORM)
+    required: bool = True
+    optional: bool = False
+    is_distributed: bool = False
+    dependencies: List[str] = Field(default_factory=list)
+    config: StepConfig = Field(default_factory=StepConfig)
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        data = super().model_dump(**kwargs)
+        return data
+
+    @classmethod
+    def model_validate(cls, obj: Any, **kwargs) -> 'WorkflowStep':
+        """Validate and create instance."""
+        if isinstance(obj, dict):
+            if 'config' in obj and isinstance(obj['config'], dict):
+                obj['config'] = StepConfig(**obj['config'])
+            return super().model_validate(obj, **kwargs)
+        return obj
+
+    async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute workflow step."""
+        # Convert Message object to dictionary if needed
+        if not isinstance(context, dict) and hasattr(context, 'model_dump'):
+            context = context.model_dump()
+        elif not isinstance(context, dict):
+            context = {"data": context}
+
+        # Execute step function if available
+        if self.config.execute is not None and callable(self.config.execute):
+            return await self.config.execute(context)
+
+        # Handle different step types
         if self.type == WorkflowStepType.TRANSFORM:
-            valid_strategies = {"feature_engineering", "outlier_removal", "standard"}
-            if self.config.strategy not in valid_strategies:
-                raise WorkflowExecutionError(
-                    f"Invalid strategy for transform step: {self.config.strategy}. "
-                    f"Valid strategies are: {', '.join(valid_strategies)}"
-                )
-        elif self.type == WorkflowStepType.ANALYZE:
-            valid_strategies = {"statistical", "exploratory", "diagnostic"}
-            if self.config.strategy not in valid_strategies:
-                raise WorkflowExecutionError(
-                    f"Invalid strategy for analyze step: {self.config.strategy}. "
-                    f"Valid strategies are: {', '.join(valid_strategies)}"
-                )
-        elif self.type == WorkflowStepType.VALIDATE:
-            valid_strategies = {"schema", "data_quality", "business_rules"}
-            if self.config.strategy not in valid_strategies:
-                raise WorkflowExecutionError(
-                    f"Invalid strategy for validate step: {self.config.strategy}. "
-                    f"Valid strategies are: {', '.join(valid_strategies)}"
-                )
+            return await self._execute_transform(context)
+        elif self.type == WorkflowStepType.FILTER:
+            return await self._execute_filter(context)
         elif self.type == WorkflowStepType.AGGREGATE:
-            valid_strategies = {"sum", "mean", "custom"}
-            if self.config.strategy not in valid_strategies:
-                raise WorkflowExecutionError(
-                    f"Invalid strategy for aggregate step: {self.config.strategy}. "
-                    f"Valid strategies are: {', '.join(valid_strategies)}"
-                )
+            return await self._execute_aggregate(context)
+        elif self.type == WorkflowStepType.ANALYZE:
+            return await self._execute_analyze(context)
         elif self.type == WorkflowStepType.RESEARCH_EXECUTION:
-            valid_strategies = {"literature_review", "data_collection", "analysis"}
-            if self.config.strategy not in valid_strategies:
-                raise WorkflowExecutionError(
-                    f"Invalid strategy for research execution step: {self.config.strategy}. "
-                    f"Valid strategies are: {', '.join(valid_strategies)}"
-                )
+            return await self._execute_research(context)
         elif self.type == WorkflowStepType.DOCUMENT_GENERATION:
-            valid_strategies = {"markdown", "latex", "html", "pdf"}
-            if self.config.strategy not in valid_strategies:
-                raise WorkflowExecutionError(
-                    f"Invalid strategy for document generation step: {self.config.strategy}. "
-                    f"Valid strategies are: {', '.join(valid_strategies)}"
-                )
-        elif self.type == WorkflowStepType.CODE_GENERATION:
-            valid_strategies = {"python", "javascript", "typescript", "java", "cpp", "custom"}
-            if self.config.strategy not in valid_strategies:
-                raise WorkflowExecutionError(
-                    f"Invalid strategy for code generation step: {self.config.strategy}. "
-                    f"Valid strategies are: {', '.join(valid_strategies)}"
-                )
-        elif self.type == WorkflowStepType.FIGURE_GENERATION:
-            valid_strategies = {"matplotlib", "plotly", "seaborn", "custom"}
-            if self.config.strategy not in valid_strategies:
-                raise WorkflowExecutionError(
-                    f"Invalid strategy for figure generation step: {self.config.strategy}. "
-                    f"Valid strategies are: {', '.join(valid_strategies)}"
-                )
-        elif self.type == WorkflowStepType.VIDEO_GENERATION:
-            valid_strategies = {"animation", "slideshow", "screen_recording", "custom"}
-            if self.config.strategy not in valid_strategies:
-                raise WorkflowExecutionError(
-                    f"Invalid strategy for video generation step: {self.config.strategy}. "
-                    f"Valid strategies are: {', '.join(valid_strategies)}"
-                )
-        elif self.type == WorkflowStepType.VOICE_GENERATION:
-            valid_strategies = {"text_to_speech", "voice_cloning", "custom"}
-            if self.config.strategy not in valid_strategies:
-                raise WorkflowExecutionError(
-                    f"Invalid strategy for voice generation step: {self.config.strategy}. "
-                    f"Valid strategies are: {', '.join(valid_strategies)}"
-                )
+            return await self._execute_document_generation(context)
+        elif self.type == WorkflowStepType.AGENT:
+            raise WorkflowExecutionError(f"Agent step type requires an agent to be configured for step {self.id}")
+
+        # Return the data in a standardized format
+        return {"data": context.get("data", None)}
+
+    async def _execute_transform(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute transform step."""
+        if self.config.strategy == "feature_engineering":
+            data = context.get("data")
+            if not isinstance(data, (list, np.ndarray)):
+                raise WorkflowExecutionError(f"Transform step {self.id} requires numeric data")
+            # Convert data to numpy array
+            data = np.asarray(data)
+            params = self.config.params
+            method = params.get("method", "standard")
+            if method == "standard":
+                with_mean = params.get("with_mean", True)
+                with_std = params.get("with_std", True)
+                mean = np.mean(data, axis=0) if with_mean else 0
+                std = np.std(data, axis=0) if with_std else 1
+                transformed_data = (data - mean) / std
+                return {"data": transformed_data}
+            elif method == "isolation_forest":
+                threshold = params.get("threshold", 0.1)
+                mean = np.mean(data, axis=0)
+                std = np.std(data, axis=0)
+                z_scores = np.abs((data - mean) / std)
+                outliers = np.any(z_scores > threshold, axis=1)
+                transformed_data = data[~outliers]
+                return {"data": transformed_data}
+        return {"data": context.get("data")}
+
+    async def _execute_filter(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute filter step."""
+        data = context.get("data")
+        if not isinstance(data, (list, dict)):
+            raise WorkflowExecutionError(f"Filter step {self.id} requires list or dict data")
+        params = self.config.params
+        if isinstance(data, list):
+            condition = params.get("condition", lambda x: True)
+            filtered_data = [x for x in data if condition(x)]
+        else:
+            condition = params.get("condition", lambda k, v: True)
+            filtered_data = {k: v for k, v in data.items() if condition(k, v)}
+        return {"data": filtered_data}
+
+    async def _execute_aggregate(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute aggregate step."""
+        data = context.get("data")
+        if not isinstance(data, (list, dict)):
+            raise WorkflowExecutionError(f"Aggregate step {self.id} requires list or dict data")
+        params = self.config.params
+        method = params.get("method", "sum")
+        if method == "sum":
+            result = sum(data) if isinstance(data, list) else sum(data.values())
+        elif method == "mean":
+            result = np.mean(data) if isinstance(data, list) else np.mean(list(data.values()))
+        else:
+            result = data
+        return {"data": result}
+
+    async def _execute_analyze(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute analyze step."""
+        data = context.get("data")
+        if not isinstance(data, (list, dict, np.ndarray)):
+            raise WorkflowExecutionError(f"Analyze step {self.id} requires list, dict, or array data")
+        params = self.config.params
+        method = params.get("method", "basic_stats")
+        if method == "basic_stats":
+            if isinstance(data, (list, np.ndarray)):
+                result = {
+                    "mean": float(np.mean(data)),
+                    "std": float(np.std(data)),
+                    "min": float(np.min(data)),
+                    "max": float(np.max(data))
+                }
+            else:
+                result = {
+                    "count": len(data),
+                    "keys": list(data.keys())
+                }
+        else:
+            result = {"data": data}
+        return {"data": result}
+
+    async def _execute_research(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute research step."""
+        raise WorkflowExecutionError(f"Research execution step {self.id} requires a research agent to be configured")
+
+    async def _execute_document_generation(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute document generation step."""
+        raise WorkflowExecutionError(f"Document generation step {self.id} requires a document generation agent to be configured")
 
 class WorkflowConfig(BaseModel):
-    """Configuration for a workflow."""
-    model_config = ConfigDict(frozen=False, validate_assignment=True)
-    
-    name: str = Field(default="")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    max_iterations: int = Field(default=10)
-    max_retries: int = Field(default=3)
-    timeout: float = Field(default=300.0)
-    steps: List[WorkflowStep] = Field(default_factory=list)
-    use_ell2a: bool = Field(default=False)
-    ell2a_mode: str = Field(default="simple")
-    ell2a_config: Dict[str, Any] = Field(default_factory=lambda: {
-        "model": "gpt-4",
-        "max_tokens": 2000,
-        "temperature": 0.7,
-        "tools": [],
-        "stream": False,
-        "simple": {
-            "max_retries": 3,
-            "retry_delay": 1.0,
-            "timeout": 30.0
-        },
-        "complex": {
-            "max_retries": 3,
-            "retry_delay": 1.0,
-            "timeout": 60.0,
-            "track_performance": True,
-            "track_memory": True
-        }
-    })
-    required_fields: List[str] = Field(default_factory=list)
-    error_handling: Dict[str, Any] = Field(default_factory=dict)
-    retry_policy: Optional[Dict[str, Any]] = Field(default=None)
-    error_policy: Optional[Dict[str, Any]] = Field(default=None)
-    is_distributed: bool = Field(default=False)
-    distributed: bool = Field(default=False)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    agents: Dict[str, Any] = Field(default_factory=dict)
-    logging_level: str = Field(default="INFO")
-    
-    def _validate_dependencies(self) -> None:
-        """Validate step dependencies."""
-        # Build dependency graph
-        graph = nx.DiGraph()
-        step_ids = {step.id for step in self.steps}
-        
-        for step in self.steps:
-            graph.add_node(step.id)
-            for dep in step.dependencies:
-                if dep not in step_ids:
-                    raise WorkflowExecutionError(
-                        f"Missing dependency '{dep}' for step '{step.id}'"
-                    )
-                graph.add_edge(dep, step.id)
-                
-        # Check for cycles
-        try:
-            cycles = list(nx.simple_cycles(graph))
-            if cycles:
-                raise WorkflowExecutionError(
-                    f"Circular dependencies detected: {cycles}"
-                )
-        except nx.NetworkXNoCycle:
-            pass
-    
-    def _get_execution_order(self) -> List[str]:
-        """Get step execution order based on dependencies."""
-        if not self.steps:
-            return []
-            
-        graph = nx.DiGraph()
-        for step in self.steps:
-            graph.add_node(step.id)
-            for dep in step.dependencies:
-                graph.add_edge(dep, step.id)
-                
-        try:
-            return list(nx.topological_sort(graph))
-        except nx.NetworkXUnfeasible as e:
-            raise WorkflowExecutionError("Invalid step dependencies") from e
+    """Workflow configuration."""
+    model_config = ConfigDict(
+        validate_assignment=True,
+        arbitrary_types_allowed=True,
+        use_enum_values=True
+    )
 
-    async def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute workflow steps.
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = Field(default="default_workflow")
+    type: str = "sequential"
+    steps: List[WorkflowStep] = Field(default_factory=list)
+    max_iterations: int = Field(default=3, ge=0)
+    timeout: float = Field(default=300.0, ge=0)
+    logging_level: str = "INFO"
+    distributed: bool = False
+    error_policy: ErrorPolicy = Field(default_factory=ErrorPolicy)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator('steps')
+    @classmethod
+    def validate_steps(cls, v: List[WorkflowStep], info: ValidationInfo) -> List[WorkflowStep]:
+        """Validate steps list."""
+        # Allow empty steps list during initialization or if explicitly allowed
+        if info.context and (
+            info.context.get("allow_empty_steps") or
+            info.context.get("is_initialization", False)
+        ):
+            return v
+        # Allow empty steps for distributed workflows
+        if info.context and info.context.get("distributed", False):
+            return v
+        if not v:
+            raise ValueError("Workflow steps list cannot be empty")
+        return v
+
+    def get_step(self, step_id: str) -> Optional[WorkflowStep]:
+        """Get a step by its ID.
         
         Args:
-            data: Input data for workflow
+            step_id: The ID of the step to get.
             
         Returns:
-            Workflow execution results
+            The step with the given ID, or None if not found.
+        """
+        for step in self.steps:
+            if step.id == step_id:
+                return step
+        return None
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        data = super().model_dump(**kwargs)
+        # Ensure steps is a list of dictionaries
+        if isinstance(data.get('steps'), list):
+            data['steps'] = [
+                step.model_dump() if hasattr(step, 'model_dump') else step
+                for step in data['steps']
+            ]
+        # Convert error policy to dictionary
+        if isinstance(data.get('error_policy'), ErrorPolicy):
+            data['error_policy'] = data['error_policy'].model_dump()
+        return data
+
+    @classmethod
+    def model_validate(cls, obj: Any, **kwargs) -> 'WorkflowConfig':
+        """Validate and create instance."""
+        if isinstance(obj, dict):
+            # Convert steps to proper format if needed
+            if 'steps' in obj and isinstance(obj['steps'], list):
+                obj['steps'] = [
+                    WorkflowStep.model_validate(step) if not isinstance(step, WorkflowStep) else step
+                    for step in obj['steps']
+                ]
+            # Convert error policy to proper format if needed
+            if 'error_policy' in obj and not isinstance(obj['error_policy'], ErrorPolicy):
+                if isinstance(obj['error_policy'], dict):
+                    obj['error_policy'] = ErrorPolicy(**obj['error_policy'])
+                elif hasattr(obj['error_policy'], 'model_dump'):
+                    obj['error_policy'] = ErrorPolicy(**obj['error_policy'].model_dump())
+                elif hasattr(obj['error_policy'], 'dict'):
+                    obj['error_policy'] = ErrorPolicy(**obj['error_policy'].dict())
+        return super().model_validate(obj, **kwargs)
+
+class WorkflowMetrics(BaseModel):
+    """Metrics for workflow execution."""
+    
+    model_config = ConfigDict(
+        validate_assignment=True,
+        arbitrary_types_allowed=True,
+        extra='allow'
+    )
+
+    # Public fields
+    total_steps: int = Field(default=0)
+    completed_steps: int = Field(default=0)
+    failed_steps: int = Field(default=0)
+    retried_steps: Set[str] = Field(default_factory=set)
+    task_durations: List[float] = Field(default_factory=list)
+    step_metrics: Dict[str, Dict[str, Any]] = Field(default_factory=lambda: {
+        'duration': {},
+        'retries': {},
+        'status': {},
+        'errors': {},
+        'dependencies': {}
+    })
+
+    def initialize_step(self, step_id: str) -> None:
+        """Initialize metrics for a new step."""
+        self.step_metrics['duration'][step_id] = 0.0
+        self.step_metrics['retries'][step_id] = 0
+        self.step_metrics['status'][step_id] = 'pending'
+        self.step_metrics['errors'][step_id] = []
+
+    def update_step_duration(self, step_id: str, duration: float) -> None:
+        """Update duration for a step."""
+        self.step_metrics['duration'][step_id] = duration
+        self.task_durations.append(duration)
+
+    def increment_step_retries(self, step_id: str) -> None:
+        """Increment retry count for a step."""
+        if step_id not in self.retried_steps:
+            self.retried_steps.add(step_id)
+        self.step_metrics['retries'][step_id] += 1
+
+    def update_step_status(self, step_id: str, status: str) -> None:
+        """Update status for a step."""
+        self.step_metrics['status'][step_id] = status
+        if status == 'completed':
+            self.completed_steps += 1
+        elif status == 'failed':
+            self.failed_steps += 1
+
+    def add_step_error(self, step_id: str, error: str) -> None:
+        """Add error for a step."""
+        self.step_metrics['errors'][step_id].append(error)
+
+    def get_step_metrics(self, step_id: str) -> Dict[str, Any]:
+        """Get metrics for a specific step."""
+        return {
+            'duration': self.step_metrics['duration'].get(step_id, 0.0),
+            'retries': self.step_metrics['retries'].get(step_id, 0),
+            'status': self.step_metrics['status'].get(step_id, 'unknown'),
+            'errors': self.step_metrics['errors'].get(step_id, [])
+        }
+
+class Workflow:
+    """Workflow execution engine."""
+    
+    def __init__(self, config: WorkflowConfig):
+        """Initialize workflow with configuration."""
+        self.config = config
+        self.error_policy = ErrorPolicy()
+        if isinstance(config.error_policy, dict):
+            self.error_policy = ErrorPolicy(**config.error_policy)
+        else:
+            self.error_policy = config.error_policy
+        
+    async def execute(self, data: Dict[str, Any] = Field(default_factory=dict)) -> Dict[str, Any]:
+        """Execute the workflow.
+        
+        Args:
+            data: Input data for workflow execution
+            
+        Returns:
+            Dict containing execution results
             
         Raises:
-            WorkflowExecutionError: If workflow execution fails
+            WorkflowExecutionError: If execution fails
         """
-        # Handle empty workflow
-        if not self.steps:
-            return {}
+        if data is None:
+            data = {}
             
-        # Validate steps
-        for step in self.steps:
-            try:
-                step.validate()
-            except WorkflowExecutionError as e:
-                raise WorkflowExecutionError(f"Step validation failed for {step.id}: {str(e)}")
-            
-        # Validate dependencies
-        try:
-            self._validate_dependencies()
-        except WorkflowExecutionError as e:
-            raise WorkflowExecutionError(f"Dependency validation failed: {str(e)}")
-        
-        # Get execution order
-        try:
-            execution_order = self._get_execution_order()
-        except WorkflowExecutionError as e:
-            raise WorkflowExecutionError(f"Failed to determine execution order: {str(e)}")
-            
-        # Execute steps
         results = {}
-        step_map = {step.id: step for step in self.steps}
+        context = data.copy()
+        completed_steps = set()
         
-        try:
-            for step_id in execution_order:
-                step = step_map[step_id]
-                # Execute step (mock implementation)
-                results[step_id] = {
-                    "status": "success",
-                    "output": data  # Just pass through data for now
+        for step in self.config.steps:
+            try:
+                # Validate dependencies
+                if step.dependencies:
+                    for dep_id in step.dependencies:
+                        if dep_id not in completed_steps:
+                            raise WorkflowExecutionError(f"Missing dependency '{dep_id}' required by step '{step.id}'")
+                
+                step_result = await step.execute(context)
+                results[step.id] = {
+                    "output": {
+                        "data": step_result.get("data"),
+                        "result": step_result.get("result"),
+                        "metadata": step_result.get("metadata", {})
+                    }
                 }
-        except Exception as e:
-            raise WorkflowExecutionError(f"Step execution failed: {str(e)}")
-            
+                context.update(step_result)
+                completed_steps.add(step.id)
+            except Exception as e:
+                if self.error_policy.fail_fast:
+                    raise WorkflowExecutionError(f"Error executing step {step.id}: {str(e)}") from e
+                if not self.error_policy.ignore_warnings:
+                    results["warnings"] = results.get("warnings", []) + [str(e)]
+                    
         return results
+
+class AgentConfig(BaseModel):
+    """Configuration for an agent."""
+
+    model_config = ConfigDict(
+        validate_assignment=True,
+        arbitrary_types_allowed=True,
+        use_enum_values=True
+    )
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = Field(default="default_agent")
+    type: str = "generic"
+    version: str = "1.0.0"
+    max_retries: int = Field(default=3, ge=0)
+    mode: str = "sequential"
+    distributed: bool = False
+    system_prompt: Optional[str] = None
+    model: Union[Dict[str, Any], ModelConfig] = Field(default_factory=lambda: ModelConfig(name="gpt-3.5-turbo", provider="openai"))
+    workflow: Dict[str, Any] = Field(default_factory=dict)
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    research_context: Dict[str, Any] = Field(default_factory=dict)
+    data_science_context: Dict[str, Any] = Field(default_factory=dict)
+    custom_attribute: str = Field(default="custom")
+    domain_config: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode='after')
+    @classmethod
+    def validate_model_provider(cls, data: Any) -> Any:
+        """Validate model provider after model is instantiated."""
+        valid_providers = {'openai', 'anthropic', 'mistral', 'cohere', 'ai21', 'default'}
+        
+        if isinstance(data.model, dict):
+            try:
+                data.model = ModelConfig(**data.model)
+            except Exception as e:
+                raise ValueError(f"Invalid model configuration: {e}")
+        
+        if isinstance(data.model, ModelConfig):
+            if data.model.provider not in valid_providers:
+                raise ValueError(f"Invalid model provider: {data.model.provider}. Must be one of {valid_providers}")
+        
+        return data
+
+    @field_validator('workflow')
+    @classmethod
+    def validate_workflow(cls, v: Optional[Union[Dict[str, Any], WorkflowConfig]]) -> Dict[str, Any]:
+        """Validate the workflow configuration."""
+        if v is None:
+            return {}
+        if isinstance(v, WorkflowConfig):
+            return v.model_dump()
+        if isinstance(v, dict):
+            try:
+                if "name" not in v and "id" not in v:
+                    v["name"] = "default"
+                    v["id"] = str(uuid.uuid4())
+                workflow_config = WorkflowConfig(**v)
+                return workflow_config.model_dump()
+            except ValidationError as e:
+                raise ValueError(f"Invalid workflow configuration: {e}")
+        raise ValueError("Workflow must be either a dictionary or WorkflowConfig instance")
+
+    @field_validator('type')
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        """Validate the agent type."""
+        valid_types = {"generic", "research", "data_science", "custom"}
+        if v not in valid_types:
+            raise ValueError(f"Invalid type: {v}. Must be one of {valid_types}")
+        return v
+
+    @field_validator('mode')
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        """Validate the agent mode."""
+        valid_modes = {"sequential", "parallel", "simple"}
+        if v not in valid_modes:
+            raise ValueError(f"Invalid mode: {v}. Must be one of {valid_modes}")
+        return v
+
+    @property
+    def is_distributed(self) -> bool:
+        """Check if agent is distributed."""
+        if self.distributed:
+            return True
+        if isinstance(self.workflow, dict) and self.workflow.get("distributed", False):
+            return True
+        return False
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a value from the configuration."""
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            return default
+
+    def __getitem__(self, key: str) -> Any:
+        """Get item by key."""
+        return self.get(key)
+
+    def __contains__(self, key: str) -> bool:
+        """Check if key exists."""
+        try:
+            getattr(self, key)
+            return True
+        except AttributeError:
+            return False
+
+class WorkflowContext(BaseModel):
+    """Context for workflow execution."""
+    
+    model_config = ConfigDict(
+        validate_assignment=True,
+        arbitrary_types_allowed=True,
+        use_enum_values=True
+    )
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = Field(default="default_context")
+    data: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    status: WorkflowStatus = Field(default=WorkflowStatus.PENDING)
+    error: Optional[str] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    step_results: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    metrics: WorkflowMetrics = Field(default_factory=WorkflowMetrics)
+
+    def update(self, data: Dict[str, Any]) -> None:
+        """Update context with new data."""
+        self.data.update(data)
+
+    def get_step_result(self, step_id: str) -> Optional[Dict[str, Any]]:
+        """Get result for a specific step."""
+        return self.step_results.get(step_id)
+
+    def set_step_result(self, step_id: str, result: Dict[str, Any]) -> None:
+        """Set result for a specific step."""
+        self.step_results[step_id] = result
+
+    def start(self) -> None:
+        """Start workflow execution."""
+        self.start_time = datetime.now()
+        self.status = WorkflowStatus.RUNNING
+
+    def complete(self) -> None:
+        """Complete workflow execution."""
+        self.end_time = datetime.now()
+        self.status = WorkflowStatus.COMPLETED
+
+    def fail(self, error: str) -> None:
+        """Mark workflow as failed."""
+        self.end_time = datetime.now()
+        self.status = WorkflowStatus.FAILED
+        self.error = error
+
+    def get_duration(self) -> Optional[float]:
+        """Get workflow execution duration in seconds."""
+        if self.start_time and self.end_time:
+            return (self.end_time - self.start_time).total_seconds()
+        return None
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        """Convert the model to a dictionary."""
+        data = super().model_dump(**kwargs)
+        if self.metrics:
+            data['metrics'] = self.metrics.model_dump(**kwargs)
+        else:
+            data['metrics'] = {}
+        return data
+
+    def __getitem__(self, key: str) -> Any:
+        """Get item by key."""
+        if key in self.data:
+            return self.data[key]
+        return getattr(self, key)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Set item by key."""
+        if hasattr(self, key):
+            setattr(self, key, value)
+        else:
+            self.data[key] = value
+
+    def __contains__(self, key: str) -> bool:
+        """Check if key exists."""
+        return key in self.data or hasattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a value with a default."""
+        try:
+            return self[key]
+        except (KeyError, AttributeError):
+            return default
+
+def has_circular_dependency(dependencies: Dict[str, List[str]]) -> bool:
+    """Check if there are circular dependencies in the graph.
+    
+    Args:
+        dependencies: Dictionary mapping step IDs to their dependencies
+        
+    Returns:
+        bool: True if circular dependencies exist, False otherwise
+    """
+    visited = set()
+    path = set()
+    
+    def visit(node: str) -> bool:
+        if node in path:
+            return True
+        if node in visited:
+            return False
+            
+        visited.add(node)
+        path.add(node)
+        
+        for neighbor in dependencies.get(node, []):
+            if visit(neighbor):
+                return True
+                
+        path.remove(node)
+        return False
+    
+    return any(visit(node) for node in dependencies)

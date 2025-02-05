@@ -2,7 +2,8 @@
 
 import pytest
 import os
-from agentflow.agents.agent import Agent, AgentConfig
+from agentflow.agents.agent import Agent
+from agentflow.core.config import AgentConfig
 from agentflow.core.isa.isa_manager import Instruction, InstructionType, InstructionStatus
 from agentflow.core.isa.types import AgentType
 from datetime import datetime

@@ -1,13 +1,16 @@
 """Intelligent instruction selection and optimization"""
 
-from typing import Dict, Any, List, Set
+from typing import Dict, Any, List, Set, Optional, Union, Type, Callable
 import logging
 from dataclasses import dataclass
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from .adaptive_weights import AdaptiveWeights, WeightConfig
-from .isa.isa_manager import Instruction
+from .isa.instruction import Instruction
+from .agent_config import AgentConfig
+from .base_types import AgentType, AgentMode, AgentStatus
+from .exceptions import ConfigurationError
 
 logger = logging.getLogger(__name__)
 
@@ -248,7 +251,7 @@ class InstructionSelector:
         
         # Build dependency graph
         dependencies = {
-            name: set(available_instructions[name].dependencies)
+            name: set(getattr(available_instructions[name], 'dependencies', []))
             for name in selected_instructions
         }
         

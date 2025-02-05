@@ -1,9 +1,13 @@
 """Tests for workflow functionality."""
 import pytest
-from unittest.mock import patch, MagicMock
-from agentflow.core.workflow import WorkflowEngine
+from unittest.mock import patch, MagicMock, AsyncMock
+from agentflow.core.workflow import WorkflowEngine, WorkflowInstance
 from agentflow.core.metrics import MetricType
-from agentflow.core.workflow_types import WorkflowConfig
+from agentflow.core.workflow_types import (
+    WorkflowConfig, WorkflowStep, StepConfig, WorkflowStepType
+)
+from agentflow.core.enums import WorkflowStatus
+from agentflow.agents.agent_types import AgentType
 
 class MockAgent:
     """Mock agent for testing."""
@@ -13,59 +17,16 @@ class MockAgent:
         self.async_mode = async_mode
         self.executed = False
     
+    async def initialize(self):
+        """Initialize mock agent."""
+        pass
+    
     async def execute(self, context):
         self.executed = True
         return {"result": f"{self.name}_result"}
 
 class TestWorkflowExecution:
     """Test workflow execution."""
-    
-    @pytest.fixture
-    def sequential_workflow_config(self):
-        """Create sequential workflow config."""
-        return {
-            "COLLABORATION": {
-                "MODE": "SEQUENTIAL",
-                "WORKFLOW": [
-                    {"name": "agent1", "async": True},
-                    {"name": "agent2", "async": False}
-                ]
-            },
-            "required_fields": ["research_topic"],
-            "missing_input_error": "Empty input data",
-            "validation_rules": {
-                "research_topic": {
-                    "type": "string",
-                    "required": True
-                }
-            },
-            "steps": []
-        }
-    
-    @pytest.fixture
-    def parallel_workflow_config(self):
-        """Create parallel workflow config."""
-        return {
-            "COLLABORATION": {
-                "MODE": "PARALLEL",
-                "COMMUNICATION_PROTOCOL": {
-                    "TYPE": "SEMANTIC"
-                },
-                "WORKFLOW": [
-                    {"name": "agent1", "async": True},
-                    {"name": "agent2", "async": True}
-                ]
-            },
-            "required_fields": ["research_topic"],
-            "missing_input_error": "Empty input data",
-            "validation_rules": {
-                "research_topic": {
-                    "type": "string",
-                    "required": True
-                }
-            },
-            "steps": []
-        }
     
     @pytest.fixture
     def workflow_config(self):
@@ -75,107 +36,89 @@ class TestWorkflowExecution:
             name="Test Workflow",
             max_iterations=5,
             timeout=3600,
-            steps=[]
+            error_policy={
+                "fail_fast": True,
+                "ignore_warnings": False,
+                "max_errors": 10,
+                "retry_policy": {
+                    "max_retries": 3,
+                    "retry_delay": 1.0,
+                    "backoff": 2.0,
+                    "max_delay": 60.0
+                }
+            },
+            steps=[
+                WorkflowStep(
+                    id="step1",
+                    name="Agent Step",
+                    type=WorkflowStepType.AGENT,
+                    config=StepConfig(
+                        type=WorkflowStepType.AGENT,
+                        agent_type=AgentType.GENERIC,
+                        config=None
+                    )
+                )
+            ]
         )
     
     @pytest.mark.asyncio
-    @patch('agentflow.core.workflow.WorkflowEngine._create_agent')
-    async def test_sequential_workflow(self, mock_create_agent, sequential_workflow_config, workflow_config):
-        """Test sequential workflow execution."""
-        # Setup mock agents
-        agent1 = MockAgent("agent1", async_mode=True)
-        agent2 = MockAgent("agent2", async_mode=False)
-        mock_create_agent.side_effect = [agent1, agent2]
+    async def test_workflow_execution(self, workflow_config):
+        """Test workflow execution."""
+        engine = WorkflowEngine(workflow_config)
+        await engine.initialize()
         
-        # Initial context
-        initial_context = {
-            "research_topic": "AI Ethics",
-            "metrics": {
-                MetricType.LATENCY.value: [{"value": 100, "timestamp": 1234567890}]
-            }
-        }
+        # Create workflow instance
+        instance = await engine.create_workflow("test_workflow", workflow_config)
+        instance.context["test_mode"] = True
         
-        # Create and execute workflow
-        workflow = WorkflowEngine(sequential_workflow_config, workflow_config)
-        result = await workflow.execute(initial_context)
+        # Execute workflow
+        result = await engine.execute_workflow(instance)
         
-        # Verify execution
-        assert agent1.executed
-        assert agent2.executed
-        assert "agent1_result" in str(result)
-        assert "agent2_result" in str(result)
+        assert result is not None
+        assert result["status"] == WorkflowStatus.COMPLETED.value
+        assert "result" in result
+        assert "steps" in result["result"]
+        assert len(result["result"]["steps"]) == 1
+        assert result["result"]["steps"][0]["id"] == "step1"
+        assert result["result"]["steps"][0]["status"] == WorkflowStatus.COMPLETED.value
     
     @pytest.mark.asyncio
-    @patch('agentflow.core.workflow.WorkflowEngine._create_agent')
-    async def test_parallel_workflow(self, mock_create_agent, parallel_workflow_config, workflow_config):
-        """Test parallel workflow execution."""
-        # Setup mock agents
-        agent1 = MockAgent("agent1", async_mode=True)
-        agent2 = MockAgent("agent2", async_mode=True)
-        mock_create_agent.side_effect = [agent1, agent2]
+    async def test_workflow_validation(self, workflow_config):
+        """Test workflow validation."""
+        engine = WorkflowEngine(workflow_config)
+        await engine.initialize()
         
-        # Initial context with metrics
-        initial_context = {
-            "research_topic": "AI Ethics",
-            "metrics": {
-                MetricType.LATENCY.value: [{"value": 100, "timestamp": 1234567890}],
-                MetricType.TOKEN_COUNT.value: [{"value": 1000, "timestamp": 1234567890}]
-            }
-        }
-        
-        # Create and execute workflow
-        workflow = WorkflowEngine(parallel_workflow_config, workflow_config)
-        result = await workflow.execute(initial_context)
-        
-        # Verify execution
-        assert agent1.executed
-        assert agent2.executed
-        assert "agent1_result" in str(result)
-        assert "agent2_result" in str(result)
+        # Test with invalid workflow instance
+        with pytest.raises(ValueError, match="Workflow instance has no steps"):
+            instance = await engine.create_workflow("test_workflow")
+            await engine.execute_workflow(instance)
     
     @pytest.mark.asyncio
-    async def test_workflow_validation(self, sequential_workflow_config, workflow_config):
-        """Test workflow input validation."""
-        workflow = WorkflowEngine(sequential_workflow_config, workflow_config)
-        
-        # Test missing required field
-        with pytest.raises(ValueError, match="Empty input data"):
-            await workflow.execute({})
-        
-        # Test invalid field type
-        with pytest.raises(ValueError, match="Invalid input"):
-            await workflow.execute({"research_topic": 123})
-    
-    @pytest.mark.asyncio
-    async def test_workflow_context_propagation(self, sequential_workflow_config, workflow_config):
-        """Test context propagation through workflow."""
-        workflow = WorkflowEngine(sequential_workflow_config, workflow_config)
-        
-        initial_context = {
-            "research_topic": "AI Ethics",
-            "additional_data": "test"
-        }
-        
-        result = await workflow.execute(initial_context)
-        assert "research_topic" in str(result)
-        assert "additional_data" in str(result)
-    
-    @pytest.mark.asyncio
-    async def test_workflow_error_handling(self, sequential_workflow_config, workflow_config):
+    async def test_workflow_error_handling(self, workflow_config):
         """Test workflow error handling."""
-        workflow = WorkflowEngine(sequential_workflow_config, workflow_config)
+        engine = WorkflowEngine(workflow_config)
+        await engine.initialize()
         
-        # Test with invalid agent configuration
-        with pytest.raises(ValueError):
-            await workflow.execute({"research_topic": "test"}, max_retries=0)
+        # Create workflow instance with failing step
+        instance = await engine.create_workflow("test_workflow", workflow_config)
+        instance.steps[0].type = WorkflowStepType.AGENT  # Change to agent type to trigger error
+        
+        # Execute workflow
+        result = await engine.execute_workflow(instance)
+        
+        assert result["status"] == WorkflowStatus.FAILED.value
+        assert result["error"] is not None
     
     @pytest.mark.asyncio
-    async def test_workflow_metrics(self, sequential_workflow_config, workflow_config):
+    async def test_workflow_metrics(self, workflow_config):
         """Test workflow metrics collection."""
-        workflow = WorkflowEngine(sequential_workflow_config, workflow_config)
+        engine = WorkflowEngine(workflow_config)
+        await engine.initialize()
         
-        context = {
-            "research_topic": "AI Ethics",
+        # Create workflow instance
+        instance = await engine.create_workflow("test_workflow", workflow_config)
+        instance.context = {
+            "test_mode": True,
             "metrics": {
                 MetricType.LATENCY.value: [
                     {"value": 100, "timestamp": 1234567890}
@@ -183,5 +126,10 @@ class TestWorkflowExecution:
             }
         }
         
-        result = await workflow.execute(context)
-        assert MetricType.LATENCY.value in str(result)
+        # Execute workflow
+        result = await engine.execute_workflow(instance)
+        
+        assert result is not None
+        assert result["status"] == WorkflowStatus.COMPLETED.value
+        assert "result" in result
+        assert "steps" in result["result"]

@@ -1,15 +1,23 @@
 """AgentFlow package."""
 
-from .agents.agent import Agent
-from .core.workflow import WorkflowEngine
-from .core.config import AgentConfig, ModelConfig, WorkflowConfig
+# Import version
+from .version import __version__
+
+# Import core components
 from .core.types import AgentStatus
+from .core.config import AgentConfig, WorkflowConfig
+from .core.workflow import WorkflowEngine, WorkflowInstance
+
+# Import agent types
+from .agents.agent_types import AgentType, AgentMode
 
 __all__ = [
-    'Agent',
-    'WorkflowEngine',
+    '__version__',
+    'AgentStatus',
     'AgentConfig',
-    'ModelConfig',
     'WorkflowConfig',
-    'AgentStatus'
+    'WorkflowEngine',
+    'WorkflowInstance',
+    'AgentType',
+    'AgentMode'
 ] 

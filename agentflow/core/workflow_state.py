@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, ConfigDict, computed_field, field_validator, model_validator
 from dataclasses import dataclass, field
-from .workflow_types import WorkflowStatus, StepStatus
+from .workflow_types import WorkflowStatus, WorkflowStepStatus as StepStatus
 from ..agents.agent_types import AgentStatus
 from .exceptions import WorkflowStateError
 

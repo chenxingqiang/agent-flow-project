@@ -1,6 +1,8 @@
 import ell
 from agentflow.ell2a.configurator import config
 import anthropic
+from typing import Optional
+from agentflow.ell2a.util.differ import write_commit_message_for_diff
 
 test1_v1 = '''import ell
 import numpy as np
@@ -41,7 +43,6 @@ def write_a_chord_progression_for_song(genre: Optional[str], key : Optional[str]
     return [
         agentflow.ell2a.system(f"You are a world class music theorist and composer. Your goal is to write chord progressions to songs given parameters. They should be fully featured and compositionally sound. Feel free to use advanced chords of your choosing. Only answer with the chord progression in {CHORD_FORMAT} format. Do not provide any additional text. Feel free to occaisonally use 13 chords and complex chords if necessary etc."),
         agentflow.ell2a.user(f"Write a chord progression for a song {'in ' + genre if genre else ''} {'in the key of ' + key if key else ''}.")
-
     ]"""
 
 test2_v2 = """CHORD_FORMAT = "| Chord | Chord | ... |"
@@ -51,26 +52,19 @@ def write_a_chord_progression_for_song(genre: Optional[str], key : Optional[str]
     return [
         agentflow.ell2a.system(f"You are a world-renowned class music theorist and composer. Your goal is to write chord progressions for a song given a genre or key. They should be fully featured and compositionally sound. Feel free to use advanced chords of your choosing. Only answer with the chord progression in {CHORD_FORMAT} format. Do not provide any additional text. Feel free to occaisonally use 13 chords and complex chords if necessary etc."),
         agentflow.ell2a.user(f"Write a chord progression for a song {'in ' + genre if genre else ''} {'in the key of ' + key if key else ''}.")
-
     ]"""
 
-
-import os
-
-# if os.environ.get("OPENAI_API_KEY"):
-#     from ell2a.util.differ import write_commit_message_for_diff
-#     ell2a.init(verbose=True, autocommit_model="gpt-4o-mini")
-#     # ell2a.init(verbose=True, autocommit_model="claude-3-haiku-20240307")
-#     def test_commit_message_1():
-#         # test 1
-#         (response, *args) = write_commit_message_for_diff(test1_v1, test1_v2)
-#         print(response)
-
-#         # test 2
-#         (response, *args) = write_commit_message_for_diff(test2_v1, test2_v2)
-#         print(response)
-
-    ### --BEFORE PROMPT CHANGES-- ###
+def test_commit_message_1():
+    """Test commit message generation for code changes."""
+    ell.init(verbose=True, autocommit_model="gpt-4o-mini")
+    
+    # Test 1: Changes in joke function
+    response1, *args1 = write_commit_message_for_diff(test1_v1, test1_v2)
+    assert response1.startswith("refactor")  # Basic check for now
+    
+    # Test 2: Changes in chord progression function
+    response2, *args2 = write_commit_message_for_diff(test2_v1, test2_v2)
+    assert response2.startswith("refactor")  # Basic check for now
 
 ### CLAUDE 3 HAIKU ###
 # Test 1:

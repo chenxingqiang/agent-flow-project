@@ -99,11 +99,13 @@ def server():
 # Global variable to store the base URL
 BASE_URL = None
 
-def pytest_configure(config):
-    """Configure the test session"""
+@pytest.fixture(scope="session", autouse=True)
+def configure_base_url(request):
+    """Configure the base URL for tests"""
     global BASE_URL
-    # This will be set by the server fixture
-    BASE_URL = f"http://localhost:{server().port}" if hasattr(server(), 'port') else None
+    server_manager = ServerManager()
+    BASE_URL = server_manager.base_url
+    return BASE_URL
 
 def test_sync_workflow_execution(server):
     """Test synchronous workflow execution"""
@@ -111,37 +113,55 @@ def test_sync_workflow_execution(server):
 
     request_data = {
         "workflow": {
-            "WORKFLOW": [
+            "id": "test-workflow-1",
+            "name": "Test Research Workflow",
+            "steps": [
                 {
-                    "step": 1,
+                    "id": "step-1",
                     "type": "research",
                     "name": "Research Step",
                     "description": "Perform research on the given topic",
-                    "input": ["STUDENT_NEEDS", "LANGUAGE", "TEMPLATE"],
-                    "output": {
-                        "type": "research_findings",
-                        "format": "structured_data"
-                    },
-                    "agent_config": {
-                        "type": "research",
-                        "provider": "openai",
-                        "model": "gpt-3.5-turbo"
+                    "dependencies": [],
+                    "required": True,
+                    "optional": False,
+                    "is_distributed": False,
+                    "config": {
+                        "strategy": "research",
+                        "params": {
+                            "input": ["STUDENT_NEEDS", "LANGUAGE", "TEMPLATE"],
+                            "output": {
+                                "type": "research_findings",
+                                "format": "structured_data"
+                            }
+                        },
+                        "retry_delay": 1.0,
+                        "retry_backoff": 2.0,
+                        "max_retries": 3,
+                        "timeout": 30.0
                     }
                 },
                 {
-                    "step": 2,
+                    "id": "step-2",
                     "type": "document",
                     "name": "Document Generation Step",
                     "description": "Generate document from research findings",
-                    "input": ["WORKFLOW.1.output"],
-                    "output": {
-                        "type": "document",
-                        "format": "Markdown with LaTeX"
-                    },
-                    "agent_config": {
-                        "type": "document",
-                        "provider": "openai",
-                        "model": "gpt-3.5-turbo"
+                    "dependencies": ["step-1"],
+                    "required": True,
+                    "optional": False,
+                    "is_distributed": False,
+                    "config": {
+                        "strategy": "document",
+                        "params": {
+                            "input": ["WORKFLOW.1.output"],
+                            "output": {
+                                "type": "document",
+                                "format": "Markdown with LaTeX"
+                            }
+                        },
+                        "retry_delay": 1.0,
+                        "retry_backoff": 2.0,
+                        "max_retries": 3,
+                        "timeout": 30.0
                     }
                 }
             ]
@@ -210,37 +230,55 @@ def test_async_workflow_execution(server):
     
     request_data = {
         "workflow": {
-            "WORKFLOW": [
+            "id": "test-workflow-2",
+            "name": "Test Async Research Workflow",
+            "steps": [
                 {
-                    "step": 1,
+                    "id": "step-1",
                     "type": "research",
                     "name": "Research Step",
                     "description": "Perform research on the given topic",
-                    "input": ["STUDENT_NEEDS", "LANGUAGE", "TEMPLATE"],
-                    "output": {
-                        "type": "research_findings",
-                        "format": "structured_data"
-                    },
-                    "agent_config": {
-                        "type": "research",
-                        "provider": "openai",
-                        "model": "gpt-3.5-turbo"
+                    "dependencies": [],
+                    "required": True,
+                    "optional": False,
+                    "is_distributed": True,
+                    "config": {
+                        "strategy": "research",
+                        "params": {
+                            "input": ["STUDENT_NEEDS", "LANGUAGE", "TEMPLATE"],
+                            "output": {
+                                "type": "research_findings",
+                                "format": "structured_data"
+                            }
+                        },
+                        "retry_delay": 1.0,
+                        "retry_backoff": 2.0,
+                        "max_retries": 3,
+                        "timeout": 30.0
                     }
                 },
                 {
-                    "step": 2,
+                    "id": "step-2",
                     "type": "document",
                     "name": "Document Generation Step",
                     "description": "Generate document from research findings",
-                    "input": ["WORKFLOW.1.output"],
-                    "output": {
-                        "type": "document",
-                        "format": "Markdown with LaTeX"
-                    },
-                    "agent_config": {
-                        "type": "document",
-                        "provider": "openai",
-                        "model": "gpt-3.5-turbo"
+                    "dependencies": ["step-1"],
+                    "required": True,
+                    "optional": False,
+                    "is_distributed": True,
+                    "config": {
+                        "strategy": "document",
+                        "params": {
+                            "input": ["WORKFLOW.1.output"],
+                            "output": {
+                                "type": "document",
+                                "format": "Markdown with LaTeX"
+                            }
+                        },
+                        "retry_delay": 1.0,
+                        "retry_backoff": 2.0,
+                        "max_retries": 3,
+                        "timeout": 30.0
                     }
                 }
             ]
@@ -317,7 +355,7 @@ def test_invalid_workflow(server):
 
     invalid_workflow_config = {
         "workflow": {
-            "workflow_steps": []  # Empty workflow steps
+            "steps": []  # Missing required id and name fields
         },
         "input_data": {}
     }
@@ -331,10 +369,10 @@ def test_invalid_workflow(server):
         assert response.status_code == 422  # Validation error status code
         error_data = response.json()
         assert "detail" in error_data
-        assert any("No workflow steps found" in str(detail) for detail in error_data["detail"])
-
+        # Check for missing required fields error
+        assert any("Field required" in str(detail) for detail in error_data["detail"])
     except Exception as e:
-        logger.error(f"Invalid workflow request failed: {str(e)}")
+        logger.error(f"Invalid workflow request failed: {e}")
         raise
 
 if __name__ == "__main__":

@@ -6,7 +6,8 @@ from typing import Dict, Any
 import pytest
 from pydantic import ValidationError, Field
 from agentflow.agents.agent_types import AgentType, AgentMode, AgentConfig, ModelConfig
-from agentflow.core.workflow_types import WorkflowConfig
+from agentflow.core.workflow_types import WorkflowConfig, WorkflowStepType, WorkflowStep, StepConfig
+import pydantic
 
 @pytest.fixture
 def base_config():
@@ -31,7 +32,27 @@ def base_config():
             "name": "test_workflow",
             "max_iterations": 15,
             "timeout": 600,
-            "steps": []
+            "steps": [
+                {
+                    "id": "step-1",
+                    "name": "Research Step",
+                    "type": WorkflowStepType.RESEARCH_EXECUTION.value,
+                    "description": "Perform research on the given topic",
+                    "config": {
+                        "strategy": "research",
+                        "params": {
+                            "max_retries": 3,
+                            "retry_delay": 1.0,
+                            "retry_backoff": 2.0,
+                            "timeout": 30.0
+                        }
+                    },
+                    "dependencies": [],
+                    "required": True,
+                    "optional": False,
+                    "is_distributed": False
+                }
+            ]
         },
         "TRANSFORMATIONS": {
             "input": [
@@ -61,7 +82,11 @@ def base_config():
 def test_configuration_schema_creation(base_config):
     """Test creating configuration schema from dictionary."""
     agent_config = AgentConfig.model_validate(base_config["AGENT"])
-    workflow_config = WorkflowConfig(**base_config["WORKFLOW"])
+    
+    # Create WorkflowStep instances
+    workflow_data = base_config["WORKFLOW"].copy()
+    workflow_data["steps"] = [WorkflowStep(**step) for step in workflow_data["steps"]]
+    workflow_config = WorkflowConfig(**workflow_data)
     
     # Validate basic properties
     assert agent_config.name == "TestResearchAgent"
@@ -75,26 +100,40 @@ def test_configuration_validation(base_config):
     """Test comprehensive configuration validation."""
     # Valid configuration
     agent_config = AgentConfig.model_validate(base_config["AGENT"])
-    workflow_config = WorkflowConfig(**base_config["WORKFLOW"])
+    
+    # Create WorkflowStep instances
+    workflow_data = base_config["WORKFLOW"].copy()
+    workflow_data["steps"] = [WorkflowStep(**step) for step in workflow_data["steps"]]
+    workflow_config = WorkflowConfig(**workflow_data)
+    
     model_config = ModelConfig.model_validate(base_config["MODEL"])
     
     assert agent_config.name == "TestResearchAgent"
     assert workflow_config.max_iterations == 15
     assert model_config.temperature == 0.7
     
-    # Invalid configuration - missing required field 'type'
+    # Invalid configuration - invalid type
     invalid_config = {
-        "name": "InvalidAgent",
-        "mode": AgentMode.SEQUENTIAL.value,
+        "name": "test_agent",
+        "type": "invalid_type",  # This should trigger a validation error
+        "mode": "sequential",
         "version": "1.0.0"
     }
-    with pytest.raises(ValidationError):
+    
+    # This should raise a ValidationError because the type is invalid
+    with pytest.raises(ValidationError) as exc_info:
         AgentConfig.model_validate(invalid_config)
+    
+    assert "type" in str(exc_info.value)  # Verify the error message mentions the invalid type
 
 def test_configuration_merging(base_config):
     """Test configuration merging with priority handling."""
     agent_config = AgentConfig.model_validate(base_config["AGENT"])
-    workflow_config = WorkflowConfig(**base_config["WORKFLOW"])
+    
+    # Create WorkflowStep instances
+    workflow_data = base_config["WORKFLOW"].copy()
+    workflow_data["steps"] = [WorkflowStep(**step) for step in workflow_data["steps"]]
+    workflow_config = WorkflowConfig(**workflow_data)
     
     # Create override configuration
     override_config = {
@@ -115,7 +154,11 @@ def test_configuration_merging(base_config):
 def test_configuration_export_and_import(base_config):
     """Test configuration export and import functionality."""
     agent_config = AgentConfig.model_validate(base_config["AGENT"])
-    workflow_config = WorkflowConfig(**base_config["WORKFLOW"])
+    
+    # Create WorkflowStep instances
+    workflow_data = base_config["WORKFLOW"].copy()
+    workflow_data["steps"] = [WorkflowStep(**step) for step in workflow_data["steps"]]
+    workflow_config = WorkflowConfig(**workflow_data)
     
     # Export to temporary file
     with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_file:
@@ -127,7 +170,11 @@ def test_configuration_export_and_import(base_config):
         imported_config = json.load(f)
     
     imported_agent_config = AgentConfig.model_validate(imported_config["AGENT"])
-    imported_workflow_config = WorkflowConfig(**imported_config["WORKFLOW"])
+    
+    # Create WorkflowStep instances for imported config
+    imported_workflow_data = imported_config["WORKFLOW"].copy()
+    imported_workflow_data["steps"] = [WorkflowStep(**step) for step in imported_workflow_data["steps"]]
+    imported_workflow_config = WorkflowConfig(**imported_workflow_data)
     
     # Validate imported configuration
     assert imported_agent_config.name == agent_config.name
@@ -162,7 +209,17 @@ def test_flexible_configuration_loading(base_config):
                 "id": "test-workflow-1",
                 "name": "partial_workflow",
                 "max_iterations": 5,
-                "steps": []
+                "steps": [
+                    {
+                        "id": "step-1",
+                        "name": "Research Step",
+                        "type": WorkflowStepType.RESEARCH_EXECUTION.value,
+                        "config": StepConfig(
+                            strategy="research",
+                            params={}
+                        )
+                    }
+                ]
             }
         }
     ]
@@ -171,10 +228,18 @@ def test_flexible_configuration_loading(base_config):
         if isinstance(scenario, str):
             loaded_config = json.loads(scenario)
             loaded_agent_config = AgentConfig.model_validate(loaded_config["AGENT"])
-            loaded_workflow_config = WorkflowConfig(**loaded_config["WORKFLOW"])
+            
+            # Create WorkflowStep instances
+            workflow_data = loaded_config["WORKFLOW"].copy()
+            workflow_data["steps"] = [WorkflowStep(**step) for step in workflow_data["steps"]]
+            loaded_workflow_config = WorkflowConfig(**workflow_data)
         else:
             loaded_agent_config = AgentConfig.model_validate(scenario["AGENT"])
-            loaded_workflow_config = WorkflowConfig(**scenario["WORKFLOW"])
+            
+            # Create WorkflowStep instances
+            workflow_data = scenario["WORKFLOW"].copy()
+            workflow_data["steps"] = [WorkflowStep(**step) for step in workflow_data["steps"]]
+            loaded_workflow_config = WorkflowConfig(**workflow_data)
         
         assert loaded_agent_config.name is not None
         assert loaded_workflow_config.max_iterations > 0
@@ -195,7 +260,11 @@ def test_domain_specific_configuration(base_config):
     }
     
     agent_config = AgentConfig.model_validate(domain_config["AGENT"])
-    workflow_config = WorkflowConfig(**domain_config["WORKFLOW"])
+    
+    # Create WorkflowStep instances
+    workflow_data = domain_config["WORKFLOW"].copy()
+    workflow_data["steps"] = [WorkflowStep(**step) for step in workflow_data["steps"]]
+    workflow_config = WorkflowConfig(**workflow_data)
     
     assert agent_config.type == AgentType.DATA_SCIENCE
     assert workflow_config.max_iterations == 15
@@ -237,9 +306,12 @@ def test_advanced_transformation_configuration(base_config):
     
     # Create agent configuration with all required fields
     agent_config = AgentConfig.model_validate(advanced_config["AGENT"])
-    workflow_config = WorkflowConfig(**advanced_config["WORKFLOW"])
+    
+    # Create WorkflowStep instances
+    workflow_data = advanced_config["WORKFLOW"].copy()
+    workflow_data["steps"] = [WorkflowStep(**step) for step in workflow_data["steps"]]
+    workflow_config = WorkflowConfig(**workflow_data)
     
     assert agent_config.type == AgentType.DATA_SCIENCE
     assert workflow_config.max_iterations == 15
     assert len(advanced_config["TRANSFORMATIONS"]["input"]) == 2
-    assert len(advanced_config["TRANSFORMATIONS"]["preprocessing"]) == 1

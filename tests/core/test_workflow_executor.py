@@ -3,6 +3,7 @@
 import pytest
 import asyncio
 import numpy as np
+import uuid
 from agentflow.core.workflow_types import WorkflowConfig, WorkflowStep, WorkflowStepType, StepConfig
 from agentflow.core.exceptions import WorkflowExecutionError
 from agentflow.core.workflow_executor import WorkflowExecutor
@@ -15,6 +16,7 @@ async def test_workflow_execution():
         return data
 
     config = WorkflowConfig(
+        id=str(uuid.uuid4()),
         name="test_workflow",
         max_iterations=5,
         timeout=30,
@@ -31,6 +33,7 @@ async def test_workflow_execution():
         ]
     )
     executor = WorkflowExecutor(config)
+    await executor.initialize()
     data = np.random.randn(10, 2)
     result = await executor.execute({"data": data})
     assert "step-1" in result
@@ -50,6 +53,7 @@ async def test_workflow_with_dependencies():
         return data + 1
 
     config = WorkflowConfig(
+        id=str(uuid.uuid4()),
         name="dependency_workflow",
         max_iterations=5,
         timeout=30,
@@ -76,6 +80,7 @@ async def test_workflow_with_dependencies():
         ]
     )
     executor = WorkflowExecutor(config)
+    await executor.initialize()
     data = np.random.randn(10, 2)
     result = await executor.execute({"data": data})
     assert "step-1" in result
@@ -96,6 +101,7 @@ async def test_workflow_error_handling():
         raise ValueError("Test error")
 
     config = WorkflowConfig(
+        id=str(uuid.uuid4()),
         name="error_workflow",
         max_iterations=5,
         timeout=30,
@@ -112,6 +118,7 @@ async def test_workflow_error_handling():
         ]
     )
     executor = WorkflowExecutor(config)
+    await executor.initialize()
     data = np.random.randn(10, 2)
     with pytest.raises(WorkflowExecutionError):
         await executor.execute({"data": data})
@@ -124,6 +131,7 @@ async def test_workflow_timeout():
         return data
 
     config = WorkflowConfig(
+        id=str(uuid.uuid4()),
         name="timeout_workflow",
         max_iterations=5,
         timeout=1,  # Short timeout
@@ -140,6 +148,7 @@ async def test_workflow_timeout():
         ]
     )
     executor = WorkflowExecutor(config)
+    await executor.initialize()
     data = np.random.randn(10, 2)
     with pytest.raises(WorkflowExecutionError):
         await executor.execute({"data": data})

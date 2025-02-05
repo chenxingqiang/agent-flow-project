@@ -32,7 +32,7 @@ class DistributedConfig:
     max_retries: int = 3
     timeout: float = 3600.0
 
-class ResearchDistributedWorkflow(WorkflowEngine):
+class ResearchDistributedWorkflow:
     """Research distributed workflow class."""
     
     @classmethod
@@ -61,19 +61,40 @@ class ResearchDistributedWorkflow(WorkflowEngine):
         else:
             config_dict = None
             
+        # Convert workflow definition to expected format
+        if "COLLABORATION" not in workflow_def:
+            workflow_def = {
+                "COLLABORATION": {
+                    "WORKFLOW": workflow_def.get("WORKFLOW", {})
+                }
+            }
+            
+        # Create remote actor with workflow definition and config
         workflow = RemoteWorkflow.remote(workflow_def=workflow_def, workflow_config=config_dict)
-        
         return workflow
     
-    def __init__(self, workflow_def: Dict[str, Any], workflow_config: Union[Dict[str, Any], WorkflowConfig, None] = None):
+    def __init__(self, workflow_def: Dict[str, Any], workflow_config: Optional[Union[Dict[str, Any], WorkflowConfig]] = None):
         """Initialize research workflow.
         
         Args:
             workflow_def: Workflow definition
-            workflow_config: Workflow configuration
+            workflow_config: Optional workflow configuration
         """
-        # Initialize base class with required arguments
-        super().__init__(workflow_def or {"COLLABORATION": {"WORKFLOW": {}}}, workflow_config)
+        self.workflow_def = workflow_def  # Store workflow definition
+        
+        # Initialize workflow config
+        if isinstance(workflow_config, WorkflowConfig):
+            self.workflow_config = workflow_config
+        elif isinstance(workflow_config, dict):
+            self.workflow_config = WorkflowConfig.model_validate(
+                workflow_config,
+                context={"is_initialization": True}
+            )
+        else:
+            self.workflow_config = WorkflowConfig.model_validate(
+                {},
+                context={"is_initialization": True}
+            )
         
         # Initialize distributed config
         self.dist_config = DistributedConfig()
@@ -81,6 +102,19 @@ class ResearchDistributedWorkflow(WorkflowEngine):
         # Initialize additional attributes
         self.workers: List[Agent] = []
         self.step_results: Dict[str, Any] = {}
+        
+    async def configure(self, config: Dict[str, Any]) -> None:
+        """Configure workflow with additional settings.
+        
+        Args:
+            config: Configuration dictionary
+        """
+        if config:
+            self.dist_config = DistributedConfig(**config.get("distributed", {}))
+            if hasattr(self, "workflow_config"):
+                # Update workflow config using model_validate
+                updated_config = {**self.workflow_config.model_dump(), **config}
+                self.workflow_config = WorkflowConfig.model_validate(updated_config)
         
     async def initialize(self) -> None:
         """Initialize workflow."""
@@ -113,7 +147,7 @@ class ResearchDistributedWorkflow(WorkflowEngine):
         tasks = []
         for i, item in enumerate(batch):
             worker = self.workers[i % len(self.workers)]
-            task = asyncio.create_task(worker.process_message(str(item)))
+            task = asyncio.create_task(worker.execute({"data": item}))
             tasks.append(task)
             
         results = await asyncio.gather(*tasks)
@@ -239,18 +273,26 @@ class ResearchDistributedWorkflow(WorkflowEngine):
                 input_data["_test_fail_count"] -= 1
                 raise ValueError("Simulated failure for testing")
         
+        # Get retry delay from step config
+        retry_delay = 0.1  # Default retry delay
+        step_config = step_info.get("config", {})
+        if isinstance(step_config, dict) and "retry_delay" in step_config:
+            retry_delay = float(step_config["retry_delay"])
+        
         # Process step (mock implementation)
         return {
             "status": "success",
             "output": input_data,
-            "retry_count": input_data.get("_test_fail_count", 0)
+            "retry_count": input_data.get("_test_fail_count", 0),
+            "retry_delay": retry_delay
         }
         
     async def cleanup(self) -> None:
         """Clean up workflow resources."""
         # Clean up workers
         for worker in self.workers:
-            await worker.cleanup()
+            if hasattr(worker, "execute"):  # Check if worker has execute method
+                await worker.execute({"command": "cleanup"})  # Send cleanup command
         self.workers.clear()
         
         # Clean up base class

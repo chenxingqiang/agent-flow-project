@@ -2,7 +2,8 @@
 
 import pytest
 from typing import List, Dict, Any
-from agentflow.ell2a.types.message import Message, MessageRole, ELL, system, user
+from agentflow.ell2a.types.message import Message, MessageRole, system, user
+from agentflow.ell2a.ell import ELL
 
 def test_message_creation():
     """Test message creation."""

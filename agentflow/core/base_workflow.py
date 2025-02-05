@@ -5,7 +5,7 @@ import logging
 from typing import Dict, Any, Optional, List, TYPE_CHECKING
 import uuid
 
-from .workflow_state import WorkflowStateManager, WorkflowStatus, StepStatus
+from .workflow_state import WorkflowStateManager, WorkflowStatus, WorkflowStepStatus
 from .exceptions import WorkflowExecutionError, StepExecutionError
 from .workflow_types import WorkflowConfig, WorkflowStep, StepConfig, WorkflowStepType
 
@@ -52,7 +52,7 @@ class BaseWorkflow:
                     self.state_manager.update_step_status(
                         self.config.id,
                         step.id,
-                        StepStatus.RUNNING
+                        WorkflowStepStatus.RUNNING
                     )
                     
                     # Execute step based on its type
@@ -76,7 +76,7 @@ class BaseWorkflow:
                     self.state_manager.update_step_status(
                         self.config.id,
                         step.id,
-                        StepStatus.SUCCESS
+                        WorkflowStepStatus.SUCCESS
                     )
                     
                 except Exception as e:
@@ -84,7 +84,7 @@ class BaseWorkflow:
                     self.state_manager.update_step_status(
                         self.config.id,
                         step.id,
-                        StepStatus.FAILED
+                        WorkflowStepStatus.FAILED
                     )
                     raise StepExecutionError(f"Failed to execute step {step.name}: {str(e)}")
             
@@ -108,7 +108,7 @@ class BaseWorkflow:
         else:
             raise ValueError(f"Unknown transform strategy: {strategy}")
         
-        return {"data": result}
+        return result
     
     async def _execute_test_step(self, step: WorkflowStep, data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute test step."""

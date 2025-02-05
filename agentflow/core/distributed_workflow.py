@@ -1,34 +1,44 @@
 """Distributed workflow implementation using Ray."""
 
+from typing import Dict, Any, List, Optional, Union, Type, cast, NoReturn, TypeVar
+from datetime import datetime
 import asyncio
-import json
 import logging
-import time
-from typing import Any, Dict, List, Optional, Union
-from enum import Enum
-from functools import partial
-from concurrent.futures import ThreadPoolExecutor
-from abc import ABC, abstractmethod
-# Import workflow-related modules
-from agentflow.core.workflow_state import WorkflowStateManager, WorkflowStatus, StepStatus
-from agentflow.core.exceptions import WorkflowExecutionError
-from agentflow.core.research_workflow import ResearchDistributedWorkflow
-
 import ray
-from ray.exceptions import RayActorError, RayTaskError
+import uuid
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from dataclasses import dataclass, field
+import time
+from pydantic import BaseModel
+from ray.actor import ActorHandle
+from ray.util.actor_pool import ActorPool
+from ray._raylet import ObjectRef
+
+from agentflow.core.workflow_types import (
+    WorkflowStep,
+    WorkflowConfig,
+    WorkflowStepType,
+    StepConfig,
+    WorkflowDefinition
+)
+from agentflow.core.workflow_state import WorkflowState
+from agentflow.core.exceptions import WorkflowExecutionError
+from agentflow.core.enums import WorkflowStatus
+from agentflow.core.config import DistributedConfig
 
 # Initialize logger
 logger = logging.getLogger(__name__)
 
-def initialize_ray():
+T = TypeVar('T')
+
+def initialize_ray() -> None:
     """Initialize Ray if not already initialized."""
     if not ray.is_initialized():
         try:
             ray.init(
                 ignore_reinit_error=True,
-                runtime_env={
-                    "pip": ["ray[default]>=2.5.0"]
-                },
+                runtime_env={"pip": ["ray[default]>=2.5.0"]},
                 num_cpus=2,  # Use 2 CPUs for distributed testing
                 local_mode=False,  # Use distributed mode
                 include_dashboard=False  # Disable dashboard for tests
@@ -37,411 +47,809 @@ def initialize_ray():
             logger.error(f"Failed to initialize Ray: {e}")
             raise
 
-
-class DistributedWorkflowStep:
-    """Base class for workflow steps"""
-    def __init__(self, step_id: str, config: Dict[str, Any] = None):
+@ray.remote
+class TransformStep:
+    """Transform step in workflow."""
+    
+    def __init__(self):
+        """Initialize transform step."""
+        self.step_id: str = ""
+        self.step_config: Dict[str, Any] = {}
+        self.dependencies: List[str] = []
+        self.initialized: bool = False
+        self.scaler: Optional[StandardScaler] = None
+        self.logger = logging.getLogger(f"{__name__}.TransformStep")
+    
+    async def initialize(self, step_id: str, config: Dict[str, Any], dependencies: Optional[List[str]] = None) -> bool:
+        """Initialize step with configuration.
+        
+        Args:
+            step_id: Step identifier
+            config: Step configuration
+            dependencies: List of step dependencies
+            
+        Returns:
+            bool: True if initialization successful
+        """
         self.step_id = step_id
-        self.config = config or {}
-        self._initialize_logging()
+        self.step_config = config
+        self.dependencies = dependencies or []  # Use empty list as default
         
-    def _initialize_logging(self):
-        """Initialize step-specific logging."""
-        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}.{self.step_id}")
+        # Initialize scaler based on config
+        params = self.step_config.get('params', {})
+        if params.get('method') == 'standard':
+            self.scaler = StandardScaler(
+                with_mean=params.get('with_mean', True),
+                with_std=params.get('with_std', True)
+            )
         
-    @ray.method(num_returns=1)
-    def health_check(self) -> bool:
-        """Check if the actor is healthy."""
+        self.initialized = True
         return True
-
-    def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute the workflow step"""
-        raise NotImplementedError("Subclasses must implement execute()")
-
-@ray.remote(max_restarts=3, max_task_retries=3)
-class ResearchStep(DistributedWorkflowStep):
-    """A research workflow step that can be executed remotely"""
     
-    def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute the research step"""
-        try:
-            # Log step execution
-            self.logger.info(f"Executing research step {self.step_id}")
-            
-            # Validate input
-            if not input_data:
-                raise ValueError("No input data provided")
-            
-            # Process research task
-            result = {
-                "status": "success",
-                "result": f"Research completed for {self.step_id}",
-                "metadata": {
-                    "step_id": self.step_id,
-                    "timestamp": time.time()
-                }
-            }
-            
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"Error in research step: {str(e)}", exc_info=True)
-            raise StepExecutionError(f"Research step failed: {str(e)}")
-
-@ray.remote(max_restarts=3, max_task_retries=3)
-class DocumentStep(DistributedWorkflowStep):
-    """A document generation step that can be executed remotely"""
-    
-    def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute the document step"""
-        try:
-            # Log step execution
-            self.logger.info(f"Executing document step {self.step_id}")
-            
-            # Process document task
-            result = {
-                "status": "success",
-                "result": f"Document generated for {self.step_id}",
-                "metadata": {
-                    "step_id": self.step_id,
-                    "timestamp": time.time()
-                }
-            }
-            
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"Error in document step: {str(e)}", exc_info=True)
-            raise StepExecutionError(f"Document step failed: {str(e)}")
-
-@ray.remote(max_restarts=3, max_task_retries=3)
-class ImplementationStep(DistributedWorkflowStep):
-    """An implementation step that can be executed remotely"""
-    
-    def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute the implementation step"""
-        try:
-            # Log step execution
-            self.logger.info(f"Executing implementation step {self.step_id}")
-            
-            # Process implementation task
-            result = {
-                "status": "success",
-                "result": f"Implementation completed for {self.step_id}",
-                "metadata": {
-                    "step_id": self.step_id,
-                    "timestamp": time.time()
-                }
-            }
-            
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"Error in implementation step: {str(e)}", exc_info=True)
-            raise StepExecutionError(f"Implementation step failed: {str(e)}")
-
-class DistributedWorkflow:
-    """Base class for distributed workflows"""
-    
-    def __init__(
-                self,
-                workflow_config: Dict[str, Any] = None,
-                config: Optional[Dict[str, Any]] = None,
-                state_manager: Optional[WorkflowStateManager] = None
-            ):
-        """Initialize workflow."""
-        self.workflow_config = workflow_config or {}
-        self.config = config or {}
-        self.state_manager = state_manager or WorkflowStateManager()
-        self.distributed_steps = {}
-        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
-        
-        # Populate step configurations with global retry settings
-        for key, value in self.config.items():
-            if key.endswith('_config'):
-                # Ensure retry settings are populated
-                value.setdefault('retry_delay', self.config.get('retry_delay', 1.0))
-                value.setdefault('retry_backoff', self.config.get('retry_backoff', 2.0))
-                value.setdefault('max_retries', self.config.get('max_retries', 3))
-                
-    async def _check_actor_health(self, step_actor) -> bool:
-        """Check if a Ray actor is healthy.
+    async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute transform step.
         
         Args:
-            step_actor: Ray actor reference
+            input_data: Input data for transformation
             
         Returns:
-            bool: True if actor is healthy, False otherwise
-        """
-        try:
-            return await ray.get(step_actor.health_check.remote())
-        except (RayActorError, RayTaskError):
-            return False
-            
-    async def _ensure_actor_health(self, step_id: str, step_actor) -> Any:
-        """Ensure a Ray actor is healthy, recreating it if necessary.
-        
-        Args:
-            step_id: ID of the step
-            step_actor: Ray actor reference
-            
-        Returns:
-            Ray actor reference: Original or recreated actor
-        """
-        if not await self._check_actor_health(step_actor):
-            self.logger.warning(f"Actor for step {step_id} is unhealthy, recreating...")
-            # Get actor class and config from original actor
-            actor_class = ray.get(step_actor.get_class.remote())
-            actor_config = ray.get(step_actor.get_config.remote())
-            # Create new actor
-            new_actor = actor_class.remote(step_id, actor_config)
-            self.distributed_steps[step_id] = new_actor
-            return new_actor
-        return step_actor
-
-    async def _execute_step_with_retry(
-            self,
-            step_actor,
-            step_id: str,
-            step_input: Dict[str, Any],
-            max_retries: int = 3,
-            retry_delay: float = 1.0,
-            retry_backoff: float = 2.0
-        ) -> Dict[str, Any]:
-        """Execute a workflow step with retry logic.
-        
-        Args:
-            step_actor: Ray actor reference
-            step_id: Step ID
-            step_input: Input data for the step
-            max_retries: Maximum number of retry attempts
-            retry_delay: Initial delay between retries in seconds
-            retry_backoff: Multiplicative factor for retry delay
-            
-        Returns:
-            Dict[str, Any]: Step execution result
+            Dict containing transformed data
             
         Raises:
-            WorkflowExecutionError: If step execution fails after all retries
+            WorkflowExecutionError: If execution fails
         """
-        attempt = 0
-        last_exception = None
-        current_delay = retry_delay
-
-        while attempt < max_retries:
-            try:
-                # Ensure actor is healthy
-                step_actor = await self._ensure_actor_health(step_id, step_actor)
-                
-                # Execute step
-                self.logger.info(f"Executing step {step_id} (attempt {attempt + 1}/{max_retries})")
-                step_result_ref = step_actor.execute.remote(step_input)
-                step_result = await ray.get(step_result_ref)
-                return step_result
-
-            except (RayActorError, RayTaskError) as e:
-                last_exception = e
-                attempt += 1
-                if attempt < max_retries:
-                    self.logger.warning(
-                        f"Step {step_id} failed (attempt {attempt}/{max_retries}): {e}. "
-                        f"Retrying in {current_delay} seconds..."
-                    )
-                    await asyncio.sleep(current_delay)
-                    current_delay *= retry_backoff
-                else:
-                    self.logger.error(f"Step {step_id} failed after {max_retries} attempts: {e}")
-                    
-        raise WorkflowExecutionError(
-            f"Step {step_id} failed after {max_retries} attempts: {last_exception}"
-        )
-    
-    async def execute_async(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute workflow asynchronously"""
         try:
-            # Validate input
-            input_data = self.validate_input(input_data)
+            if not self.initialized:
+                raise WorkflowExecutionError("Step not initialized")
+            
+            # Get data from input
+            data = input_data.get('data')
+            if data is None:
+                raise WorkflowExecutionError("No data provided")
+            
+            # Convert data to numpy array if needed
+            if not isinstance(data, np.ndarray):
+                data = np.array(data)
+            
+            # Reshape data if needed
+            if len(data.shape) == 1:
+                data = data.reshape(-1, 1)
+            
+            # Get transformation method
+            method = self.step_config.get('params', {}).get('method')
+            if method not in ['standard']:
+                raise WorkflowExecutionError(f"Invalid transformation method: {method}")
+            
+            # Transform data
+            if method == 'standard' and self.scaler is not None:
+                transformed_data = self.scaler.fit_transform(data)
+            else:
+                raise WorkflowExecutionError(f"Transformation method {method} not properly initialized")
+            
+            return transformed_data.tolist()
+            
+        except Exception as e:
+            error_msg = f"Failed to execute transform step {self.step_id}: {str(e)}"
+            self.logger.error(error_msg)
+            raise WorkflowExecutionError(error_msg)
+    
+    async def health_check(self) -> bool:
+        """Check if the actor is healthy."""
+        return self.initialized
+
+@ray.remote
+class ResearchExecutionStep:
+    """Research execution step in workflow."""
+    
+    def __init__(self):
+        """Initialize research execution step."""
+        self.step_id: str = ""
+        self.step_config: Dict[str, Any] = {}
+        self.dependencies: List[str] = []
+        self.initialized: bool = False
+        self.logger = logging.getLogger(f"{__name__}.ResearchExecutionStep")
+    
+    async def initialize(self, step_id: str, config: Dict[str, Any], dependencies: Optional[List[str]] = None) -> bool:
+        """Initialize step with configuration.
+        
+        Args:
+            step_id: Step identifier
+            config: Step configuration
+            dependencies: List of step dependencies
+            
+        Returns:
+            bool: True if initialization successful
+        """
+        self.step_id = step_id
+        self.step_config = config
+        self.dependencies = dependencies or []  # Use empty list as default
+        self.initialized = True
+        return True
+    
+    async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute research step.
+        
+        Args:
+            input_data: Input data for research execution
+            
+        Returns:
+            Dict containing research results
+            
+        Raises:
+            WorkflowExecutionError: If execution fails
+        """
+        try:
+            if not self.initialized:
+                raise WorkflowExecutionError("Step not initialized")
+            
+            # Get strategy from config
+            strategy = self.step_config.get('strategy')
+            if not strategy:
+                raise WorkflowExecutionError("No strategy specified in step config")
+            
+            # Execute research strategy
+            # For now, just return a mock result
+            result = {
+                "status": "success",
+                "strategy": strategy,
+                "output": f"Executed {strategy} on input data"
+            }
+            
+            return result
+            
+        except Exception as e:
+            error_msg = f"Failed to execute research step {self.step_id}: {str(e)}"
+            self.logger.error(error_msg)
+            raise WorkflowExecutionError(error_msg)
+
+    async def health_check(self) -> bool:
+        """Check if the actor is healthy."""
+        return self.initialized
+
+class DistributedWorkflow:
+    """Distributed workflow class."""
+
+    def __init__(self, config: Optional[Union[Dict[str, Any], WorkflowConfig]] = None):
+        """Initialize distributed workflow.
+        
+        Args:
+            config: Workflow configuration
+        """
+        self.config = config
+        self.steps: Dict[str, Dict[str, Any]] = {}
+        self.state: WorkflowState = WorkflowState(
+            workflow_id=str(uuid.uuid4()),
+            name="default_workflow",
+            status=WorkflowStatus.PENDING.value
+        )
+        self.workflow_config: Optional[Dict[str, Any]] = None
+        self.logger = logging.getLogger(__name__)
+
+    def get_config_dict(self) -> Dict[str, Any]:
+        """Get workflow configuration as dictionary."""
+        if self.config is None:
+            return {}
+        
+        if isinstance(self.config, dict):
+            return self.config
+        
+        # Handle Pydantic models
+        if hasattr(self.config, 'dict'):
+            return self.config.dict()  # type: ignore
+        
+        # Fallback for other objects
+        return {k: v for k, v in self.config.__dict__.items() if not k.startswith('_')}
+
+    async def initialize_step(self, step: WorkflowStep) -> Optional[ray.ObjectRef]:
+        """Initialize a workflow step."""
+        try:
+            # Create step actor based on type
+            if step.type == WorkflowStepType.TRANSFORM:
+                actor = TransformStep.remote()  # type: ignore
+            elif step.type == WorkflowStepType.RESEARCH_EXECUTION:
+                actor = ResearchExecutionStep.remote()  # type: ignore
+            else:
+                self.logger.error(f"Unsupported step type: {step.type}")
+                return None
+
+            # Initialize step with configuration
+            config_dict = {}
+            if hasattr(step.config, 'dict'):
+                config_dict = step.config.dict()  # type: ignore
+            elif isinstance(step.config, dict):
+                config_dict = step.config
+            
+            dependencies = step.dependencies if step.dependencies else []
+            
+            # Call initialize on the actor
+            success = await actor.initialize.remote(  # type: ignore
+                step.id,
+                config_dict,
+                dependencies
+            )
+            
+            if not success:
+                self.logger.error(f"Failed to initialize step {step.id}")
+                return None
+                
+            return actor
+            
+        except Exception as e:
+            self.logger.error(f"Error initializing step {step.id}: {str(e)}")
+            return None
+
+    def get_workflow_state(self) -> Dict[str, Any]:
+        """Get current workflow state."""
+        state = self._ensure_state()
+        return {
+            "workflow_id": state.workflow_id,
+            "name": state.name,
+            "status": str(state.status),
+            "start_time": state.start_time,
+            "end_time": state.end_time
+        }
+
+    async def _initialize_step_actors(self, steps: List[Dict[str, Any]]) -> None:
+        """Initialize Ray actors for workflow steps.
+        
+        Args:
+            steps: List of step configurations
+        """
+        for step in steps:
+            step_id = step.get('id')
+            if not step_id or step_id not in self.steps:
+                continue
+                
+            step_type = step.get('type', WorkflowStepType.RESEARCH_EXECUTION)
+            
+            try:
+                # Create appropriate actor based on step type
+                actor: Optional[ActorHandle] = None
+                if step_type == WorkflowStepType.TRANSFORM:
+                    actor = cast(ActorHandle, TransformStep.remote())
+                else:
+                    actor = cast(ActorHandle, ResearchExecutionStep.remote())
+                
+                # Initialize actor with configuration
+                if actor is not None:
+                    # Cast to ActorHandle to help type checker
+                    init_ref = cast(ObjectRef, actor.initialize.remote(
+                        step_id,
+                        step.get('config', {}),
+                        (step.get('dependencies') or [])
+                    ))
+                    await init_ref
+                    
+                    # Store actor reference
+                    self.steps[step_id]['actor'] = actor
+                    self.steps[step_id]['status'] = 'initialized'
+                
+            except Exception as e:
+                error_msg = f"Failed to initialize step actor {step_id}: {str(e)}"
+                self.logger.error(error_msg)
+                self.steps[step_id]['status'] = 'failed'
+                self.steps[step_id]['error'] = error_msg
+                raise WorkflowExecutionError(error_msg)
+
+    def _ensure_state(self) -> WorkflowState:
+        """Ensure workflow state exists and return it.
+        
+        Returns:
+            WorkflowState: The current workflow state
+        """
+        if not self.state:
+            self.state = WorkflowState(
+                workflow_id=str(uuid.uuid4()),
+                name="default_workflow",
+                status=WorkflowStatus.PENDING.value
+            )
+        return self.state
+
+    def _initialize_step_configs(self, steps: List[Dict[str, Any]]) -> None:
+        """Initialize configurations for workflow steps.
+        
+        Args:
+            steps: List of step configurations
+        """
+        for step in steps:
+            step_id = step.get('id')
+            if not step_id:
+                continue
+                
+            # Store step configuration
+            self.steps[step_id] = {
+                'config': step,
+                'actor': None,
+                'status': 'pending',
+                'result': None,
+                'error': None
+            }
+
+    async def initialize(self, workflow_def: Dict[str, Any], workflow_id: str) -> None:
+        """Initialize workflow with definition.
+
+        Args:
+            workflow_def: Workflow definition
+            workflow_id: Unique identifier for the workflow
+            
+        Raises:
+            WorkflowExecutionError: If initialization fails
+        """
+        try:
+            # Convert workflow definition if needed
+            workflow_dict = workflow_def
+            if not isinstance(workflow_def, dict) and hasattr(workflow_def, 'model_dump'):
+                workflow_dict = workflow_def.model_dump()  # type: ignore
+
+            # Get steps from workflow definition
+            workflow = workflow_dict.get("COLLABORATION", {}).get("WORKFLOW", {})
+            if not workflow:
+                raise WorkflowExecutionError("Invalid workflow definition: missing COLLABORATION.WORKFLOW")
+            
+            steps = self._convert_workflow_to_steps(workflow)
+            
+            # Initialize step configurations
+            self._initialize_step_configs(steps)
+            
+            # Initialize step actors
+            await self._initialize_step_actors(steps)
+            
+            # Store workflow config
+            self.workflow_config = workflow_dict
             
             # Initialize workflow state
-            self.state_manager.initialize_workflow()
-            self.state_manager.set_workflow_status(WorkflowStatus.RUNNING)
+            self.state = WorkflowState(
+                workflow_id=workflow_id,
+                name=workflow_dict.get("name", "default_workflow"),
+                status=WorkflowStatus.PENDING.value
+            )
             
-            results = {}
-            final_output = None
+        except Exception as e:
+            error_msg = f"Failed to initialize workflow: {str(e)}"
+            self.logger.error(error_msg)
+            raise WorkflowExecutionError(error_msg)
+
+    def _convert_workflow_to_steps(self, workflow: Union[Dict[str, Any], List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Convert workflow definition to list of steps.
+        
+        Args:
+            workflow: Workflow definition (either a dictionary or a list)
             
-            # Get workflow steps
-            workflow_steps = self.workflow_config.get('WORKFLOW', {})
-            
-            # Ensure workflow_steps is a list of dictionaries
-            if isinstance(workflow_steps, dict):
-                workflow_steps = [
-                    {'step_id': step_id, **step_config}
-                    for step_id, step_config in sorted(
-                        workflow_steps.items(),
-                        key=lambda x: x[1].get('step', 0)
-                    )
-                ]
-            elif not isinstance(workflow_steps, list):
-                workflow_steps = []
-            
-            # Execute each step
-            for step in workflow_steps:
-                # Ensure step has a step number
-                step_num = step.get('step', step.get('step_id', 0))
-                if isinstance(step_num, str) and step_num.startswith('step_'):
-                    step_num = int(step_num.split('_')[-1])
-                
-                # Fallback to index if step_num is not a valid number
-                if not isinstance(step_num, int):
-                    step_num = workflow_steps.index(step) + 1
-                
-                step_id = f"step_{step_num}"
-                step_config = self.config.get(f'{step_id}_config', {})
-                
-                # Get retry settings
-                max_retries = step_config.get('max_retries', self.config.get('max_retries', 3))
-                retry_delay = step_config.get('retry_delay', self.config.get('retry_delay', 1.0))
-                retry_backoff = step_config.get('retry_backoff', self.config.get('retry_backoff', 2.0))
-                
-                # Prepare step input
-                try:
-                    # First try the workflow's method
-                    step_input = self._prepare_step_input(step, input_data, results)
-                except Exception:
-                    # Fallback to a default input preparation
-                    required_fields = step.get('input', []) if isinstance(step, dict) else []
-                    step_input = {
-                        field: input_data.get(field, f'Mock {field}') 
-                        for field in required_fields
+        Returns:
+            List of step dictionaries
+        """
+        steps = []
+        if isinstance(workflow, list):
+            # If workflow is a list, each item is already a step definition
+            for step_def in workflow:
+                step = {
+                    "id": step_def.get("id", str(uuid.uuid4())),
+                    "name": step_def.get("name", ""),
+                    "type": step_def.get("type", WorkflowStepType.RESEARCH_EXECUTION),
+                    "config": {
+                        "strategy": step_def.get("config", {}).get("strategy", "feature_engineering"),
+                        "params": {
+                            "max_retries": step_def.get("config", {}).get("max_retries", 3),
+                            "retry_delay": step_def.get("config", {}).get("retry_delay", 1.0),
+                            "retry_backoff": step_def.get("config", {}).get("retry_backoff", 2.0),
+                            "timeout": step_def.get("config", {}).get("timeout", 30.0),
+                            "batch_size": step_def.get("config", {}).get("batch_size", 10),
+                            "num_workers": step_def.get("config", {}).get("num_workers", 4)
+                        }
                     }
-                    step_input.update({
-                        'name': step.get('name', 'Mock Step') if isinstance(step, dict) else 'Mock Step',
-                        'description': step.get('description', 'Mock Step Description') if isinstance(step, dict) else 'Mock Step Description',
-                        'agent_config': step.get('agent_config', {}) if isinstance(step, dict) else {},
-                        'input': required_fields
-                    })
-                
-                # Execute step with retry logic
+                }
+                steps.append(step)
+        else:
+            # If workflow is a dictionary, convert each item to a step definition
+            for step_id, step_def in workflow.items():
+                step = {
+                    "id": step_def.get("id", step_id),
+                    "name": step_def.get("name", ""),
+                    "type": step_def.get("type", WorkflowStepType.RESEARCH_EXECUTION),
+                    "config": {
+                        "strategy": step_def.get("config", {}).get("strategy", "feature_engineering"),
+                        "params": {
+                            "max_retries": step_def.get("config", {}).get("max_retries", 3),
+                            "retry_delay": step_def.get("config", {}).get("retry_delay", 1.0),
+                            "retry_backoff": step_def.get("config", {}).get("retry_backoff", 2.0),
+                            "timeout": step_def.get("config", {}).get("timeout", 30.0),
+                            "batch_size": step_def.get("config", {}).get("batch_size", 10),
+                            "num_workers": step_def.get("config", {}).get("num_workers", 4)
+                        }
+                    }
+                }
+                steps.append(step)
+        return steps
+        
+    async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute workflow with input data.
+        
+        Args:
+            input_data: Input data for workflow execution
+            
+        Returns:
+            Dict containing workflow results
+            
+        Raises:
+            WorkflowExecutionError: If execution fails
+        """
+        try:
+            # Add logging for input validation
+            self.logger.info(f"Validating input data: {input_data}")
+            
+            # Validate input data
+            if not isinstance(input_data, dict):
+                error_msg = f"Input data must be a dictionary, got {type(input_data)}"
+                self.logger.error(error_msg)
+                raise WorkflowExecutionError(error_msg)
+            if "data" not in input_data:
+                error_msg = "Input data must contain 'data' key"
+                self.logger.error(error_msg)
+                raise WorkflowExecutionError(error_msg)
+            if input_data.get("data") is None:
+                error_msg = "Input data 'data' value cannot be None"
+                self.logger.error(error_msg)
+                raise WorkflowExecutionError(error_msg)
+            
+            # Initialize state if needed
+            state = self._ensure_state()
+
+            # Update workflow status
+            state.update_status(WorkflowStatus.RUNNING)
+            if not hasattr(state, 'start_time') or state.start_time is None:
+                state.start_time = time.time()  # type: ignore
+            
+            # Execute steps in sequence
+            results = {}
+            steps_executed = 0
+            for step_id, step in self.steps.items():
+                actor = step.get('actor')
+                if not actor:
+                    continue
+                    
                 try:
-                    step_actor = self.distributed_steps.get(step_id)
-                    if not step_actor:
-                        raise ValueError(f"No step actor found for step_id: {step_id}")
+                    # Execute step
+                    step['status'] = 'running'
+                    result = await actor.execute.remote(input_data)
                     
-                    step_result = await self._execute_step_with_retry(
-                        step_actor,
-                        step_id,
-                        step_input,
-                        max_retries=max_retries,
-                        retry_delay=retry_delay,
-                        retry_backoff=retry_backoff
-                    )
-                    
-                    # Store results
-                    results[step_id] = step_result
-                    self.state_manager.set_step_result(step_id, step_result)
-                    self.state_manager.set_step_status(step_id, StepStatus.SUCCESS)
-                    
-                    # Update final output
-                    if isinstance(step_result, dict):
-                        if 'output' in step_result:
-                            final_output = step_result['output']
-                        else:
-                            final_output = step_result
-                    else:
-                        final_output = step_result
+                    # Store result
+                    step['status'] = 'completed'
+                    step['result'] = result
+                    results[step_id] = result
+                    steps_executed += 1
                     
                 except Exception as e:
-                    self.state_manager.set_step_status(step_id, StepStatus.FAILED)
-                    raise
+                    error_msg = f"Failed to execute step {step_id}: {str(e)}"
+                    self.logger.error(error_msg)
+                    step['status'] = 'failed'
+                    step['error'] = error_msg
+                    raise WorkflowExecutionError(error_msg)
             
-            # Set workflow status to completed
-            self.state_manager.set_workflow_status(WorkflowStatus.COMPLETED)
+            # Update workflow status
+            if not hasattr(self, 'state') or self.state is None:
+                from types import SimpleNamespace
+                self.state = SimpleNamespace()  # type: ignore
+            self.state.status = WorkflowStatus.COMPLETED
+            if not hasattr(self.state, 'end_time') or self.state.end_time is None:
+                self.state.end_time = time.time()  # type: ignore
             
             return {
-                'status': 'success',
-                'output': final_output,
-                'results': results
+                "status": "success",
+                "metrics": {
+                    "steps_executed": steps_executed
+                },
+                "results": results
             }
             
         except Exception as e:
-            logger.error(f"Error executing workflow: {str(e)}")
-            self.state_manager.set_workflow_status(WorkflowStatus.FAILED)
-            raise
-    
-    def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute workflow synchronously"""
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(self.execute_async(input_data))
-    
-    def validate_input(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate workflow input data."""
-        return input_data
-    
-    def _prepare_step_input(self, step: Dict[str, Any], input_data: Dict[str, Any], previous_results: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Prepare input for a workflow step."""
-        return input_data
-    
-    def _default_error_handler(self, error: Exception, input_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Handle workflow errors"""
-        error_msg = f"Workflow error: {str(error)}"
-        if input_data:
-            error_msg += f" with input: {input_data}"
-        logger.error(error_msg)
-        raise WorkflowExecutionError(error_msg)
-    
+            error_msg = f"Failed to execute workflow: {str(e)}"
+            self.logger.error(error_msg)
+            if not hasattr(self, 'state') or self.state is None:
+                from types import SimpleNamespace
+                self.state = SimpleNamespace()  # type: ignore
+            self.state.status = WorkflowStatus.FAILED
+            self.state.end_time = time.time()  # type: ignore
+            raise WorkflowExecutionError(error_msg)
+            
+    async def get_status(self) -> Dict[str, Any]:
+        """Get current workflow status.
+        
+        Returns:
+            Dict containing workflow status information
+        """
+        return {
+            'workflow_id': self.state.workflow_id,
+            'name': self.state.name,
+            'status': self.state.status,
+            'start_time': self.state.start_time,
+            'end_time': self.state.end_time,
+            'steps': {
+                step_id: {
+                    'status': step['status'],
+                    'error': step['error']
+                }
+                for step_id, step in self.steps.items()
+            }
+        }
+        
     @classmethod
-    def create_remote_workflow(cls, workflow_config: Dict[str, Any], config: Dict[str, Any], state_manager: Optional[WorkflowStateManager] = None) -> Any:
-        """Create a remote workflow instance."""
-        # Create a new remote actor instance
-        RemoteWorkflow = ray.remote(cls)
-        return RemoteWorkflow.remote(workflow_config, config, state_manager)
+    async def create_remote_workflow(cls, workflow_def: Dict[str, Any], workflow_config: Union[dict, 'WorkflowConfig'], workflow_id: str) -> 'ray.actor.ActorHandle':
+        """Create a remote workflow actor.
+        
+        Args:
+            workflow_def: Workflow definition
+            workflow_config: Workflow configuration
+            workflow_id: Unique identifier for the workflow
+            
+        Returns:
+            Ray actor handle for the workflow
+        """
+        try:
+            # Create workflow instance
+            workflow = ray.remote(cls).remote(config=workflow_config)  # type: ignore
+            
+            # Initialize workflow
+            await workflow.initialize.remote(workflow_def, workflow_id)  # type: ignore
+            
+            return workflow
+            
+        except Exception as e:
+            error_msg = f"Failed to create remote workflow: {str(e)}"
+            logger.error(error_msg)
+            raise WorkflowExecutionError(error_msg)
 
-def execute_step(step_type: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Standalone function to execute a step with the given type and input data.
+    async def execute_async(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute workflow asynchronously.
+        
+        Args:
+            input_data: Input data for workflow execution
+            
+        Returns:
+            Dict containing workflow results
+            
+        Raises:
+            WorkflowExecutionError: If execution fails
+        """
+        return await self.execute(input_data)
 
-    Args:
-        step_type (str): The type of step to execute.
-        input_data (Dict[str, Any]): Input data for the step.
+class ResearchDistributedWorkflow(DistributedWorkflow):
+    """Research distributed workflow class."""
 
-    Returns:
-        Dict[str, Any]: The output from the step execution
-    """
-    # This is a placeholder implementation. You may need to modify it based on your specific requirements.
-    # For now, it simply returns the input data as a demonstration.
-    return input_data
+    def __init__(self, name: Optional[str] = None, config: Optional[Union[Dict[str, Any], WorkflowConfig]] = None, steps: Optional[List[Dict[str, Any]]] = None):
+        """Initialize research distributed workflow.
+        
+        Args:
+            name: Workflow name
+            config: Workflow configuration
+            steps: List of workflow steps
+        """
+        super().__init__(config)
+        self.name = name or "default_research_workflow"
+        self.research_context: Dict[str, Any] = {}
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialize state properly
+        self.state = WorkflowState(
+            workflow_id=str(uuid.uuid4()),
+            name=self.name,
+            status=WorkflowStatus.PENDING
+        )
+        
+        # Initialize steps if provided
+        if steps:
+            self.steps = {}
+            for step in steps:
+                step_id = step.get('id')
+                if step_id:
+                    self.steps[step_id] = {
+                        'config': step.get('config', {}),
+                        'dependencies': step.get('dependencies', []),
+                        'status': 'pending',
+                        'actor': None,
+                        'result': None,
+                        'error': None
+                    }
+                    
+                    # Create actor for step
+                    try:
+                        # Create a new actor instance
+                        actor = ResearchExecutionStep.options(name=step_id).remote()
+                        # Initialize the actor
+                        init_result = ray.get(actor.initialize.remote(
+                            step_id=step_id,
+                            config=step.get('config', {}),
+                            dependencies=step.get('dependencies', [])
+                        ))
+                        if init_result:
+                            self.steps[step_id]['actor'] = actor
+                        else:
+                            raise WorkflowExecutionError(f"Failed to initialize step {step_id}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to initialize step {step_id}: {e}")
+                        raise WorkflowExecutionError(f"Failed to initialize step {step_id}: {e}")
 
-def _execute_step_with_retry(
-    distributed_steps: Dict[str, Any], 
-    step_type: str, 
-    step_def: Dict[str, Any], 
-    input_data: Dict[str, Any]
-) -> Dict[str, Any]:
-    """
-    Standalone function to execute a step with retry mechanism.
+    async def initialize(self, workflow_def: Dict[str, Any], workflow_id: str) -> None:
+        """Initialize workflow with definition.
+        
+        Args:
+            workflow_def: Workflow definition
+            workflow_id: Unique identifier for the workflow
+            
+        Raises:
+            WorkflowExecutionError: If initialization fails
+        """
+        try:
+            # Convert workflow definition if needed
+            workflow_dict = workflow_def
+            if not isinstance(workflow_def, dict) and hasattr(workflow_def, 'model_dump'):
+                workflow_dict = workflow_def.model_dump()
 
-    Args:
-        distributed_steps (Dict[str, Any]): Dictionary of distributed steps
-        step_type (str): The type of step to execute.
-        step_def (Dict[str, Any]): Step definition configuration.
-        input_data (Dict[str, Any]): Input data for the step.
+            # Get steps from workflow definition
+            workflow = workflow_dict.get("COLLABORATION", {}).get("WORKFLOW", [])
+            if not workflow:
+                raise WorkflowExecutionError("Invalid workflow definition: missing COLLABORATION.WORKFLOW")
+            
+            # Convert workflow to steps
+            steps = self._convert_workflow_to_steps(workflow)
+            
+            # Initialize step configurations
+            self._initialize_step_configs(steps)
+            
+            # Initialize step actors
+            await self._initialize_step_actors(steps)
+            
+            # Store workflow config
+            self.workflow_config = workflow_dict
+            
+            # Update workflow state
+            self.state = WorkflowState(
+                workflow_id=workflow_id,
+                name=self.name,
+                status=WorkflowStatus.PENDING
+            )
+            
+        except Exception as e:
+            error_msg = f"Failed to initialize workflow: {str(e)}"
+            self.logger.error(error_msg)
+            self.state.status = WorkflowStatus.FAILED
+            raise WorkflowExecutionError(error_msg)
 
-    Returns:
-        Dict[str, Any]: The output from the step execution
-    """
-    # This is a placeholder implementation. You may need to modify it based on your specific requirements.
-    # For now, it simply returns the input data as a demonstration.
-    return input_data
+    async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute workflow with input data."""
+        try:
+            # Validate input data
+            if not isinstance(input_data, dict):
+                error_msg = f"Input data must be a dictionary, got {type(input_data)}"
+                self.logger.error(error_msg)
+                raise WorkflowExecutionError(error_msg)
 
-class WorkflowExecutionError(Exception):
-    """Custom exception for workflow execution errors"""
-    def __init__(self, message, add_prefix=True):
-        self.message = message
-        self.add_prefix = add_prefix
+            # Update workflow status
+            self.state.status = WorkflowStatus.RUNNING
+            if not hasattr(self.state, 'start_time') or self.state.start_time is None:
+                self.state.start_time = time.time()
+            
+            # Execute steps in sequence, respecting dependencies
+            results = {}
+            steps_executed = 0
+            
+            # Get ordered steps based on dependencies
+            step_ids = list(self.steps.keys())
+            for step_id in step_ids:
+                step = self.steps[step_id]
+                actor = step.get('actor')
+                if not actor:
+                    continue
+                
+                try:
+                    # Prepare input data with dependencies
+                    step_input = {"data": input_data.get("data")}
+                    step_config = step.get('config', {})
+                    dependencies = step_config.get('dependencies', [])
+                    
+                    if dependencies:
+                        dep_results = {}
+                        for dep_id in dependencies:
+                            if dep_id not in results:
+                                raise WorkflowExecutionError(f"Dependent step {dep_id} not executed yet")
+                            dep_results[dep_id] = results[dep_id].get("data")
+                        step_input["dependencies"] = dep_results
+                    
+                    # Execute step
+                    step['status'] = WorkflowStatus.RUNNING.value
+                    result = await actor.execute.remote(step_input)
+                    
+                    # Store result
+                    step['status'] = WorkflowStatus.COMPLETED.value
+                    step['result'] = result
+                    results[step_id] = result
+                    steps_executed += 1
+                    
+                except Exception as e:
+                    error_msg = f"Failed to execute step {step_id}: {str(e)}"
+                    self.logger.error(error_msg)
+                    step['status'] = WorkflowStatus.FAILED.value
+                    step['error'] = error_msg
+                    self.state.status = WorkflowStatus.FAILED
+                    self.state.end_time = time.time()
+                    raise WorkflowExecutionError(error_msg)
+            
+            # Update workflow status
+            self.state.status = WorkflowStatus.COMPLETED
+            self.state.end_time = time.time()
+            
+            # Get final result from last step
+            final_step_id = step_ids[-1]
+            final_result = results[final_step_id] if results else None
+            
+            return {
+                "status": WorkflowStatus.COMPLETED.value,
+                "metrics": {
+                    "steps_executed": steps_executed
+                },
+                "results": results,
+                "data": final_result.get("data") if final_result else None
+            }
+            
+        except Exception as e:
+            error_msg = f"Failed to execute workflow: {str(e)}"
+            self.logger.error(error_msg)
+            self.state.status = WorkflowStatus.FAILED
+            self.state.end_time = time.time()
+            raise WorkflowExecutionError(error_msg)
 
-class StepExecutionError(Exception):
-    """Custom exception for step execution errors"""
-    pass
+    async def get_status(self) -> Dict[str, Any]:
+        """Get current workflow status."""
+        return {
+            'workflow_id': self.state.workflow_id,
+            'name': self.state.name,
+            'status': self.state.status.value if isinstance(self.state.status, WorkflowStatus) else self.state.status,
+            'start_time': self.state.start_time,
+            'end_time': self.state.end_time,
+            'steps': {
+                step_id: {
+                    'status': step['status'],
+                    'error': step.get('error', '')
+                }
+                for step_id, step in self.steps.items()
+            }
+        }
+        
+    @classmethod
+    async def create_remote_workflow(cls, workflow_def: Dict[str, Any], workflow_config: Union[dict, 'WorkflowConfig'], workflow_id: str) -> 'ray.actor.ActorHandle':
+        """Create a remote workflow actor.
+        
+        Args:
+            workflow_def: Workflow definition
+            workflow_config: Workflow configuration
+            workflow_id: Unique identifier for the workflow
+            
+        Returns:
+            Ray actor handle for the workflow
+        """
+        try:
+            # Create workflow instance
+            workflow = ray.remote(cls).remote(config=workflow_config)  # type: ignore
+            
+            # Initialize workflow
+            await workflow.initialize.remote(workflow_def, workflow_id)  # type: ignore
+            
+            return workflow
+            
+        except Exception as e:
+            error_msg = f"Failed to create remote workflow: {str(e)}"
+            logger.error(error_msg)
+            raise WorkflowExecutionError(error_msg)
 
-# Initialize Ray when module is imported
-initialize_ray()
+    async def execute_async(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute workflow asynchronously.
+        
+        Args:
+            input_data: Input data for workflow execution
+            
+        Returns:
+            Dict containing workflow results
+            
+        Raises:
+            WorkflowExecutionError: If execution fails
+        """
+        return await self.execute(input_data) 

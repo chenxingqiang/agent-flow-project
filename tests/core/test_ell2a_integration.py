@@ -4,9 +4,11 @@ import pytest
 import asyncio
 from typing import Dict, Any
 from agentflow.core.ell2a_integration import ell2a_integration
-from agentflow.core.config import WorkflowConfig
+from agentflow.core.workflow_types import WorkflowConfig, ErrorPolicy, WorkflowStep, StepConfig, WorkflowStepType
+from agentflow.ell2a.types.message import Message, MessageRole
 from agentflow.ell2a.lmp import LMPType
 from agentflow.ell2a.workflow import ELL2AWorkflow
+import uuid
 
 @pytest.fixture(autouse=True)
 def cleanup_ell2a():
@@ -19,43 +21,50 @@ def cleanup_ell2a():
 def sample_workflow_config():
     """Create a sample workflow configuration."""
     return WorkflowConfig(
+        id=str(uuid.uuid4()),
         name="Test Workflow",
         max_iterations=10,
-        timeout=3600,
-        logging_level='INFO',
-        required_fields=[],
-        error_policy={'ignore_warnings': False, 'fail_fast': True},
-        retry_policy={'max_retries': 3, 'retry_delay': 1.0},
-        steps=[],
-        ell2a_config={
-            "mode": "simple",
-            "model": "test-model",
-            "complex": {
-                "track_performance": True,
-                "track_memory": True
-            }
-        }
+        timeout=30,
+        error_policy=ErrorPolicy(),
+        steps=[
+            WorkflowStep(
+                id="step-1",
+                name="step_1",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="standard",
+                    params={"test": "value"}
+                )
+            )
+        ],
+        distributed=False
     )
 
 @pytest.mark.asyncio
 async def test_ell2a_message_handling():
     """Test ELL2A message creation and handling."""
     # Create a message
-    message = ell2a_integration.create_message(
-        role="user",
+    message = Message(
+        role=MessageRole.USER,
         content="Test message",
-        metadata={"type": LMPType.AGENT}
+        metadata={
+            "role": MessageRole.USER,
+            "type": LMPType.AGENT
+        }
     )
+    message_dict = {
+        "content": message.content,
+        "metadata": message.metadata
+    }
     
-    # Add message to context
-    ell2a_integration.add_message(message)
+    # Add message to ELL2A integration
+    ell2a_integration.add_message(message_dict)
     
-    # Get messages
+    # Verify message was added
     messages = ell2a_integration.get_messages()
     assert len(messages) == 1
-    assert messages[0]["role"] == "user"
-    assert messages[0]["content"] == "Test message"
-    assert messages[0]["metadata"]["type"] == LMPType.AGENT
+    assert messages[0]["content"] == message_dict["content"]
+    assert messages[0]["metadata"] == message_dict["metadata"]
 
 @pytest.mark.asyncio
 async def test_ell2a_workflow_registration():
@@ -83,17 +92,25 @@ async def test_ell2a_function_decoration():
     
     @ell2a_integration.with_ell2a(mode="simple")
     async def test_function():
-        return {"result": "success"}
+        return Message(
+            role=MessageRole.ASSISTANT,
+            content="success",
+            metadata={"type": "result"}
+        )
     
     result = await test_function()
-    assert result["result"] == "success"
+    assert result.content == "success"
     
     @ell2a_integration.with_ell2a(mode="complex")
     async def test_complex_function():
-        return {"result": "complex success"}
+        return Message(
+            role=MessageRole.ASSISTANT,
+            content="complex success",
+            metadata={"type": "result"}
+        )
     
     result = await test_complex_function()
-    assert result["result"] == "complex success"
+    assert result.content == "complex success"
 
 @pytest.mark.asyncio
 async def test_ell2a_performance_tracking():
@@ -102,7 +119,11 @@ async def test_ell2a_performance_tracking():
     @ell2a_integration.track_function()
     async def tracked_function():
         await asyncio.sleep(0.1)  # Simulate work
-        return {"result": "tracked"}
+        return Message(
+            role=MessageRole.ASSISTANT,
+            content="tracked",
+            metadata={"type": "result"}
+        )
     
     result = await tracked_function()
     metrics = ell2a_integration.get_metrics()
@@ -143,13 +164,15 @@ async def test_ell2a_error_handling():
 @pytest.mark.asyncio
 async def test_ell2a_context_management():
     """Test ELL2A context management."""
-    # Create and add messages
+    # Create test messages
     messages = [
-        ell2a_integration.create_message(
-            role="user",
-            content=f"Message {i}",
-            metadata={"type": LMPType.AGENT}
-        ) for i in range(3)
+        {
+            "content": f"Message {i}",
+            "metadata": {
+                "role": MessageRole.USER,
+                "type": LMPType.AGENT
+            }
+        } for i in range(3)
     ]
     
     for msg in messages:
@@ -167,27 +190,30 @@ async def test_ell2a_context_management():
 @pytest.mark.asyncio
 async def test_ell2a_workflow_execution(sample_workflow_config):
     """Test ELL2A workflow execution."""
+    # Create a message
+    message = Message(
+        role=MessageRole.USER,
+        content="Test message",
+        metadata={
+            "role": MessageRole.USER,
+            "type": LMPType.AGENT
+        }
+    )
+    message_dict = {
+        "content": message.content,
+        "metadata": message.metadata
+    }
+    
+    # Add message to ELL2A integration
+    ell2a_integration.add_message(message_dict)
+    
+    # Create and initialize workflow
     workflow = ELL2AWorkflow(
         name=sample_workflow_config.name,
         description="Test workflow execution"
     )
-    
-    # Add a test step
-    workflow.add_step({
-        "name": "test_step",
-        "type": "process",
-        "config": {"param": "value"}
-    })
-    
-    # Initialize and register workflow
     await workflow.initialize()
-    ell2a_integration.register_workflow(workflow.id, workflow)
     
-    # Execute workflow
-    result = await workflow.run({
-        "input": "test data",
-        "config": sample_workflow_config.ell2a_config
-    })
-    
+    # Run workflow
+    result = await workflow.run({"input": "test"})
     assert result is not None
-    ell2a_integration.unregister_workflow(workflow.id) 

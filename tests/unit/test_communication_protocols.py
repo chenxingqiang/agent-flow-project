@@ -1,12 +1,71 @@
 import pytest
-import asyncio
+import ray
+import uuid
 from typing import Dict, Any
-from agentflow.core.workflow import WorkflowEngine
-from agentflow.core.workflow_types import WorkflowConfig
-from agentflow.core.metric_type import MetricType
+from agentflow.core.workflow_types import (
+    WorkflowConfig as WorkflowConfigType,
+    WorkflowStep,
+    WorkflowStepType,
+    StepConfig,
+    WorkflowStatus,
+    WorkflowConfig
+)
+from agentflow.core.workflow_engine import WorkflowEngine
+from agentflow.core.exceptions import WorkflowExecutionError
+from agentflow.core.types import AgentType, AgentMode, AgentConfig, ModelConfig
+from agentflow.agents.agent import Agent
+from pathlib import Path
+import json
+import asyncio
+from datetime import datetime
+
+@pytest.fixture(scope="module")
+def test_data_dir():
+    """Create test data directory"""
+    test_dir = Path(__file__).parent.parent / 'data'
+    test_dir.mkdir(parents=True, exist_ok=True)
+    return test_dir
+
+@pytest.fixture(scope="module")
+def ray_context():
+    """Initialize Ray for testing"""
+    if not ray.is_initialized():
+        ray.init(ignore_reinit_error=True)
+    yield
+    if ray.is_initialized():
+        ray.shutdown()
+
+@pytest.fixture
+def workflow_engine():
+    """Create a workflow engine instance"""
+    async def _create_engine(workflow_def: Dict[str, Any], workflow_config: Dict[str, Any]) -> WorkflowEngine:
+        engine = WorkflowEngine()
+        await engine.initialize(workflow_def=workflow_def, workflow_config=workflow_config)
+        
+        # Create and register default agent
+        model_config = ModelConfig(name="gpt-4", provider="openai")
+        workflow_cfg = WorkflowConfigType(**workflow_config)  # For workflow engine
+        agent_workflow_cfg = WorkflowConfig(**workflow_config)  # For agent config
+        
+        agent_config = AgentConfig(
+            name="default_agent",
+            type=AgentType.RESEARCH,
+            model=model_config,  # Pass ModelConfig instance directly
+            workflow=agent_workflow_cfg.model_dump()  # Convert back to dictionary
+        )
+        agent = Agent(config=agent_config, name="default_agent")
+        await agent.initialize()  # Initialize the agent before registering
+        await engine.register_workflow(agent, workflow_cfg)
+        
+        # Store the agent's ID for later use
+        engine.default_agent_id = agent.id
+        
+        return engine
+    return _create_engine
 
 @pytest.mark.asyncio
-async def test_federated_learning_protocol():
+async def test_federated_learning_protocol(workflow_engine):
+    """Test federated learning protocol"""
     workflow_def = {
         "COLLABORATION": {
             "MODE": "PARALLEL",
@@ -27,35 +86,58 @@ async def test_federated_learning_protocol():
             ]
         }
     }
+
+    workflow_config = {
+        "id": str(uuid.uuid4()),
+        "name": "test_federated_workflow",
+        "max_iterations": 5,
+        "timeout": 3600,
+        "error_policy": {
+            "fail_fast": True,
+            "ignore_warnings": False,
+            "max_errors": 10,
+            "retry_policy": {
+                "max_retries": 3,
+                "retry_delay": 1.0,
+                "backoff": 2.0,
+                "max_delay": 60.0
+            }
+        },
+        "steps": [
+            {
+                "id": "step1",
+                "name": "federated_step",
+                "type": WorkflowStepType.TRANSFORM.value,
+                "required": True,
+                "optional": False,
+                "is_distributed": True,
+                "dependencies": [],
+                "config": {
+                    "strategy": "federated",
+                    "params": {"protocol": "federated"},
+                    "retry_delay": 1.0,
+                    "retry_backoff": 2.0,
+                    "max_retries": 3
+                }
+            }
+        ]
+    }
+
+    # Create workflow engine
+    engine = await workflow_engine(workflow_def=workflow_def, workflow_config=workflow_config)
     
-    workflow_config = WorkflowConfig(
-        max_iterations=5,
-        timeout=3600,
-        logging_level="INFO",
-        required_fields=[],
-        error_handling={},
-        retry_policy=None,
-        error_policy=None,
-        is_distributed=True,
-        distributed=True,
-        steps=[],
-        metadata={},
-        agents={}
-    )
-
-    workflow = WorkflowEngine(workflow_def, workflow_config)
-    result = await workflow.execute({
-        "research_topic": "AI Ethics",
-        "metrics": {
-            MetricType.LATENCY.value: [{"value": 100, "timestamp": 1234567890}]
-        }
-    })
-
+    # Execute workflow
+    result = await engine.execute_workflow(engine.default_agent_id, {"data": {}})
+    
+    # Verify results
     assert result is not None
-    assert "metrics" in result
+    assert "steps" in result
+    assert "step1" in result["steps"]
+    assert result["steps"]["step1"]["result"] is not None
 
 @pytest.mark.asyncio
-async def test_gossip_protocol():
+async def test_gossip_protocol(workflow_engine):
+    """Test gossip protocol"""
     workflow_def = {
         "COLLABORATION": {
             "MODE": "PARALLEL",
@@ -76,35 +158,58 @@ async def test_gossip_protocol():
             ]
         }
     }
+
+    workflow_config = {
+        "id": str(uuid.uuid4()),
+        "name": "test_gossip_workflow",
+        "max_iterations": 5,
+        "timeout": 3600,
+        "error_policy": {
+            "fail_fast": True,
+            "ignore_warnings": False,
+            "max_errors": 10,
+            "retry_policy": {
+                "max_retries": 3,
+                "retry_delay": 1.0,
+                "backoff": 2.0,
+                "max_delay": 60.0
+            }
+        },
+        "steps": [
+            {
+                "id": "step1",
+                "name": "gossip_step",
+                "type": WorkflowStepType.TRANSFORM.value,
+                "required": True,
+                "optional": False,
+                "is_distributed": True,
+                "dependencies": [],
+                "config": {
+                    "strategy": "gossip",
+                    "params": {"protocol": "gossip"},
+                    "retry_delay": 1.0,
+                    "retry_backoff": 2.0,
+                    "max_retries": 3
+                }
+            }
+        ]
+    }
+
+    # Create workflow engine
+    engine = await workflow_engine(workflow_def=workflow_def, workflow_config=workflow_config)
     
-    workflow_config = WorkflowConfig(
-        max_iterations=5,
-        timeout=3600,
-        logging_level="INFO",
-        required_fields=[],
-        error_handling={},
-        retry_policy=None,
-        error_policy=None,
-        is_distributed=True,
-        distributed=True,
-        steps=[],
-        metadata={},
-        agents={}
-    )
-
-    workflow = WorkflowEngine(workflow_def, workflow_config)
-    result = await workflow.execute({
-        "research_topic": "AI Ethics",
-        "metrics": {
-            MetricType.LATENCY.value: [{"value": 100, "timestamp": 1234567890}]
-        }
-    })
-
+    # Execute workflow
+    result = await engine.execute_workflow(engine.default_agent_id, {"data": {}})
+    
+    # Verify results
     assert result is not None
-    assert "metrics" in result
+    assert "steps" in result
+    assert "step1" in result["steps"]
+    assert result["steps"]["step1"]["result"] is not None
 
 @pytest.mark.asyncio
-async def test_hierarchical_merge_protocol():
+async def test_hierarchical_merge_protocol(workflow_engine):
+    """Test hierarchical merge protocol"""
     workflow_def = {
         "COLLABORATION": {
             "MODE": "DYNAMIC_ROUTING",
@@ -133,35 +238,58 @@ async def test_hierarchical_merge_protocol():
             }
         }
     }
+
+    workflow_config = {
+        "id": str(uuid.uuid4()),
+        "name": "test_hierarchical_workflow",
+        "max_iterations": 5,
+        "timeout": 3600,
+        "error_policy": {
+            "fail_fast": True,
+            "ignore_warnings": False,
+            "max_errors": 10,
+            "retry_policy": {
+                "max_retries": 3,
+                "retry_delay": 1.0,
+                "backoff": 2.0,
+                "max_delay": 60.0
+            }
+        },
+        "steps": [
+            {
+                "id": "step1",
+                "name": "hierarchical_step",
+                "type": WorkflowStepType.TRANSFORM.value,
+                "required": True,
+                "optional": False,
+                "is_distributed": True,
+                "dependencies": [],
+                "config": {
+                    "strategy": "hierarchical",
+                    "params": {"protocol": "hierarchical"},
+                    "retry_delay": 1.0,
+                    "retry_backoff": 2.0,
+                    "max_retries": 3
+                }
+            }
+        ]
+    }
+
+    # Create workflow engine
+    engine = await workflow_engine(workflow_def=workflow_def, workflow_config=workflow_config)
     
-    workflow_config = WorkflowConfig(
-        max_iterations=5,
-        timeout=3600,
-        logging_level="INFO",
-        required_fields=[],
-        error_handling={},
-        retry_policy=None,
-        error_policy=None,
-        is_distributed=True,
-        distributed=True,
-        steps=[],
-        metadata={},
-        agents={}
-    )
-
-    workflow = WorkflowEngine(workflow_def, workflow_config)
-    result = await workflow.execute({
-        "research_topic": "AI Ethics",
-        "metrics": {
-            MetricType.LATENCY.value: [{"value": 100, "timestamp": 1234567890}]
-        }
-    })
-
+    # Execute workflow
+    result = await engine.execute_workflow(engine.default_agent_id, {"data": {}})
+    
+    # Verify results
     assert result is not None
-    assert "metrics" in result
+    assert "steps" in result
+    assert "step1" in result["steps"]
+    assert result["steps"]["step1"]["result"] is not None
 
 @pytest.mark.asyncio
-async def test_invalid_communication_protocol():
+async def test_invalid_communication_protocol(workflow_engine):
+    """Test invalid communication protocol"""
     workflow_def = {
         "COLLABORATION": {
             "MODE": "SEQUENTIAL",
@@ -182,33 +310,53 @@ async def test_invalid_communication_protocol():
             ]
         }
     }
-    
-    workflow_config = WorkflowConfig(
-        max_iterations=5,
-        timeout=3600,
-        logging_level="INFO",
-        required_fields=[],
-        error_handling={},
-        retry_policy=None,
-        error_policy=None,
-        is_distributed=False,
-        distributed=False,
-        steps=[],
-        metadata={},
-        agents={}
-    )
 
-    workflow = WorkflowEngine(workflow_def, workflow_config)
-    with pytest.raises(ValueError):
-        await workflow.execute({
-            "research_topic": "AI Ethics",
-            "metrics": {
-                MetricType.LATENCY.value: [{"value": 100, "timestamp": 1234567890}]
+    workflow_config = {
+        "id": str(uuid.uuid4()),
+        "name": "test_invalid_workflow",
+        "max_iterations": 5,
+        "timeout": 3600,
+        "error_policy": {
+            "fail_fast": True,
+            "ignore_warnings": False,
+            "max_errors": 10,
+            "retry_policy": {
+                "max_retries": 3,
+                "retry_delay": 1.0,
+                "backoff": 2.0,
+                "max_delay": 60.0
             }
-        })
+        },
+        "steps": [
+            {
+                "id": "step1",
+                "name": "invalid_step",
+                "type": WorkflowStepType.TRANSFORM.value,
+                "required": True,
+                "optional": False,
+                "is_distributed": True,
+                "dependencies": [],
+                "config": {
+                    "strategy": "custom",
+                    "params": {"protocol": "invalid"},
+                    "retry_delay": 1.0,
+                    "retry_backoff": 2.0,
+                    "max_retries": 3
+                }
+            }
+        ]
+    }
+
+    # Create workflow engine
+    engine = await workflow_engine(workflow_def=workflow_def, workflow_config=workflow_config)
+    
+    # Execute workflow and expect error
+    with pytest.raises(WorkflowExecutionError):
+        await engine.execute_workflow(engine.default_agent_id, {"data": {}})
 
 @pytest.mark.asyncio
-async def test_empty_workflow():
+async def test_empty_workflow(workflow_engine):
+    """Test empty workflow"""
     workflow_def = {
         "COLLABORATION": {
             "MODE": "PARALLEL",
@@ -218,35 +366,53 @@ async def test_empty_workflow():
             "WORKFLOW": []
         }
     }
+
+    workflow_config = {
+        "id": str(uuid.uuid4()),
+        "name": "test_empty_workflow",
+        "max_iterations": 5,
+        "timeout": 3600,
+        "error_policy": {
+            "fail_fast": True,
+            "ignore_warnings": False,
+            "max_errors": 10,
+            "retry_policy": {
+                "max_retries": 3,
+                "retry_delay": 1.0,
+                "backoff": 2.0,
+                "max_delay": 60.0
+            }
+        },
+        "steps": [
+            {
+                "id": "step1",
+                "name": "empty_step",
+                "type": WorkflowStepType.TRANSFORM.value,
+                "required": True,
+                "optional": False,
+                "is_distributed": True,
+                "dependencies": [],
+                "config": {
+                    "strategy": "custom",
+                    "params": {},
+                    "retry_delay": 1.0,
+                    "retry_backoff": 2.0,
+                    "max_retries": 3
+                }
+            }
+        ]
+    }
+
+    # Create workflow engine
+    engine = await workflow_engine(workflow_def=workflow_def, workflow_config=workflow_config)
     
-    workflow_config = WorkflowConfig(
-        max_iterations=5,
-        timeout=3600,
-        logging_level="INFO",
-        required_fields=[],
-        error_handling={},
-        retry_policy=None,
-        error_policy=None,
-        is_distributed=True,
-        distributed=True,
-        steps=[],
-        metadata={},
-        agents={}
-    )
-
-    workflow = WorkflowEngine(workflow_def, workflow_config)
-    result = await workflow.execute({
-        "research_topic": "AI Ethics",
-        "metrics": {
-            MetricType.LATENCY.value: [{"value": 100, "timestamp": 1234567890}]
-        }
-    })
-
-    assert result is not None
-    assert "metrics" in result
+    # Execute workflow and expect error
+    with pytest.raises(WorkflowExecutionError):
+        await engine.execute_workflow(engine.default_agent_id, {"data": {}})
 
 @pytest.mark.asyncio
-async def test_hierarchical_merge_protocol_with_test_agent():
+async def test_hierarchical_merge_protocol_with_test_agent(workflow_engine):
+    """Test hierarchical merge protocol with test agent"""
     workflow_def = {
         "COLLABORATION": {
             "MODE": "SEQUENTIAL",
@@ -272,35 +438,58 @@ async def test_hierarchical_merge_protocol_with_test_agent():
             ]
         }
     }
+
+    workflow_config = {
+        "id": str(uuid.uuid4()),
+        "name": "test_hierarchical_merge_workflow",
+        "max_iterations": 5,
+        "timeout": 3600,
+        "error_policy": {
+            "fail_fast": True,
+            "ignore_warnings": False,
+            "max_errors": 10,
+            "retry_policy": {
+                "max_retries": 3,
+                "retry_delay": 1.0,
+                "backoff": 2.0,
+                "max_delay": 60.0
+            }
+        },
+        "steps": [
+            {
+                "id": "step1",
+                "name": "hierarchical_merge_step",
+                "type": WorkflowStepType.TRANSFORM.value,
+                "required": True,
+                "optional": False,
+                "is_distributed": True,
+                "dependencies": [],
+                "config": {
+                    "strategy": "hierarchical_merge",
+                    "params": {"protocol": "hierarchical_merge"},
+                    "retry_delay": 1.0,
+                    "retry_backoff": 2.0,
+                    "max_retries": 3
+                }
+            }
+        ]
+    }
+
+    # Create workflow engine
+    engine = await workflow_engine(workflow_def=workflow_def, workflow_config=workflow_config)
     
-    workflow_config = WorkflowConfig(
-        max_iterations=5,
-        timeout=3600,
-        logging_level="INFO",
-        required_fields=[],
-        error_handling={},
-        retry_policy=None,
-        error_policy=None,
-        is_distributed=False,
-        distributed=False,
-        steps=[],
-        metadata={},
-        agents={}
-    )
-
-    workflow = WorkflowEngine(workflow_def, workflow_config)
-    result = await workflow.execute({
-        "research_topic": "AI Ethics",
-        "metrics": {
-            MetricType.LATENCY.value: [{"value": 100, "timestamp": 1234567890}]
-        }
-    })
-
+    # Execute workflow
+    result = await engine.execute_workflow(engine.default_agent_id, {"data": {}})
+    
+    # Verify results
     assert result is not None
-    assert "metrics" in result
+    assert "steps" in result
+    assert "step1" in result["steps"]
+    assert result["steps"]["step1"]["result"] is not None
 
 @pytest.mark.asyncio
-async def test_invalid_communication_protocol_with_test_agent():
+async def test_invalid_communication_protocol_with_test_agent(workflow_engine):
+    """Test invalid communication protocol with test agent"""
     workflow_def = {
         "COLLABORATION": {
             "MODE": "SEQUENTIAL",
@@ -319,27 +508,46 @@ async def test_invalid_communication_protocol_with_test_agent():
             ]
         }
     }
-    
-    workflow_config = WorkflowConfig(
-        max_iterations=5,
-        timeout=3600,
-        logging_level="INFO",
-        required_fields=[],
-        error_handling={},
-        retry_policy=None,
-        error_policy=None,
-        is_distributed=False,
-        distributed=False,
-        steps=[],
-        metadata={},
-        agents={}
-    )
 
-    workflow = WorkflowEngine(workflow_def, workflow_config)
-    with pytest.raises(ValueError):
-        await workflow.execute({
-            "research_topic": "AI Ethics",
-            "metrics": {
-                MetricType.LATENCY.value: [{"value": 100, "timestamp": 1234567890}]
+    workflow_config = {
+        "id": str(uuid.uuid4()),
+        "name": "test_invalid_protocol_workflow",
+        "max_iterations": 5,
+        "timeout": 3600,
+        "error_policy": {
+            "fail_fast": True,
+            "ignore_warnings": False,
+            "max_errors": 10,
+            "retry_policy": {
+                "max_retries": 3,
+                "retry_delay": 1.0,
+                "backoff": 2.0,
+                "max_delay": 60.0
             }
-        })
+        },
+        "steps": [
+            {
+                "id": "step1",
+                "name": "invalid_protocol_step",
+                "type": WorkflowStepType.TRANSFORM.value,
+                "required": True,
+                "optional": False,
+                "is_distributed": True,
+                "dependencies": [],
+                "config": {
+                    "strategy": "custom",
+                    "params": {"protocol": "unknown"},
+                    "retry_delay": 1.0,
+                    "retry_backoff": 2.0,
+                    "max_retries": 3
+                }
+            }
+        ]
+    }
+
+    # Create workflow engine
+    engine = await workflow_engine(workflow_def=workflow_def, workflow_config=workflow_config)
+    
+    # Execute workflow and expect error
+    with pytest.raises(WorkflowExecutionError):
+        await engine.execute_workflow(engine.default_agent_id, {"data": {}})

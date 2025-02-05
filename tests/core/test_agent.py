@@ -7,14 +7,7 @@ import asyncio
 from unittest.mock import MagicMock, AsyncMock
 import logging
 import time
-from typing import AsyncGenerator
-
-# Add anext for Python < 3.10
-try:
-    from builtins import anext
-except ImportError:
-    async def anext(ait):
-        return await ait.__anext__()
+import uuid
 
 from agentflow.agents.agent import Agent, AgentStatus
 from agentflow.core.config import AgentConfig, ModelConfig, WorkflowConfig
@@ -88,35 +81,42 @@ def mock_ell2a():
     return mock
 
 @pytest.fixture
-def agent_config():
-    """Create test agent config."""
-    return AgentConfig(
-        id="test-agent",
-        name="Test Agent",
-        description="Test agent for unit tests",
-        type="generic",
-        system_prompt="You are a test agent",
-        model=ModelConfig(
-            provider="default",
-            name="gpt-3.5-turbo"
-        ),
-        workflow=WorkflowConfig(
-            id="test-workflow-id",
-            name="test-workflow",
-            max_iterations=10,
-            timeout=3600
-        ),
-        config={
-            "algorithm": "PPO"
-        }
-    )
+def model_config():
+    """Create test model config."""
+    return {
+        "provider": "default",
+        "name": "gpt-3.5-turbo"
+    }
 
 @pytest.fixture
-async def agent(agent_config, mock_ell2a):
+def workflow_config():
+    """Create test workflow config."""
+    return {
+        "id": "test-workflow-id",
+        "name": "test-workflow",
+        "max_iterations": 10,
+        "timeout": 3600
+    }
+
+@pytest.fixture
+async def agent(model_config, workflow_config, mock_ell2a):
     """Create and initialize test agent."""
     _agent = None
     try:
-        _agent = Agent(config=agent_config)
+        _agent = Agent(
+            id=str(uuid.uuid4()),  # Generate a new UUID for each test
+            name="Test Agent",
+            description=None,  # Optional field
+            type="generic",
+            mode="sequential",
+            config={
+                "name": "Test Agent",
+                "type": "generic",
+                "system_prompt": "You are a test agent",
+                "model": model_config
+            },
+            workflow=workflow_config
+        )
         _agent._ell2a = mock_ell2a
         await _agent.initialize()
         _agent.metadata["test_mode"] = True
@@ -128,56 +128,60 @@ async def agent(agent_config, mock_ell2a):
 @pytest.mark.asyncio
 async def test_agent_initialization(agent):
     """Test agent initialization."""
-    agent_instance = await anext(agent)
-    assert isinstance(agent_instance, Agent)
-    assert agent_instance.state.status == AgentStatus.IDLE
-    assert agent_instance._initialized
+    async for agent_instance in agent:
+        assert isinstance(agent_instance, Agent)
+        assert agent_instance.state.status == AgentStatus.IDLE
+        assert agent_instance._initialized
+        break
 
 @pytest.mark.asyncio
 async def test_message_processing(agent, mock_ell2a):
     """Test message processing."""
-    agent_instance = await anext(agent)
-    assert isinstance(agent_instance, Agent)
+    async for agent_instance in agent:
+        assert isinstance(agent_instance, Agent)
 
-    test_message = "Test message"
-    response = await agent_instance.process_message(test_message)
+        test_message = "Test message"
+        response = await agent_instance.process_message(test_message)
 
-    assert response == "Test response"
-    assert len(agent_instance.history) == 2
-    assert agent_instance.state.status == AgentStatus.IDLE
+        assert response == "Test response"
+        assert len(agent_instance.history) == 2
+        assert agent_instance.state.status == AgentStatus.IDLE
+        break
 
 @pytest.mark.asyncio
 async def test_error_handling(agent, mock_ell2a):
     """Test error handling."""
-    agent_instance = await anext(agent)
-    assert isinstance(agent_instance, Agent)
+    async for agent_instance in agent:
+        assert isinstance(agent_instance, Agent)
 
-    # Set up mock to raise an exception
-    mock_ell2a.process_message.side_effect = Exception("Test error")
-    agent_instance._ell2a = mock_ell2a
+        # Set up mock to raise an exception
+        mock_ell2a.process_message.side_effect = Exception("Test error")
+        agent_instance._ell2a = mock_ell2a
 
-    with pytest.raises(Exception):
-        await agent_instance.process_message("Test message")
+        with pytest.raises(Exception):
+            await agent_instance.process_message("Test message")
 
-    assert agent_instance.state.status == AgentStatus.FAILED
-    assert len(agent_instance.errors) == 1
-    assert agent_instance.state.last_error == "Test error"
+        assert agent_instance.state.status == AgentStatus.FAILED
+        assert len(agent_instance.errors) == 1
+        assert agent_instance.state.last_error == "Test error"
+        break
 
 @pytest.mark.asyncio
 async def test_error_limit(agent, mock_ell2a):
     """Test error limit handling."""
-    agent_instance = await anext(agent)
-    assert isinstance(agent_instance, Agent)
+    async for agent_instance in agent:
+        assert isinstance(agent_instance, Agent)
 
-    # Set up mock to raise an exception
-    mock_ell2a.process_message.side_effect = Exception("Test error")
-    agent_instance._ell2a = mock_ell2a
+        # Set up mock to raise an exception
+        mock_ell2a.process_message.side_effect = Exception("Test error")
+        agent_instance._ell2a = mock_ell2a
 
-    # Generate more errors than the limit
-    for i in range(agent_instance.max_errors + 5):
-        with pytest.raises(Exception):
-            await agent_instance.process_message("Test message")
+        # Generate more errors than the limit
+        for i in range(agent_instance.max_errors + 5):
+            with pytest.raises(Exception):
+                await agent_instance.process_message("Test message")
 
-    # Check that errors list is limited
-    assert len(agent_instance.errors) == agent_instance.max_errors
-    assert agent_instance.state.status == AgentStatus.FAILED
+        # Check that errors list is limited
+        assert len(agent_instance.errors) == agent_instance.max_errors
+        assert agent_instance.state.status == AgentStatus.FAILED
+        break

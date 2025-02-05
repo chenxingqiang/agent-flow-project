@@ -1,61 +1,57 @@
 """Agent module."""
 
-from typing import Dict, Any, Optional, Union, List, Type, Callable
-from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
+from typing import Dict, Any, Optional, Union, List, Type, Callable, TYPE_CHECKING
 import uuid
+from datetime import datetime
+import ray
 import logging
+import json
+import asyncio
+from enum import Enum
 
-from ..core.config import AgentConfig, ModelConfig, WorkflowConfig
-from ..core.isa.isa_manager import Instruction, ISAManager
-from ..core.isa.types import InstructionType
-from ..core.instruction_selector import InstructionSelector
+from pydantic import BaseModel, Field, PrivateAttr, ConfigDict, ValidationError
+
+if TYPE_CHECKING:
+    from ..core.workflow import WorkflowEngine
+    from ..core.isa.isa_manager import ISAManager
+    from ..core.isa.selector import InstructionSelector
+    from ..core.ell2a_integration import ELL2AIntegration
+
+from ..core.model_config import ModelConfig
+from ..core.isa.isa_manager import Instruction, InstructionType, InstructionStatus
+from ..core.isa.selector import InstructionSelector
 from ..ell2a.integration import ELL2AIntegration
-from ..ell2a.types.message import Message, MessageRole
-from .agent_types import AgentType, AgentStatus
+from ..ell2a.types.message import Message, MessageRole, MessageType
+from ..core.types import AgentType, AgentMode, AgentStatus, AgentConfig, ModelConfig
 from ..transformations.advanced_strategies import AdvancedTransformationStrategy
-from ..core.isa.instruction import Instruction
+from agentflow.errors import WorkflowExecutionError, ConfigurationError
+from unittest.mock import AsyncMock
+from ..core.workflow_types import WorkflowConfig
 
 logger = logging.getLogger(__name__)
-
-class TransformationPipeline:
-    """Pipeline for applying multiple transformation strategies in sequence."""
-    
-    def __init__(self):
-        """Initialize transformation pipeline."""
-        self.strategies = []
-        
-    def add_strategy(self, strategy: AdvancedTransformationStrategy) -> None:
-        """Add a transformation strategy to the pipeline.
-        
-        Args:
-            strategy: Strategy to add
-        """
-        self.strategies.append(strategy)
-        
-    def fit_transform(self, data: Any) -> Any:
-        """Apply all transformation strategies in sequence.
-        
-        Args:
-            data: Input data to transform
-            
-        Returns:
-            Transformed data
-        """
-        result = data
-        for strategy in self.strategies:
-            result = strategy.transform(result)
-        return result
 
 class AgentState(BaseModel):
     """Agent state class."""
     
-    status: AgentStatus = Field(default=AgentStatus.IDLE)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
+    status: AgentStatus = Field(default=AgentStatus.INITIALIZED)
     iteration: int = Field(default=0)
     last_error: Optional[str] = None
     messages_processed: int = Field(default=0)
 
-class Agent(BaseModel):
-    """Agent class."""
+class AgentBase(BaseModel):
+    """Base agent class."""
+    
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        extra='allow',
+        validate_assignment=True,
+        from_attributes=True,
+        use_enum_values=True,
+        populate_by_name=True,
+        strict=False
+    )
     
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str = Field(default="")
@@ -63,252 +59,245 @@ class Agent(BaseModel):
     type: AgentType = Field(default=AgentType.GENERIC)
     mode: str = Field(default="simple")
     version: str = Field(default="1.0.0")
-    config: Optional[AgentConfig] = None
+    system_prompt: Optional[str] = Field(default=None)
+    config: Optional['AgentConfig'] = None
     state: AgentState = Field(default_factory=AgentState)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     history: List[Dict[str, str]] = Field(default_factory=list)
-    errors: List[str] = Field(default_factory=list)
+    errors: List[Dict[str, str]] = Field(default_factory=list)
     max_errors: int = Field(default=10)
     domain_config: Dict[str, Any] = Field(default_factory=dict)
     is_distributed: bool = Field(default=False)
-    process_message: Optional[Callable[..., Any]] = Field(default=None)
     
-    # Private attributes
-    _ell2a: Optional[ELL2AIntegration] = PrivateAttr(default=None)
-    _isa_manager: Optional[ISAManager] = PrivateAttr(default=None)
-    _instruction_selector: Optional[InstructionSelector] = PrivateAttr(default=None)
-    _initialized: bool = PrivateAttr(default=False)
-    
-    def __init__(self, config: Union[Dict[str, Any], str, AgentConfig], **data):
-        """Initialize agent."""
-        if isinstance(config, str):
-            # Load config from file
-            import json
-            from pathlib import Path
-    
-            config_path = Path(config)
-            if not config_path.exists():
-                raise FileNotFoundError(f"Config file not found: {config}")
-    
-            with open(config_path) as f:
-                config = json.load(f)
-    
-            # Load workflow from separate file if specified
-            if "AGENT" in config and "workflow_path" in config["AGENT"]:
-                workflow_path = Path(config["AGENT"]["workflow_path"])
-                if not workflow_path.exists():
-                    raise FileNotFoundError(f"Workflow file not found: {workflow_path}")
-                    
-                with open(workflow_path) as f:
-                    workflow = json.load(f)
-                    config["AGENT"]["workflow"] = workflow
-                    
-        # Convert config to AgentConfig if needed
-        if isinstance(config, dict):
-            config = AgentConfig(**config)
-        elif not isinstance(config, AgentConfig):
-            raise TypeError(f"Expected AgentConfig, got {type(config)}")
-            
-        # Initialize base class
-        super().__init__(config=config, **data)
+    def __init__(self, **data):
+        """Initialize agent with configuration."""
+        super().__init__(**data)
+        self._initialized = False
         
-        # Initialize ISA manager
-        self._isa_manager = ISAManager()
-        self._instruction_selector = InstructionSelector()
-        
-    def add_error(self, error_msg: str):
-        """Add error to the list, maintaining max size."""
-        self.errors.append(error_msg)
-        if len(self.errors) > self.max_errors:
-            self.errors = self.errors[-self.max_errors:]
-        self.state.last_error = error_msg
-        self.state.status = AgentStatus.FAILED
-    
-    @property
-    def client(self) -> Any:
-        """Get OpenAI client."""
-        return self._ell2a
-        
-    @client.setter
-    def client(self, value: Any) -> None:
-        """Set OpenAI client."""
-        self._ell2a = value
-        
-    @property
-    def isa_manager(self):
-        """Expose ISA manager as a property."""
-        return self._isa_manager
-    
-    @property
-    def instruction_selector(self):
-        """Expose instruction selector as a property."""
-        return self._instruction_selector
-    
-    async def initialize(self) -> None:
-        """Initialize agent."""
+    async def initialize(self):
+        """Initialize agent state and resources."""
         if self._initialized:
             return
         
-        # Allow a default system prompt if not specified
-        if not self._ell2a:
-            system_prompt = self.config.system_prompt or "You are a helpful AI assistant."
-            self._ell2a = ELL2AIntegration()
-            self._ell2a.configure({
-                "system_prompt": system_prompt
-            })
+        self.state = AgentState()
         
-        # Initialize ISA manager with default instructions
-        if not self._isa_manager:
-            self._isa_manager = ISAManager()
-        
-        # Ensure default instructions are added
-        default_instructions = [
-            Instruction(
-                id="init",
-                name="initialize",
-                type="control",
-                params={"init_param": "value"},
-                description="Initialize system and prepare environment"
-            ),
-            Instruction(
-                id="process",
-                name="process_data",
-                type="computation",
-                params={"data_param": "value"},
-                description="Process and analyze input data efficiently"
-            ),
-            Instruction(
-                id="validate",
-                name="validate_result",
-                type="validation",
-                params={"threshold": 0.9},
-                description="Validate and verify the results for accuracy"
-            )
-        ]
-        
-        # Add instructions if not already present
-        for instruction in default_instructions:
-            try:
-                self._isa_manager.get_instruction(instruction.id)
-            except ValueError:
-                self._isa_manager.register_instruction(instruction)
-        
-        # Initialize ISA manager
-        await self._isa_manager.initialize()
-            
-        if not self._instruction_selector:
-            self._instruction_selector = InstructionSelector()
-            
-            # Train the instruction selector with default instructions
-            self._instruction_selector.train(self._isa_manager.instructions)
-            await self._instruction_selector.initialize()
-        
-        # Set the process_message method
-        self.process_message = self._process_message
+        await self._initialize_ell2a()
+        await self._initialize_isa()
+        await self._initialize_instruction_selector()
         
         self._initialized = True
-        self.state.status = AgentStatus.IDLE
         
-    async def _process_message(self, input_data: Union[Dict[str, Any], str, Message]) -> Any:
-        """Process an input message through the agent's workflow.
+    async def _initialize_ell2a(self):
+        """Initialize ELL2A integration."""
+        if not self._ell2a:
+            # Create ELL2A integration instance
+            self._ell2a = ELL2AIntegration()
+            
+            # Configure with model and domain settings
+            if self.config:
+                config = {
+                    "model": self.config.model if hasattr(self.config, "model") else None,
+                    "domain": self.config.domain_config if hasattr(self.config, "domain_config") else {},
+                    "enabled": True,
+                    "tracking_enabled": True
+                }
+                self._ell2a.configure(config)
+        
+    async def _initialize_isa(self):
+        """Initialize ISA manager."""
+        if not self.isa_manager:
+            config_path = None
+            if self.config and hasattr(self.config, "domain_config"):
+                config_path = self.config.domain_config.get("isa_config_path")
+            self.isa_manager = ISAManager(config_path=config_path)
+            await self.isa_manager.initialize()
+        
+    async def _initialize_instruction_selector(self):
+        """Initialize instruction selector."""
+        if not self.instruction_selector:
+            if self.config is None:
+                # Import at runtime to avoid circular import
+                from ..core.config import AgentConfig
+                self.config = AgentConfig(name=self.name or str(uuid.uuid4()))
+            self.instruction_selector = InstructionSelector(self.config)
+            await self.instruction_selector.initialize()
+        
+    def add_error(self, error: str):
+        """Add error to error list."""
+        if len(self.errors) >= self.max_errors:
+            self.errors.pop(0)
+        self.errors.append({"error": error, "timestamp": str(datetime.now())})
+
+class Agent:
+    """Base agent class."""
+    
+    def __init__(self, config: Optional[Union['AgentConfig', Dict[str, Any]]] = None, name: Optional[str] = None, **kwargs):
+        """Initialize agent.
         
         Args:
-            input_data: Input data to process, can be a dictionary, string, or Message object
-        
-        Returns:
-            Processed result from the agent's workflow
-        
+            config: Agent configuration or dictionary
+            name: Agent name (optional, will use config name if not provided)
+            **kwargs: Additional parameters to override config values
+            
         Raises:
-            ValueError: If input type is unsupported
-            Exception: If message processing fails
+            ValueError: If the configuration is invalid
         """
-        # Ensure agent is initialized
-        if not self._initialized:
-            await self.initialize()
-        
-        # Convert input to Message if needed
-        if isinstance(input_data, str):
-            message = Message(role=MessageRole.USER, content=input_data)
-        elif isinstance(input_data, dict):
-            message = Message(role=MessageRole.USER, content=input_data.get('message', ''))
-        elif isinstance(input_data, Message):
-            message = input_data
-        else:
-            raise ValueError(f"Unsupported input type: {type(input_data)}")
-        
-        # Update agent state
-        self.state.iteration += 1
-        self.state.messages_processed += 1
-        self.state.status = AgentStatus.PROCESSING
-        
-        try:
-            # Use ELL2A integration to process the message
-            if not self._ell2a:
-                raise ValueError("ELL2A integration not configured")
-            
-            # Process message through ELL2A
-            response = await self._ell2a.process_message(message)
-            
-            # Update history
-            self.history.append({
-                'input': message.content,
-                'output': response.content,
-                'timestamp': str(response.timestamp)
-            })
-            
-            # Update agent state
-            self.state.status = AgentStatus.IDLE
-            
-            return response.content
-        
-        except Exception as e:
-            # Handle and log errors
-            error_msg = str(e)
-            self.add_error(error_msg)
-            
-            # Ensure status is set to FAILED
-            self.state.status = AgentStatus.FAILED
-            
-            # Re-raise the exception to allow test error handling
-            raise
+        # Import at runtime to avoid circular import
+        from ..core.config import AgentConfig, ModelConfig, WorkflowConfig
 
-    async def process_message(self, input_data: Union[Dict[str, Any], str, Message]) -> Any:
-        """Proxy method for process_message."""
-        if callable(self._process_message):
-            return await self._process_message(input_data)
-        raise NotImplementedError("process_message not configured")
+        if config is None:
+            config = AgentConfig(name=name or str(uuid.uuid4()))
+        elif isinstance(config, dict):
+            if not config:  # Empty dictionary
+                raise ValueError("Agent must have a configuration")
+            try:
+                config = AgentConfig(**config)
+            except Exception as e:
+                raise ValueError(f"Invalid agent configuration: {str(e)}")
 
-    async def cleanup(self) -> None:
-        """Clean up agent resources."""
-        if not self._initialized:
-            return
-        
-        # Reset state
-        self.state.status = AgentStatus.STOPPED
-        self.state.iteration = 0
-        self.state.messages_processed = 0
-        
-        # Cleanup ELL2A integration
-        if self._ell2a and hasattr(self._ell2a, 'cleanup'):
-            await self._ell2a.cleanup()
-        
-        # Cleanup ISA manager
-        if self._isa_manager and hasattr(self._isa_manager, 'cleanup'):
-            await self._isa_manager.cleanup()
-        
-        # Cleanup instruction selector
-        if self._instruction_selector and hasattr(self._instruction_selector, 'cleanup'):
-            await self._instruction_selector.cleanup()
-        
-        # Reset initialization flag
+        self.id = kwargs.get('id', str(uuid.uuid4()))
+        self.name = name or config.name
+        self.type = kwargs.get('type', config.type)
+        self.mode = kwargs.get('mode', getattr(config, 'mode', 'sequential'))
+        self.config = config
+        self.metadata: Dict[str, Any] = {}
         self._initialized = False
+        self._status: AgentStatus = AgentStatus.INITIALIZED
         
-    def __aiter__(self):
-        """Return async iterator."""
-        return self
+        # Initialize components
+        self._ell2a = kwargs.get('ell2a', None)  # Will be initialized in initialize()
+        self._isa_manager = kwargs.get('isa_manager', None)  # Will be initialized in initialize()
+        self._instruction_selector = kwargs.get('instruction_selector', None)  # Will be initialized in initialize()
         
-    async def __anext__(self):
-        """Return next value from async iterator."""
+        # If workflow is provided in kwargs, create a new config with updated workflow
+        if 'workflow' in kwargs:
+            workflow_data = kwargs['workflow']
+            if workflow_data is None:
+                # If workflow is explicitly set to None, create an empty workflow
+                workflow = WorkflowConfig()
+            elif isinstance(workflow_data, dict):
+                workflow = WorkflowConfig(**workflow_data)
+            elif isinstance(workflow_data, WorkflowConfig):
+                workflow = workflow_data
+            else:
+                raise ValueError("workflow must be a dictionary or WorkflowConfig instance")
+            self.config = AgentConfig(
+                **{**self.config.model_dump(), "workflow": workflow}
+            )
+        
+        # If model is provided in kwargs, create a new config with updated model
+        if 'model' in kwargs:
+            model_data = kwargs['model']
+            if isinstance(model_data, dict):
+                model = ModelConfig(**model_data)
+            elif isinstance(model_data, ModelConfig):
+                model = model_data
+            else:
+                raise ValueError("model must be a dictionary or ModelConfig instance")
+            self.config = AgentConfig(
+                **{**self.config.model_dump(), "model": model}
+            )
+        
+    @property
+    def status(self) -> AgentStatus:
+        """Get agent status."""
+        return self._status
+        
+    @status.setter
+    def status(self, value: AgentStatus) -> None:
+        """Set agent status."""
+        self._status = value
+        
+    async def initialize(self) -> None:
+        """Initialize agent resources."""
         if not self._initialized:
-            await self.initialize()
-        return self
+            try:
+                # Initialize components
+                if self.config:
+                    # Initialize ELL2A singleton with agent-specific settings
+                    from ..core.ell2a_integration import ELL2AIntegration
+                    self._ell2a = ELL2AIntegration()
+                    ell2a_config = {
+                        "model": self.config.model if hasattr(self.config, "model") else None,
+                        "domain": self.config.domain_config if hasattr(self.config, "domain_config") else {},
+                        "enabled": True,
+                        "tracking_enabled": True
+                    }
+                    self._ell2a.configure(ell2a_config)
+
+                # Initialize ISA manager
+                from ..core.isa.isa_manager import ISAManager
+                config_path = self.config.domain_config.get("isa_config_path") if self.config else None
+                self._isa_manager = ISAManager(config_path=config_path)
+                await self._isa_manager.initialize()
+
+                # Initialize instruction selector
+                from ..core.isa.selector import InstructionSelector
+                self._instruction_selector = InstructionSelector(self.config)
+                await self._instruction_selector.initialize()
+                
+                self._initialized = True
+                self._status = AgentStatus.IDLE
+            except Exception as e:
+                self._status = AgentStatus.FAILED
+                raise
+        
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert agent to dictionary."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "type": self.type,
+            "mode": self.mode,
+            "config": self.config.dict(),
+            "metadata": self.metadata,
+            "status": self.status.value
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Agent':
+        """Create agent from dictionary."""
+        from ..core.config import AgentConfig
+        config = AgentConfig(**data.get("config", {}))
+        agent = cls(config)
+        agent.id = data.get("id")
+        agent.name = data.get("name")
+        agent.type = data.get("type")
+        agent.mode = data.get("mode")
+        agent.metadata = data.get("metadata", {})
+        if status_value := data.get("status"):
+            agent._status = AgentStatus(status_value)
+        return agent
+
+    async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute agent workflow with input data.
+        
+        Args:
+            input_data: Input data for execution
+            
+        Returns:
+            Dict[str, Any]: Execution results
+            
+        Raises:
+            NotImplementedError: If not implemented by subclass
+        """
+        raise NotImplementedError("Execute method must be implemented by subclass")
+
+@ray.remote
+class RemoteAgent:
+    """Remote agent class for distributed operations."""
+    def __init__(self, config=None):
+        """Initialize remote agent."""
+        self.config = config
+        self.id = str(uuid.uuid4())
+        self.name = 'remote_agent'
+        self.type = AgentType.GENERIC
+        self.version = '1.0.0'
+
+    async def initialize(self):
+        """Initialize remote agent."""
+        pass
+
+    async def cleanup(self):
+        """Clean up remote agent resources."""
+        pass
