@@ -10,21 +10,38 @@ from .instruction import Instruction
 class ISAManager:
     """Manages the Instruction Set Architecture for agents."""
 
-    def __init__(self, config: AgentConfig):
-        """Initialize ISA manager."""
-        self.config = config
+    def __init__(self, config_path: Optional[str] = None):
+        """Initialize ISA manager.
+        
+        Args:
+            config_path: Optional path to ISA configuration file
+        """
+        self.config_path = config_path
         self.instructions = []
-        self._load_instructions()
+        self._initialized = False
+
+    async def initialize(self) -> None:
+        """Initialize ISA manager."""
+        if not self._initialized:
+            self._load_instructions()
+            self._initialized = True
 
     def _load_instructions(self) -> None:
         """Load instructions from configuration."""
-        if self.config.domain_config and 'instruction_set' in self.config.domain_config:
-            instruction_set = self.config.domain_config['instruction_set']
-            self.instructions = [
-                Instruction(id=str(i), name=instr, type="default", params={})
-                if isinstance(instr, str) else instr
-                for i, instr in enumerate(instruction_set)
-            ]
+        # Default instructions if no config path is provided
+        default_instructions = [
+            Instruction(id="1", name="default", type="default", params={})
+        ]
+        
+        if self.config_path:
+            try:
+                # Load instructions from config file
+                # For now, just use default instructions
+                self.instructions = default_instructions
+            except Exception as e:
+                self.instructions = default_instructions
+        else:
+            self.instructions = default_instructions
 
     def get_instruction(self, instruction_id: str) -> Optional[Instruction]:
         """Get instruction by ID."""
@@ -40,4 +57,9 @@ class ISAManager:
         if not instruction or instruction.id not in [i.id for i in self.instructions]:
             raise ValueError(f"Invalid instruction: {instruction}")
         # Execute instruction logic here
-        return None 
+        return None
+
+    async def cleanup(self) -> None:
+        """Clean up ISA manager resources."""
+        self.instructions.clear()
+        self._initialized = False 

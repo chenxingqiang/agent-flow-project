@@ -140,6 +140,8 @@ async def test_message_processing(agent, mock_ell2a):
     async for agent_instance in agent:
         assert isinstance(agent_instance, Agent)
 
+        # Ensure the mock is properly set up
+        agent_instance._ell2a = mock_ell2a
         test_message = "Test message"
         response = await agent_instance.process_message(test_message)
 

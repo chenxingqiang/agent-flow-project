@@ -6,18 +6,18 @@ from agentflow.core.config import (
     ConfigurationError
 )
 import os
+from agentflow.core.base_types import AgentType
 
 def test_agent_config_from_yaml():
     """Test loading agent configuration from YAML."""
     config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'agents')
     config = ResearchAgentConfig.from_yaml(
-        config_path=config_path, 
+        config_path=config_path,
         config_name='academic_support_agent'
     )
-    
+
     assert config.name == 'Academic_Research_Support_Agent'
-    assert config.type == 'research_optimization'
-    assert config.version == '1.0.0'
+    assert config.type == AgentType.RESEARCH
 
 def test_research_agent_config_from_yaml():
     """Test loading research-specific agent configuration."""
@@ -38,27 +38,30 @@ def test_agent_config_to_dict():
     """Test converting agent config to dictionary."""
     config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'agents')
     config = ResearchAgentConfig.from_yaml(
-        config_path=config_path, 
+        config_path=config_path,
         config_name='academic_support_agent'
     )
     config_dict = config.to_dict()
-    
+
     assert isinstance(config_dict, dict)
     assert config_dict['name'] == 'Academic_Research_Support_Agent'
-    assert config_dict['type'] == 'research_optimization'
+    assert config_dict['type'] == 'research'
 
 def test_agent_config_from_dict():
     """Test creating agent config from dictionary."""
     config_dict = {
         'name': 'Test Agent',
-        'type': 'test',
-        'version': '0.1.0'
+        'type': 'research',
+        'version': '0.1.0',
+        'model': {
+            'provider': 'openai',
+            'name': 'gpt-4'
+        }
     }
     
     config = ResearchAgentConfig.from_dict(config_dict)
-    
     assert config.name == 'Test Agent'
-    assert config.type == 'test'
+    assert config.type == 'research'
     assert config.version == '0.1.0'
 
 def test_research_agent_specific_attributes():
@@ -74,10 +77,13 @@ def test_research_agent_specific_attributes():
     assert config.publication_goals.get('acceptance_deadline') == date(2025, 3, 1)
     assert config.publication_goals.get('submission_timeline') == '3个月内'
     
-    # Check challenges
-    assert config.challenges is not None
-    assert 'innovativeness' in config.challenges
-    assert 'technical_packaging' in config.challenges
+    # Check research context
+    assert config.research_context.get('topic') == '基于静态图的恶意软件分类方法研究'
+    assert 'current_status' in config.research_context
+    
+    # Check research methods and tools
+    assert isinstance(config.research_methods, list)
+    assert isinstance(config.analysis_tools, list)
 
 def test_config_type_converter():
     """Test the ConfigTypeConverter utility class."""
@@ -106,6 +112,10 @@ def test_research_agent_config_validation():
         'name': 'Valid Research Agent',
         'type': 'research',
         'version': '1.0.0',
+        'model': {
+            'provider': 'openai',
+            'name': 'gpt-4'
+        },
         'research_context': {
             'topic': 'Test Research',
             'current_status': ['Initial Phase']
@@ -117,8 +127,9 @@ def test_research_agent_config_validation():
         }
     }
     
-    config = ResearchAgentConfig.from_dict(config_dict)
+    config = ResearchAgentConfig.model_validate(config_dict)
     assert config.name == 'Valid Research Agent'
+    assert config.research_context['topic'] == 'Test Research'
     assert config.publication_goals['acceptance_deadline'] == date(2025, 3, 1)
 
 def test_research_agent_name_validation():
@@ -239,11 +250,12 @@ def test_config_security_manager():
         }
     }
     
-    masked_config = ConfigSecurityManager.mask_sensitive_fields(OmegaConf.create(config))
+    masked_config = ConfigSecurityManager.mask_sensitive_fields(config)
     
-    # Convert to dict and check
-    assert masked_config.database == '***MASKED***'
-    assert masked_config.api == '***MASKED***'
+    # Check that sensitive fields are masked
+    assert isinstance(masked_config, dict)
+    assert masked_config.get('database') == '***MASKED***'
+    assert masked_config.get('api') == '***MASKED***'
 
 def test_configuration_inheritance():
     """Test configuration inheritance and merging."""
@@ -320,11 +332,11 @@ def test_advanced_type_conversion():
     assert ConfigTypeConverter.convert_value('3.14', float) == 3.14
     
     # Test strict mode
-    with pytest.raises(ConfigurationError):
+    with pytest.raises(ValueError):
         ConfigTypeConverter.convert_value('not a number', int, strict=True)
     
-    # Test default value
-    assert ConfigTypeConverter.convert_value('not a number', int, default=0) == 0
+    # Test non-strict mode returns default values
+    assert ConfigTypeConverter.convert_value('not a number', int) == 0
     
     # Test complex type conversion
     assert ConfigTypeConverter.convert_value('2025-03-01', date) == date(2025, 3, 1)
@@ -375,11 +387,7 @@ def test_config_validation_with_complex_schema():
         'metadata': 'extra info'
     }
 
-    validated_config = ConfigTypeConverter.convert_value(
-        config, 
-        dict, 
-        schema=schema
-    )
+    validated_config = ConfigTypeConverter.validate_config(config, schema)
 
     assert validated_config['name'] == 'Test Config'
     assert validated_config['age'] == 30

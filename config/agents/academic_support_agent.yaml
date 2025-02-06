@@ -1,7 +1,34 @@
-agent:
-  name: Academic_Research_Support_Agent
-  type: research_optimization
-  version: 1.0.0
+name: Academic Support Agent
+type: research
+version: 1.0.0
+description: An agent specialized in academic research and support
+model:
+  provider: openai
+  name: gpt-4
+  temperature: 0.7
+workflow:
+  id: academic-support-workflow
+  name: Academic Research Workflow
+  max_iterations: 10
+  timeout: 3600
+  steps:
+    - id: research-step
+      name: Research
+      type: agent
+      config:
+        strategy: default
+research_context:
+  base_topic: Academic Research
+  specific_topic: General Academic Support
+  research_fields:
+    - Computer Science
+    - Data Science
+    - Machine Learning
+capabilities:
+  - Literature Review
+  - Research Planning
+  - Academic Writing
+  - Citation Management
 
 student_profile:
   nickname: 灿灿
@@ -42,24 +69,6 @@ optimization_strategy:
     - 优化论文技术包装
     - 完善实验论证
     - 提升写作质量
-
-workflow:
-  steps:
-    - name: 方案创新性评估
-      description: 分析当前研究方法，识别创新点和改进空间
-      output: 创新策略报告
-
-    - name: 技术包装优化
-      description: 重构论文技术描述，突出研究价值
-      output: 优化后的论文技术章节
-
-    - name: 实验结果强化
-      description: 补充实验数据，完善对照实验
-      output: 增强版实验结果
-
-    - name: 论文语言与结构优化
-      description: 改进论文语言表达，优化整体结构
-      output: 修改后的论文草稿
 
 resources:
   time_investment: 3个月

@@ -1,0 +1,15 @@
+defaults:
+  - /academic_support_agent
+
+# Default environment overrides
+model:
+  temperature: 0.5  # More conservative in default environment
+
+research_context:
+  current_status:
+    - Production Ready
+  
+resources:
+  computing_resources:
+    - CPU: Standard
+    - GPU: Optional 

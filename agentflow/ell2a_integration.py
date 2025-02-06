@@ -2,7 +2,7 @@
 
 from typing import Dict, Any, Optional, List, Callable
 from functools import wraps
-from ..ell2a import ELL, Message, MessageRole, MessageType
+from .ell2a.types.message import Message, MessageRole, MessageType
 
 class ELL2AIntegration:
     """Singleton class for ELL2A integration."""
@@ -17,6 +17,7 @@ class ELL2AIntegration:
         return cls._instance
     
     def __init__(self):
+        """Initialize instance attributes."""
         self._messages = []
         self._mode_configs = {
             "simple": {"model": "test-model"},
@@ -26,38 +27,39 @@ class ELL2AIntegration:
                 "track_memory": True
             }
         }
+        self._workflows = {}
+        self._metrics = {}
+        self._initialized = False
     
     def _initialize(self):
         """Initialize ELL2A integration."""
-        self.config = {
-            "default_model": "gpt-4",
-            "temperature": 0.7,
-            "max_tokens": 2000,
-            "simple": {
-                "max_retries": 3,
-                "retry_delay": 1.0,
-                "timeout": 30.0
-            },
-            "complex": {
-                "max_retries": 3,
-                "retry_delay": 1.0,
-                "timeout": 60.0,
-                "stream": True,
-                "track_performance": True,
-                "track_memory": True
+        if not self._initialized:
+            self.config = {
+                "default_model": "gpt-4",
+                "temperature": 0.7,
+                "max_tokens": 2000,
+                "simple": {
+                    "max_retries": 3,
+                    "retry_delay": 1.0,
+                    "timeout": 30.0
+                },
+                "complex": {
+                    "max_retries": 3,
+                    "retry_delay": 1.0,
+                    "timeout": 60.0,
+                    "stream": True,
+                    "track_performance": True,
+                    "track_memory": True
+                }
             }
-        }
-        self.ell = ELL(model_name=self.config["default_model"], config=self.config)
-        self._is_initialized = True
-        self._workflows = {}
-        self._metrics = {}
+            self._initialized = True
     
     def cleanup(self):
         """Reset ELL2A integration state."""
         self._workflows.clear()
         self._messages.clear()
         self._metrics.clear()
-        self.ell.clear_history()
+        self._initialized = False
         
     def configure(self, config: Optional[Dict[str, Any]] = None):
         """Configure ELL2A integration."""

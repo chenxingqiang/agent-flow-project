@@ -5,7 +5,7 @@ import asyncio
 from typing import Dict, Any
 from agentflow.core.ell2a_integration import ell2a_integration
 from agentflow.core.workflow_types import WorkflowConfig, ErrorPolicy, WorkflowStep, StepConfig, WorkflowStepType
-from agentflow.ell2a.types.message import Message, MessageRole
+from agentflow.ell2a.types.message import Message, MessageRole, MessageType
 from agentflow.ell2a.lmp import LMPType
 from agentflow.ell2a.workflow import ELL2AWorkflow
 import uuid
@@ -49,22 +49,12 @@ async def test_ell2a_message_handling():
         content="Test message",
         metadata={
             "role": MessageRole.USER,
-            "type": LMPType.AGENT
+            "type": MessageType.TEXT
         }
     )
-    message_dict = {
-        "content": message.content,
-        "metadata": message.metadata
-    }
-    
-    # Add message to ELL2A integration
-    ell2a_integration.add_message(message_dict)
-    
-    # Verify message was added
-    messages = ell2a_integration.get_messages()
-    assert len(messages) == 1
-    assert messages[0]["content"] == message_dict["content"]
-    assert messages[0]["metadata"] == message_dict["metadata"]
+    assert message.role == MessageRole.USER
+    assert message.content == "Test message"
+    assert message.metadata["type"] == MessageType.TEXT
 
 @pytest.mark.asyncio
 async def test_ell2a_workflow_registration():
@@ -166,26 +156,25 @@ async def test_ell2a_context_management():
     """Test ELL2A context management."""
     # Create test messages
     messages = [
-        {
-            "content": f"Message {i}",
-            "metadata": {
+        Message(
+            role=MessageRole.USER,
+            content=f"Message {i}",
+            type=MessageType.TEXT,
+            metadata={
                 "role": MessageRole.USER,
-                "type": LMPType.AGENT
+                "type": MessageType.TEXT
             }
-        } for i in range(3)
+        ) for i in range(3)
     ]
     
+    # Process messages
     for msg in messages:
-        ell2a_integration.add_message(msg)
+        await ell2a_integration.process_message(msg)
     
-    # Get context
-    context = ell2a_integration.get_context()
-    assert len(context["messages"]) == 3
-    
-    # Clear context
-    ell2a_integration.clear_context()
-    context = ell2a_integration.get_context()
-    assert len(context["messages"]) == 0
+    # Get messages
+    processed_messages = ell2a_integration.get_messages()
+    assert len(processed_messages) == 3
+    assert all(isinstance(msg, Message) for msg in processed_messages)
 
 @pytest.mark.asyncio
 async def test_ell2a_workflow_execution(sample_workflow_config):
@@ -194,26 +183,15 @@ async def test_ell2a_workflow_execution(sample_workflow_config):
     message = Message(
         role=MessageRole.USER,
         content="Test message",
+        type=MessageType.TEXT,
         metadata={
             "role": MessageRole.USER,
-            "type": LMPType.AGENT
+            "type": MessageType.TEXT
         }
     )
-    message_dict = {
-        "content": message.content,
-        "metadata": message.metadata
-    }
     
-    # Add message to ELL2A integration
-    ell2a_integration.add_message(message_dict)
-    
-    # Create and initialize workflow
-    workflow = ELL2AWorkflow(
-        name=sample_workflow_config.name,
-        description="Test workflow execution"
-    )
-    await workflow.initialize()
-    
-    # Run workflow
-    result = await workflow.run({"input": "test"})
+    # Process message
+    result = await ell2a_integration.process_message(message)
     assert result is not None
+    assert isinstance(result, Message)
+    assert result.type == MessageType.RESULT

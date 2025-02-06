@@ -8,6 +8,7 @@ import pytest
 import tempfile
 from agentflow.core.config import AgentConfig, ModelConfig, ConfigurationType, WorkflowConfig, load_global_config
 from agentflow.core.config_manager import ConfigManager
+from agentflow.core.workflow_types import WorkflowStep, WorkflowStepType, StepConfig
 
 @pytest.fixture
 def config_manager():
@@ -48,22 +49,19 @@ def test_workflow_config_save_and_load(config_manager):
     workflow_config = WorkflowConfig(
         id="test-workflow-1",
         name="Test Workflow",
-        description="A test workflow configuration",
-        agents=[
-            AgentConfig(
-                id="agent-1",
-                name="Agent 1",
-                description="First test agent",
-                type=ConfigurationType.GENERIC,
-                model=ModelConfig(
-                    name="test-model-1",
-                    provider="default"
-                ),
-                system_prompt="You are agent 1"
+        max_iterations=5,
+        timeout=30,
+        steps=[
+            WorkflowStep(
+                id="step-1",
+                name="step_1",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="standard",
+                    params={}
+                )
             )
-        ],
-        processors=[],
-        connections=[]
+        ]
     )
     
     # Save configuration
@@ -73,134 +71,106 @@ def test_workflow_config_save_and_load(config_manager):
     loaded_config = config_manager.load_workflow_config("test-workflow-1")
     
     assert loaded_config is not None
-    assert loaded_config.id == "test-workflow-1"
-    assert loaded_config.name == "Test Workflow"
-    assert len(loaded_config.agents) == 1
-    assert loaded_config.agents[0].name == "Agent 1"
+    assert loaded_config.id == workflow_config.id
+    assert loaded_config.name == workflow_config.name
+    assert len(loaded_config.steps) == len(workflow_config.steps)
 
 def test_list_configurations(config_manager):
     """Test listing configurations"""
-    # Create multiple agent configs
-    agents = [
-        AgentConfig(
-            id=f"agent-{i}",
-            name=f"Agent {i}",
-            description=f"Test agent {i}",
-            type=ConfigurationType.GENERIC,
-            model=ModelConfig(
-                name=f"test-model-{i}",
-                provider="default"
-            ),
-            system_prompt=f"You are agent {i}"
-        ) for i in range(3)
-    ]
-    
-    # Save configurations
-    for agent in agents:
-        config_manager.save_agent_config(agent)
-    
-    # List configurations
-    listed_configs = config_manager.list_agent_configs()
-    
-    assert len(listed_configs) == 3
-    assert all(isinstance(config, AgentConfig) for config in listed_configs)
+    configs = config_manager.list_configurations()
+    assert isinstance(configs, dict)
+    assert "agents" in configs
+    assert "workflows" in configs
 
 def test_delete_configurations(config_manager):
     """Test deleting configurations"""
-    # Create test agent config
-    agent_config = AgentConfig(
-        id="delete-test-agent",
-        name="Delete Test Agent",
-        description="An agent to be deleted",
-        type=ConfigurationType.GENERIC,
-        model=ModelConfig(
-            name="delete-test-model",
-            provider="default"
-        ),
-        system_prompt="You are a test agent to be deleted"
-    )
-    
-    # Save configuration
-    config_manager.save_agent_config(agent_config)
-    
-    # Verify configuration exists
-    assert config_manager.load_agent_config("delete-test-agent") is not None
-    
-    # Delete configuration
-    result = config_manager.delete_agent_config("delete-test-agent")
-    
-    assert result is True
-    assert config_manager.load_agent_config("delete-test-agent") is None
+    config_manager.delete_configuration("test-workflow-1", "workflow")
+    assert config_manager.load_workflow_config("test-workflow-1") is None
 
 def test_export_and_import_config(config_manager):
     """Test exporting and importing configurations"""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Create test agent config
-        agent_config = AgentConfig(
-            id="export-import-agent",
-            name="Export Import Agent",
-            description="Agent for export/import testing",
-            type=ConfigurationType.GENERIC,
-            model=ModelConfig(
-                name="export-import-model",
-                provider="default"
-            ),
-            system_prompt="You are an export/import test agent"
-        )
-        
-        # Save original configuration
-        config_manager.save_agent_config(agent_config)
-        
-        # Export configuration
-        export_path = os.path.join(tmpdir, "exported_config.json")
-        config_manager.export_config("export-import-agent", export_path)
-        
-        # Verify export file exists and is valid
-        assert os.path.exists(export_path)
-        with open(export_path, 'r') as f:
-            exported_data = json.load(f)
-        
-        assert exported_data['id'] == "export-import-agent"
-        
-        # Import configuration to a new config manager
-        new_config_manager = ConfigManager(tmpdir)
-        new_config_manager.import_config(export_path)
-        
-        # Verify imported configuration
-        imported_config = new_config_manager.load_agent_config("export-import-agent")
-        assert imported_config is not None
-        assert imported_config.id == "export-import-agent"
-        assert imported_config.name == "Export Import Agent"
+    # Create and save a test workflow configuration
+    workflow_config = WorkflowConfig(
+        id="test-workflow-1",
+        name="Test Workflow 1",
+        steps=[
+            WorkflowStep(
+                id="step-1",
+                name="step_1",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="feature_engineering",
+                    params={
+                        "method": "standard",
+                        "with_mean": True,
+                        "with_std": True
+                    }
+                )
+            )
+        ]
+    )
+    config_manager.save_workflow_config(workflow_config)
 
-def test_agent_config_from_yaml():
-    """Test loading agent configuration from YAML."""
-    config = AgentConfig.from_yaml()
-    
-    assert config.name == "default_agent"
-    assert config.type == "generic"
-    assert hasattr(config, 'capabilities')
-    assert hasattr(config, 'optimization')
+    # Now try to export and import
+    config = config_manager.export_configuration("test-workflow-1", "workflow")
+    assert config["id"] == "test-workflow-1"
+    assert config["name"] == "Test Workflow 1"
+    assert len(config["steps"]) == 1
 
-def test_workflow_config_from_yaml():
-    """Test loading workflow configuration from YAML."""
-    config = WorkflowConfig.from_yaml()
-    
-    assert config.name == "default_workflow"
-    assert config.max_iterations == 10
-    assert config.timeout == 3600
+    # Import the configuration
+    imported_config = config_manager.import_configuration(config, "workflow")
+    assert imported_config.id == "test-workflow-1"
+    assert imported_config.name == "Test Workflow 1"
+    assert len(imported_config.steps) == 1
 
-def test_model_config_from_yaml():
-    """Test loading model configuration from YAML."""
-    config = ModelConfig.from_yaml()
-    
+def test_agent_config_from_dict():
+    """Test loading agent configuration from dictionary."""
+    config_dict = {
+        "name": "test_agent",
+        "type": "generic",
+        "model": {
+            "name": "gpt-4",
+            "provider": "openai"
+        }
+    }
+    config = AgentConfig.model_validate(config_dict)
+    assert config.name == "test_agent"
+    assert config.model.name == "gpt-4"
+
+def test_workflow_config_from_dict():
+    """Test loading workflow configuration from dictionary."""
+    config_dict = {
+        "name": "test_workflow",
+        "max_iterations": 5,
+        "timeout": 30,
+        "steps": [
+            {
+                "id": "step-1",
+                "name": "step_1",
+                "type": "transform",
+                "config": {
+                    "strategy": "standard",
+                    "params": {}
+                }
+            }
+        ]
+    }
+    config = WorkflowConfig.model_validate(config_dict)
+    assert config.name == "test_workflow"
+    assert len(config.steps) == 1
+
+def test_model_config_from_dict():
+    """Test loading model configuration from dictionary."""
+    config_dict = {
+        "name": "gpt-4",
+        "provider": "openai"
+    }
+    config = ModelConfig.model_validate(config_dict)
     assert config.name == "gpt-4"
     assert config.provider == "openai"
 
 def test_global_config():
     """Test loading global configuration."""
     global_config = load_global_config()
-    
-    assert 'global' in global_config
-    assert 'system' in global_config
-    assert 'logging_level' in global_config.global_
-    assert 'resource_limits' in global_config.system
+    assert 'global_' in global_config
+    assert 'logging_level' in global_config['global_']

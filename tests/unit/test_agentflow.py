@@ -63,7 +63,7 @@ def mock_ell2a():
         metadata={
             "role": MessageRole.ASSISTANT,
             "type": "tool_result",
-            "status": "success"
+            "status": "completed"
         }
     )
     mock.initialize = AsyncMock()
@@ -248,7 +248,7 @@ async def test_workflow_execution(workflow_engine, agent, mock_ell2a, mock_isa_m
         metadata={
             "role": MessageRole.ASSISTANT,
             "type": "tool_result",
-            "status": "success"
+            "status": "completed"
         }
     )
     
@@ -730,7 +730,7 @@ async def test_workflow_engine_execution():
         metadata={
             "role": MessageRole.ASSISTANT,
             "type": MessageType.TOOL_RESULT,
-            "status": "success"
+            "status": "completed"
         }
     )
     agent._ell2a = mock_ell2a

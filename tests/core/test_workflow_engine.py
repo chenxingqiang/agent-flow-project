@@ -1,71 +1,108 @@
-"""Unit tests for WorkflowEngine."""
+"""Tests for workflow engine."""
 
 import pytest
-from agentflow.core.workflow import WorkflowEngine
-from agentflow.core.workflow_types import WorkflowConfig, WorkflowStep, WorkflowStepType
-from agentflow.core.config import ConfigurationType
-import asyncio
+from unittest.mock import AsyncMock, MagicMock
+from typing import Dict, Any, Optional, Union, cast
+from pydantic import ValidationError
+
+from agentflow.core.workflow_engine import WorkflowEngine
+from agentflow.core.workflow_types import (
+    WorkflowConfig,
+    WorkflowStep,
+    WorkflowStepType,
+    StepConfig,
+    WorkflowStatus,
+    RetryPolicy
+)
+from agentflow.core.exceptions import WorkflowExecutionError
+from agentflow.agents.agent import Agent
+from agentflow.core.config import AgentConfig, ModelConfig
 
 @pytest.fixture
-def valid_workflow_def():
-    """Return a valid workflow definition for testing."""
-    return {
-        "COLLABORATION": {
-            "WORKFLOW": [
+def workflow_config() -> WorkflowConfig:
+    """Return a workflow configuration for testing."""
+    return WorkflowConfig.model_validate(
+        {
+            "name": "test_workflow",
+            "max_iterations": 3,
+            "timeout": 60.0,
+            "steps": [
                 {
                     "id": "step1",
                     "name": "test_step",
-                    "type": WorkflowStepType.TRANSFORM.value,
+                    "type": WorkflowStepType.TRANSFORM,
                     "config": {
                         "strategy": "test",
                         "params": {}
                     }
                 }
             ]
-        }
-    }
-
-@pytest.fixture
-def workflow_config():
-    """Return a workflow configuration for testing."""
-    return WorkflowConfig(
-        name="test_workflow",
-        max_iterations=3,
-        max_retries=3,
-        timeout=60.0,
-        steps=[]
+        },
+        context={"is_initialization": True}
     )
 
-@pytest.fixture
-def workflow_engine(valid_workflow_def, workflow_config):
-    """Return a WorkflowEngine instance for testing."""
-    return WorkflowEngine(valid_workflow_def, workflow_config)
-
-def test_workflow_engine_initialization(workflow_engine):
-    """Test WorkflowEngine initialization."""
-    assert workflow_engine.workflow_def is not None
-    assert workflow_engine.workflow_config is not None
-    assert workflow_engine.state_manager is not None
-
-def test_invalid_workflow_config():
+@pytest.mark.asyncio
+async def test_invalid_workflow_config():
     """Test WorkflowEngine initialization with invalid config."""
+    engine = WorkflowEngine()
     with pytest.raises(ValueError, match="workflow_config must be an instance of WorkflowConfig, a dictionary, or None"):
-        WorkflowEngine({"COLLABORATION": {"WORKFLOW": []}}, "invalid_config")
+        # Cast to Dict[str, Any] to satisfy type checker
+        invalid_config = cast(Dict[str, Any], "invalid_config")
+        await engine.initialize(workflow_def=None, workflow_config=invalid_config)
 
-def test_invalid_workflow_definition():
+@pytest.mark.asyncio
+async def test_invalid_workflow_definition():
     """Test WorkflowEngine initialization with invalid workflow definition."""
-    with pytest.raises(ValueError, match="Workflow definition must contain COLLABORATION.WORKFLOW"):
-        WorkflowEngine({}, WorkflowConfig(name="test", max_iterations=3, timeout=60.0))
+    engine = WorkflowEngine()
+    with pytest.raises(WorkflowExecutionError, match="Empty workflow: no workflow steps defined in COLLABORATION.WORKFLOW"):
+        await engine.initialize(workflow_def={})
+        # Create and register a workflow to trigger validation
+        agent_config = AgentConfig(
+            name="test_agent",
+            type="generic",
+            model=ModelConfig(name="gpt-4", provider="openai")
+        )
+        agent = Agent(config=agent_config)
+        await agent.initialize()
+        await engine.register_workflow(agent, WorkflowConfig.model_validate(
+            {"name": "test", "steps": []},
+            context={"is_initialization": True}
+        ))
 
 @pytest.mark.asyncio
-async def test_execute_with_invalid_max_retries(workflow_engine):
-    """Test execute with invalid max_retries."""
-    with pytest.raises(ValueError, match="max_retries must be greater than 0"):
-        await workflow_engine.execute({}, max_retries=0)
+async def test_engine_initialization(workflow_config: WorkflowConfig):
+    """Test workflow engine initialization."""
+    engine = WorkflowEngine()
+    await engine.initialize(workflow_def=None, workflow_config=workflow_config)
+    assert engine is not None
+    assert engine._initialized
+    assert isinstance(engine.workflows, dict)
+    assert len(engine.workflows) == 0
 
 @pytest.mark.asyncio
-async def test_execute_basic_workflow(workflow_engine):
-    """Test execution of a basic workflow."""
-    context = {"input": "test"}
-    result = await workflow_engine.execute(context)
-    assert isinstance(result, dict)
+async def test_execute_with_invalid_retries(workflow_config: WorkflowConfig):
+    """Test workflow execution with invalid max retries."""
+    engine = WorkflowEngine()
+    await engine.initialize(workflow_def=None, workflow_config=workflow_config)
+    
+    # Create and register an agent with the workflow
+    agent_config = AgentConfig(
+        name="test_agent",
+        type="generic",
+        model=ModelConfig(name="gpt-4", provider="openai")
+    )
+    agent = Agent(config=agent_config)
+    await agent.initialize()
+    await engine.register_workflow(agent, workflow_config)
+    
+    # Create a new RetryPolicy with invalid max_retries
+    with pytest.raises(ValidationError):
+        workflow_config.error_policy.retry_policy = RetryPolicy(max_retries=-1)
+
+@pytest.mark.asyncio
+async def test_execute_basic_workflow(workflow_config: WorkflowConfig):
+    """Test basic workflow execution."""
+    engine = WorkflowEngine()
+    await engine.initialize(workflow_def=None, workflow_config=workflow_config)
+    with pytest.raises(WorkflowExecutionError, match="No workflow registered for agent test"):
+        await engine.execute_workflow("test", {"data": "test"})

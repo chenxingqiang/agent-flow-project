@@ -124,7 +124,8 @@ class AgentBase(BaseModel):
         
     def add_error(self, error: str):
         """Add error to error list."""
-        if len(self.errors) >= self.max_errors:
+        max_errors = self.max_errors if self.max_errors is not None else 10
+        if len(self.errors) >= max_errors:
             self.errors.pop(0)
         self.errors.append({"error": error, "timestamp": str(datetime.now())})
 
@@ -162,12 +163,22 @@ class Agent:
         self.config = config
         self.metadata: Dict[str, Any] = {}
         self._initialized = False
-        self._status: AgentStatus = AgentStatus.INITIALIZED
+        self._status: AgentStatus = AgentStatus.IDLE
+        
+        # Ensure max_errors is always an int
+        config_max_errors = getattr(config, 'max_errors', None)
+        self.max_errors: int = int(config_max_errors) if isinstance(config_max_errors, (int, float, str)) else 10
+        
+        self.errors: List[Dict[str, str]] = []
+        self.history: List[Dict[str, Any]] = []  # Add history list
+        
+        # Initialize state
+        self.state = AgentState(status=AgentStatus.IDLE)
         
         # Initialize components
-        self._ell2a = kwargs.get('ell2a', None)  # Will be initialized in initialize()
-        self._isa_manager = kwargs.get('isa_manager', None)  # Will be initialized in initialize()
-        self._instruction_selector = kwargs.get('instruction_selector', None)  # Will be initialized in initialize()
+        self._ell2a = kwargs.get('ell2a', None)
+        self._isa_manager = kwargs.get('isa_manager', None)
+        self._instruction_selector = kwargs.get('instruction_selector', None)
         
         # If workflow is provided in kwargs, create a new config with updated workflow
         if 'workflow' in kwargs:
@@ -197,6 +208,16 @@ class Agent:
             self.config = AgentConfig(
                 **{**self.config.model_dump(), "model": model}
             )
+
+    @property
+    def isa_manager(self):
+        """Get ISA manager."""
+        return self._isa_manager
+
+    @property
+    def instruction_selector(self):
+        """Get instruction selector."""
+        return self._instruction_selector
         
     @property
     def status(self) -> AgentStatus:
@@ -241,47 +262,122 @@ class Agent:
             except Exception as e:
                 self._status = AgentStatus.FAILED
                 raise
-        
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert agent to dictionary."""
-        return {
-            "id": self.id,
-            "name": self.name,
-            "type": self.type,
-            "mode": self.mode,
-            "config": self.config.dict(),
-            "metadata": self.metadata,
-            "status": self.status.value
-        }
     
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Agent':
-        """Create agent from dictionary."""
-        from ..core.config import AgentConfig
-        config = AgentConfig(**data.get("config", {}))
-        agent = cls(config)
-        agent.id = data.get("id")
-        agent.name = data.get("name")
-        agent.type = data.get("type")
-        agent.mode = data.get("mode")
-        agent.metadata = data.get("metadata", {})
-        if status_value := data.get("status"):
-            agent._status = AgentStatus(status_value)
-        return agent
-
-    async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute agent workflow with input data.
+    def add_error(self, error: str) -> None:
+        """Add error to error list."""
+        if len(self.errors) >= self.max_errors:
+            self.errors.pop(0)
+        self.errors.append({"error": error, "timestamp": str(datetime.now())})
+    
+    async def process_message(self, message: Union[str, Dict[str, Any], Message]) -> str:
+        """Process a message.
+        
+        Args:
+            message: Message to process
+            
+        Returns:
+            str: Processing result
+        """
+        if isinstance(message, str):
+            message = Message(content=message, role=MessageRole.USER)
+        elif isinstance(message, dict):
+            message = Message(**message)
+            
+        # Add message to history
+        self.history.append({
+            "role": message.role,
+            "content": message.content,
+            "timestamp": str(datetime.now())
+        })
+            
+        # Update state
+        self.state.messages_processed += 1
+        self.state.status = AgentStatus.PROCESSING
+        
+        try:
+            # Process message using ELL2A
+            result = await self._ell2a.process_message(message)
+            self.state.status = AgentStatus.IDLE
+            
+            # Add response to history
+            response_content = result.content if isinstance(result, Message) else str(result)
+            if isinstance(response_content, list):
+                response_content = " ".join(str(block.content) for block in response_content)
+            self.history.append({
+                "role": MessageRole.ASSISTANT,
+                "content": response_content,
+                "timestamp": str(datetime.now())
+            })
+            
+            # Return the response content
+            if isinstance(result, Message):
+                content = result.content
+                if isinstance(content, list):
+                    return " ".join(str(block.content) for block in content)
+                return str(content)
+            if isinstance(result, (list, tuple)):
+                return str(result[0] if result else "")
+            return str(result)
+        except Exception as e:
+            self.state.status = AgentStatus.FAILED
+            self.state.last_error = str(e)
+            self.add_error(str(e))
+            raise
+    
+    async def execute(self, input_data: Dict[str, Any]) -> str:
+        """Execute agent with input data.
         
         Args:
             input_data: Input data for execution
             
         Returns:
-            Dict[str, Any]: Execution results
-            
-        Raises:
-            NotImplementedError: If not implemented by subclass
+            str: Execution result
         """
-        raise NotImplementedError("Execute method must be implemented by subclass")
+        if not isinstance(input_data, dict):
+            input_data = {"data": input_data}
+            
+        # Create message from input data
+        message = Message(
+            content=str(input_data.get("data", "")),
+            role=MessageRole.USER,
+            metadata=input_data.get("metadata", {})
+        )
+        
+        return await self.process_message(message)
+    
+    async def cleanup(self) -> None:
+        """Clean up agent resources."""
+        try:
+            if self._ell2a:
+                if hasattr(self._ell2a, 'cleanup'):
+                    cleanup_method = getattr(self._ell2a, 'cleanup')
+                    if asyncio.iscoroutinefunction(cleanup_method):
+                        await cleanup_method()
+                    else:
+                        cleanup_method()
+                        
+            if self._isa_manager:
+                if hasattr(self._isa_manager, 'cleanup'):
+                    cleanup_method = getattr(self._isa_manager, 'cleanup')
+                    if asyncio.iscoroutinefunction(cleanup_method):
+                        await cleanup_method()
+                    else:
+                        cleanup_method()
+                        
+            if self._instruction_selector:
+                # Only try to cleanup if the method exists
+                if hasattr(self._instruction_selector, 'cleanup'):
+                    cleanup_method = getattr(self._instruction_selector, 'cleanup')
+                    if asyncio.iscoroutinefunction(cleanup_method):
+                        await cleanup_method()
+                    else:
+                        cleanup_method()
+                        
+            self._initialized = False
+            self._status = AgentStatus.INITIALIZED
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+            raise
 
 @ray.remote
 class RemoteAgent:

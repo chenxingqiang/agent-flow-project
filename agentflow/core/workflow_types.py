@@ -76,7 +76,7 @@ class WorkflowStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
-    SUCCESS = "success"
+    INITIALIZED = "initialized"
 
 class RetryPolicy(BaseModel):
     """Retry policy configuration."""
@@ -166,34 +166,81 @@ class WorkflowStep(BaseModel):
 
     async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Execute workflow step."""
-        # Convert Message object to dictionary if needed
-        if not isinstance(context, dict) and hasattr(context, 'model_dump'):
-            context = context.model_dump()
-        elif not isinstance(context, dict):
-            context = {"data": context}
+        try:
+            # Convert Message object to dictionary if needed
+            if not isinstance(context, dict) and hasattr(context, 'model_dump'):
+                context = context.model_dump()
+            elif not isinstance(context, dict):
+                context = {"data": context}
 
-        # Execute step function if available
-        if self.config.execute is not None and callable(self.config.execute):
-            return await self.config.execute(context)
+            # Execute step function if available
+            if self.config.execute is not None and callable(self.config.execute):
+                try:
+                    result = await self.config.execute(context.get("data"))
+                    return {
+                        "data": result,
+                        "result": result,
+                        "metadata": {}
+                    }
+                except Exception as e:
+                    raise WorkflowExecutionError(f"Step {self.id} failed: {str(e)}") from e
 
-        # Handle different step types
-        if self.type == WorkflowStepType.TRANSFORM:
-            return await self._execute_transform(context)
-        elif self.type == WorkflowStepType.FILTER:
-            return await self._execute_filter(context)
-        elif self.type == WorkflowStepType.AGGREGATE:
-            return await self._execute_aggregate(context)
-        elif self.type == WorkflowStepType.ANALYZE:
-            return await self._execute_analyze(context)
-        elif self.type == WorkflowStepType.RESEARCH_EXECUTION:
-            return await self._execute_research(context)
-        elif self.type == WorkflowStepType.DOCUMENT_GENERATION:
-            return await self._execute_document_generation(context)
-        elif self.type == WorkflowStepType.AGENT:
-            raise WorkflowExecutionError(f"Agent step type requires an agent to be configured for step {self.id}")
-
-        # Return the data in a standardized format
-        return {"data": context.get("data", None)}
+            # Handle different step types
+            if self.type == WorkflowStepType.TRANSFORM:
+                result = await self._execute_transform(context)
+                return {
+                    "data": result.get("data"),
+                    "result": result.get("result"),
+                    "metadata": {}
+                }
+            elif self.type == WorkflowStepType.FILTER:
+                result = await self._execute_filter(context)
+                return {
+                    "data": result.get("data"),
+                    "result": result.get("data"),
+                    "metadata": {}
+                }
+            elif self.type == WorkflowStepType.AGGREGATE:
+                result = await self._execute_aggregate(context)
+                return {
+                    "data": result.get("data"),
+                    "result": result.get("data"),
+                    "metadata": {}
+                }
+            elif self.type == WorkflowStepType.ANALYZE:
+                result = await self._execute_analyze(context)
+                return {
+                    "data": result.get("data"),
+                    "result": result.get("data"),
+                    "metadata": {}
+                }
+            elif self.type == WorkflowStepType.RESEARCH_EXECUTION:
+                result = await self._execute_research(context)
+                return {
+                    "data": result.get("data"),
+                    "result": result.get("data"),
+                    "metadata": {}
+                }
+            elif self.type == WorkflowStepType.DOCUMENT_GENERATION:
+                result = await self._execute_document_generation(context)
+                return {
+                    "data": result.get("data"),
+                    "result": result.get("data"),
+                    "metadata": {}
+                }
+            elif self.type == WorkflowStepType.AGENT:
+                # For AGENT type, just pass through the input data
+                return {
+                    "data": context.get("data", None),
+                    "content": context.get("message", ""),
+                    "metadata": {}
+                }
+            else:
+                raise ValueError(f"Unsupported step type: {self.type}")
+        except Exception as e:
+            if isinstance(e, WorkflowExecutionError):
+                raise
+            raise WorkflowExecutionError(f"Step {self.id} failed: {str(e)}") from e
 
     async def _execute_transform(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Execute transform step."""
@@ -211,7 +258,14 @@ class WorkflowStep(BaseModel):
                 mean = np.mean(data, axis=0) if with_mean else 0
                 std = np.std(data, axis=0) if with_std else 1
                 transformed_data = (data - mean) / std
-                return {"data": transformed_data}
+                return {
+                    "data": transformed_data,
+                    "result": {
+                        "data": {
+                            "data": transformed_data
+                        }
+                    }
+                }
             elif method == "isolation_forest":
                 threshold = params.get("threshold", 0.1)
                 mean = np.mean(data, axis=0)
@@ -219,8 +273,22 @@ class WorkflowStep(BaseModel):
                 z_scores = np.abs((data - mean) / std)
                 outliers = np.any(z_scores > threshold, axis=1)
                 transformed_data = data[~outliers]
-                return {"data": transformed_data}
-        return {"data": context.get("data")}
+                return {
+                    "data": transformed_data,
+                    "result": {
+                        "data": {
+                            "data": transformed_data
+                        }
+                    }
+                }
+        return {
+            "data": context.get("data"),
+            "result": {
+                "data": {
+                    "data": context.get("data")
+                }
+            }
+        }
 
     async def _execute_filter(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Execute filter step."""
@@ -285,22 +353,30 @@ class WorkflowStep(BaseModel):
 
 class WorkflowConfig(BaseModel):
     """Workflow configuration."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = Field(default="default_workflow")
+    type: str = "sequential"
+    steps: List[WorkflowStep] = Field(default_factory=list)
+    max_iterations: int = Field(default=10, ge=1)
+    timeout: float = Field(default=3600.0, ge=0.0)
+    error_policy: ErrorPolicy = Field(default_factory=ErrorPolicy)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    ell2a_config: Optional[Dict[str, Any]] = None
+    agent: Optional[Any] = None  # Store agent reference
+    
     model_config = ConfigDict(
         validate_assignment=True,
         arbitrary_types_allowed=True,
         use_enum_values=True
     )
-
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str = Field(default="default_workflow")
-    type: str = "sequential"
-    steps: List[WorkflowStep] = Field(default_factory=list)
-    max_iterations: int = Field(default=3, ge=0)
-    timeout: float = Field(default=300.0, ge=0)
-    logging_level: str = "INFO"
-    distributed: bool = False
-    error_policy: ErrorPolicy = Field(default_factory=ErrorPolicy)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        data = super().model_dump(**kwargs)
+        # Skip agent when dumping
+        if 'agent' in data:
+            del data['agent']
+        return data
 
     @field_validator('steps')
     @classmethod
@@ -309,14 +385,23 @@ class WorkflowConfig(BaseModel):
         # Allow empty steps list during initialization or if explicitly allowed
         if info.context and (
             info.context.get("allow_empty_steps") or
-            info.context.get("is_initialization", False)
+            info.context.get("is_initialization", False) or
+            info.context.get("distributed", False)
         ):
             return v
         # Allow empty steps for distributed workflows
         if info.context and info.context.get("distributed", False):
             return v
         if not v:
-            raise ValueError("Workflow steps list cannot be empty")
+            # Add default step for empty workflows
+            return [
+                WorkflowStep(
+                    id="default-step",
+                    name="default_step",
+                    type=WorkflowStepType.AGENT,
+                    config=StepConfig(strategy="default")
+                )
+            ]
         return v
 
     def get_step(self, step_id: str) -> Optional[WorkflowStep]:
@@ -332,20 +417,6 @@ class WorkflowConfig(BaseModel):
             if step.id == step_id:
                 return step
         return None
-
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        data = super().model_dump(**kwargs)
-        # Ensure steps is a list of dictionaries
-        if isinstance(data.get('steps'), list):
-            data['steps'] = [
-                step.model_dump() if hasattr(step, 'model_dump') else step
-                for step in data['steps']
-            ]
-        # Convert error policy to dictionary
-        if isinstance(data.get('error_policy'), ErrorPolicy):
-            data['error_policy'] = data['error_policy'].model_dump()
-        return data
 
     @classmethod
     def model_validate(cls, obj: Any, **kwargs) -> 'WorkflowConfig':
@@ -366,6 +437,52 @@ class WorkflowConfig(BaseModel):
                 elif hasattr(obj['error_policy'], 'dict'):
                     obj['error_policy'] = ErrorPolicy(**obj['error_policy'].dict())
         return super().model_validate(obj, **kwargs)
+
+    async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute workflow steps.
+        
+        Args:
+            context: Execution context
+            
+        Returns:
+            Dict containing execution results
+            
+        Raises:
+            WorkflowExecutionError: If execution fails
+        """
+        if not self.steps:
+            raise ValueError("Workflow has no steps")
+            
+        results = {
+            "steps": {},
+            "status": "completed",
+            "error": None
+        }
+        completed_steps = set()
+        
+        for step in self.steps:
+            try:
+                # Validate dependencies
+                if step.dependencies:
+                    for dep_id in step.dependencies:
+                        if dep_id not in completed_steps:
+                            raise WorkflowExecutionError(f"Missing dependency '{dep_id}' required by step '{step.id}'")
+                
+                step_result = await step.execute(context)
+                results["steps"][step.id] = {
+                    "data": step_result.get("data"),
+                    "result": step_result.get("result"),
+                    "metadata": step_result.get("metadata", {})
+                }
+                context.update(step_result)
+                completed_steps.add(step.id)
+            except Exception as e:
+                if self.error_policy.fail_fast:
+                    raise WorkflowExecutionError(f"Error executing step {step.id}: {str(e)}") from e
+                if not self.error_policy.ignore_warnings:
+                    results["warnings"] = results.get("warnings", []) + [str(e)]
+                    
+        return results
 
 class WorkflowMetrics(BaseModel):
     """Metrics for workflow execution."""

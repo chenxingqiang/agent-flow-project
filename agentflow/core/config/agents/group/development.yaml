@@ -1,0 +1,19 @@
+defaults:
+  - /academic_support_agent
+
+# Development environment overrides
+model:
+  temperature: 0.9  # Higher temperature for more creative outputs in development
+
+research_context:
+  current_status:
+    - Development Phase
+    - Testing Phase
+  
+resources:
+  computing_resources:
+    - CPU: Development
+    - GPU: Optional
+  database_access:
+    - Test Database
+    - Mock Repository 

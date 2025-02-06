@@ -4,20 +4,14 @@ import pytest
 import numpy as np
 from agentflow.core.workflow_types import WorkflowConfig, WorkflowStep, WorkflowStepType, StepConfig
 from agentflow.core.exceptions import WorkflowExecutionError
+from agentflow.core.workflow_executor import WorkflowExecutor
+from agentflow.core.workflow import Workflow
 
 @pytest.mark.asyncio
 async def test_empty_workflow():
     """Test workflow with no steps."""
-    workflow = WorkflowConfig(
-        name="empty_workflow",
-        max_iterations=5,
-        timeout=30,
-        steps=[]
-    )
-    data = np.random.randn(10, 2)
-    result = await workflow.execute({"data": data})
-    assert isinstance(result, dict)
-    assert len(result) == 0  # No steps, so no results
+    with pytest.raises(ValueError, match="Workflow steps list cannot be empty"):
+        Workflow(steps=[])
 
 @pytest.mark.asyncio
 async def test_invalid_step_type():
@@ -38,9 +32,11 @@ async def test_invalid_step_type():
             )
         ]
     )
+    executor = WorkflowExecutor(workflow)
+    await executor.initialize()
     data = np.random.randn(10, 2)
-    with pytest.raises(WorkflowExecutionError):
-        await workflow.execute({"data": data})
+    with pytest.raises(WorkflowExecutionError, match="Invalid strategy"):
+        await executor.execute({"data": data})
 
 @pytest.mark.asyncio
 async def test_circular_dependencies():

@@ -22,23 +22,18 @@ class ProcessorConfig(BaseModel):
 class ConfigManager:
     """Configuration manager for agent and workflow configurations."""
 
-    def __init__(self, config_dir: str = None):
+    def __init__(self, config_dir: Optional[str] = None):
         """
         Initialize ConfigManager with a configuration directory.
         
         Args:
             config_dir: Directory to store and load configurations
         """
-        if config_dir is None:
-            config_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'configs')
+        self.config_dir = config_dir or os.path.join(os.path.dirname(__file__), '..', 'config')
+        self.agent_config_dir = os.path.join(self.config_dir, 'agents')
+        self.workflow_config_dir = os.path.join(self.config_dir, 'workflows')
         
-        os.makedirs(config_dir, exist_ok=True)
-        self.config_dir = config_dir
-        
-        # Create subdirectories for different config types
-        self.agent_config_dir = os.path.join(config_dir, 'agents')
-        self.workflow_config_dir = os.path.join(config_dir, 'workflows')
-        
+        # Create config directories if they don't exist
         os.makedirs(self.agent_config_dir, exist_ok=True)
         os.makedirs(self.workflow_config_dir, exist_ok=True)
 
@@ -149,26 +144,24 @@ class ConfigManager:
         return WorkflowConfig(**converted_dict)
 
     def list_agent_configs(self) -> List[AgentConfig]:
-        """
-        List all saved agent configurations.
-        
-        Returns:
-            List of AgentConfig objects
-        """
-        return [self.load_agent_config(f.replace('.json', '')) 
-                for f in os.listdir(self.agent_config_dir) 
-                if f.endswith('.json')]
+        """List all agent configurations."""
+        configs = []
+        for file in os.listdir(self.agent_config_dir):
+            if file.endswith('.json'):
+                config = self.load_agent_config(file[:-5])
+                if config:
+                    configs.append(config)
+        return configs
 
     def list_workflow_configs(self) -> List[WorkflowConfig]:
-        """
-        List all saved workflow configurations.
-        
-        Returns:
-            List of WorkflowConfig objects
-        """
-        return [self.load_workflow_config(f.replace('.json', '')) 
-                for f in os.listdir(self.workflow_config_dir) 
-                if f.endswith('.json')]
+        """List all workflow configurations."""
+        configs = []
+        for file in os.listdir(self.workflow_config_dir):
+            if file.endswith('.json'):
+                config = self.load_workflow_config(file[:-5])
+                if config:
+                    configs.append(config)
+        return configs
 
     def delete_agent_config(self, agent_id: str) -> bool:
         """
@@ -230,27 +223,66 @@ class ConfigManager:
         import shutil
         shutil.copy(source_file, export_path)
 
-    def import_config(self, import_path: str, config_type: str = 'agent'):
-        """
-        Import a configuration from a specified path.
-        
-        Args:
-            import_path: Path to import the configuration from
-            config_type: Type of configuration ('agent' or 'workflow')
-        
-        Returns:
-            Imported configuration
-        """
-        with open(import_path, 'r') as f:
-            config_dict = json.load(f)
-        
-        if config_type == 'agent':
-            config = AgentConfig(**config_dict)
-            self.save_agent_config(config)
-        elif config_type == 'workflow':
-            config = WorkflowConfig(**config_dict)
-            self.save_workflow_config(config)
-        else:
-            raise ValueError(f"Invalid config type: {config_type}")
+    def import_configuration(self, config: Dict[str, Any], config_type: str) -> Union[AgentConfig, WorkflowConfig, None]:
+        """Import a configuration."""
+        try:
+            if config_type == "agent":
+                agent_config = AgentConfig(**config)
+                self.save_agent_config(agent_config)
+                return agent_config
+            elif config_type == "workflow":
+                workflow_config = WorkflowConfig(**config)
+                self.save_workflow_config(workflow_config)
+                return workflow_config
+            else:
+                raise ValueError(f"Invalid configuration type: {config_type}")
+        except Exception as e:
+            raise ValueError(f"Failed to import configuration: {str(e)}")
 
-        return config
+    def list_configurations(self) -> Dict[str, List[str]]:
+        """List all available configurations."""
+        configs = {
+            "agents": [],
+            "workflows": []
+        }
+        
+        # List agent configs
+        for file in os.listdir(self.agent_config_dir):
+            if file.endswith('.json'):
+                configs["agents"].append(file[:-5])  # Remove .json extension
+                
+        # List workflow configs
+        for file in os.listdir(self.workflow_config_dir):
+            if file.endswith('.json'):
+                configs["workflows"].append(file[:-5])  # Remove .json extension
+                
+        return configs
+
+    def delete_configuration(self, config_id: str, config_type: str) -> bool:
+        """Delete a configuration."""
+        if config_type == "agent":
+            config_path = os.path.join(self.agent_config_dir, f"{config_id}.json")
+        elif config_type == "workflow":
+            config_path = os.path.join(self.workflow_config_dir, f"{config_id}.json")
+        else:
+            raise ValueError(f"Invalid configuration type: {config_type}")
+            
+        if os.path.exists(config_path):
+            os.remove(config_path)
+            return True
+        return False
+
+    def export_configuration(self, config_id: str, config_type: str) -> Dict[str, Any]:
+        """Export a configuration."""
+        if config_type == "agent":
+            config = self.load_agent_config(config_id)
+            if config:
+                return config.model_dump()
+        elif config_type == "workflow":
+            config = self.load_workflow_config(config_id)
+            if config:
+                return config.model_dump()
+        else:
+            raise ValueError(f"Invalid configuration type: {config_type}")
+            
+        raise ValueError(f"Configuration not found: {config_id}")
