@@ -267,7 +267,7 @@ def test_agent_state_initialization():
     agent = Agent(config=config)
     
     assert agent.name == "StateAgent"
-    assert agent.status.value == "IDLE"
+    assert agent.status.value == "idle"
     assert agent.config is not None
 
 def test_agent_invalid_initialization():

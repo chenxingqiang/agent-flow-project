@@ -7,6 +7,11 @@ class AgentType(str, Enum):
     GENERIC = "generic"
     RESEARCH = "research"
     DATA_SCIENCE = "data_science"
+    DEVELOPMENT = "development"
+    TESTING = "testing"
+    DEPLOYMENT = "deployment"
+    MONITORING = "monitoring"
+    MAINTENANCE = "maintenance"
     CUSTOM = "custom"
 
 class AgentMode(str, Enum):
@@ -21,7 +26,7 @@ class AgentStatus(str, Enum):
     IDLE = "idle"
     PROCESSING = "processing"
     FAILED = "failed"
-    COMPLETED = "completed"
+    SUCCESS = "success"
     INITIALIZED = "initialized"
 
 class DictKeyType(str, Enum):

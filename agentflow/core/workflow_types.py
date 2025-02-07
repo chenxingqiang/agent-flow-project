@@ -240,7 +240,7 @@ class WorkflowStatus(str, Enum):
     """Workflow status enum."""
     PENDING = "pending"
     RUNNING = "running"
-    COMPLETED = "completed"
+    SUCCESS = "success"
     FAILED = "failed"
     INITIALIZED = "initialized"
 
@@ -595,12 +595,12 @@ class WorkflowInstance(BaseModel):
         """Custom dump method to ensure proper serialization."""
         data = super().model_dump(**kwargs)
         # Always use "success" for completed status
-        data["status"] = "success" if self.status == WorkflowStatus.COMPLETED else self.status.value
+        data["status"] = "success" if self.status == WorkflowStatus.SUCCESS else self.status.value
         # Keep the result as is since we've already serialized it
         if self.result:
             # Ensure result status is consistent with instance status
             if isinstance(self.result, dict):
-                self.result["status"] = "success" if self.status == WorkflowStatus.COMPLETED else self.status.value
+                self.result["status"] = "success" if self.status == WorkflowStatus.SUCCESS else self.status.value
                 # Ensure step statuses are consistent
                 if "steps" in self.result:
                     for step in self.result["steps"]:
