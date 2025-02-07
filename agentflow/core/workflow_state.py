@@ -2,7 +2,7 @@
 
 from enum import Enum
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from pydantic import BaseModel, Field, ConfigDict, computed_field, field_validator, model_validator
 from dataclasses import dataclass, field
 from .workflow_types import WorkflowStatus, WorkflowStepStatus as StepStatus
@@ -22,11 +22,49 @@ class WorkflowState(BaseModel):
     end_time: Optional[datetime] = Field(default=None, description="Workflow end time")
     metrics: Dict[str, Any] = Field(default_factory=dict, description="Workflow metrics")
     result: Optional[Dict[str, Any]] = Field(default=None, description="Workflow result")
+    created_at: datetime = Field(default_factory=datetime.now, description="Creation timestamp")
+    updated_at: Optional[datetime] = Field(default=None, description="Last update timestamp")
+    state_history: List[Dict[str, Any]] = Field(default_factory=list, description="History of state changes")
     
     model_config = ConfigDict(
         validate_assignment=True,
+        arbitrary_types_allowed=True,
         use_enum_values=True
     )
+    
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v: Union[str, WorkflowStatus]) -> WorkflowStatus:
+        """Validate status field."""
+        if isinstance(v, str):
+            try:
+                return WorkflowStatus(v)
+            except ValueError:
+                raise ValueError(f"Invalid status: {v}")
+        if not isinstance(v, WorkflowStatus):
+            raise ValueError(f"Invalid status type: {type(v)}")
+        return v
+    
+    def update_status(self, status: Union[WorkflowStatus, str]) -> None:
+        """Update workflow status.
+        
+        Args:
+            status: New workflow status
+        """
+        if isinstance(status, str):
+            try:
+                status = WorkflowStatus(status)
+            except ValueError:
+                raise ValueError(f"Invalid status: {status}")
+        
+        # Record the state change
+        self.state_history.append({
+            "status": self.status,
+            "timestamp": datetime.now()
+        })
+        
+        self.status = status
+        self.updated_at = datetime.now()
     
     def validate(self) -> None:
         """Validate workflow state."""
@@ -34,16 +72,10 @@ class WorkflowState(BaseModel):
             raise WorkflowStateError("Workflow ID is required")
         if not self.name:
             raise WorkflowStateError("Workflow name is required")
-    
-    def update_status(self, status: WorkflowStatus) -> None:
-        """Update workflow status.
-        
-        Args:
-            status: New workflow status
-        """
-        if not isinstance(status, WorkflowStatus):
-            raise TypeError(f"Expected WorkflowStatus, got {type(status)}")
-        self.status = status
+        if not isinstance(self.status, WorkflowStatus):
+            raise WorkflowStateError(f"Invalid status type: {type(self.status)}")
+        if self.status not in WorkflowStatus.__members__.values():
+            raise WorkflowStateError(f"Invalid status value: {self.status}")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert workflow state to dictionary.
@@ -58,8 +90,27 @@ class WorkflowState(BaseModel):
             "start_time": self.start_time.isoformat() if self.start_time else None,
             "end_time": self.end_time.isoformat() if self.end_time else None,
             "metrics": self.metrics,
-            "result": self.result
+            "result": self.result,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "state_history": self.state_history
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'WorkflowState':
+        """Create instance from dictionary.
+        
+        Args:
+            data: Dictionary data
+            
+        Returns:
+            WorkflowState instance
+        """
+        if "created_at" in data and isinstance(data["created_at"], str):
+            data["created_at"] = datetime.fromisoformat(data["created_at"])
+        if "updated_at" in data and isinstance(data["updated_at"], str):
+            data["updated_at"] = datetime.fromisoformat(data["updated_at"])
+        return cls(**data)
 
 class StepState(BaseModel):
     """Step state class."""

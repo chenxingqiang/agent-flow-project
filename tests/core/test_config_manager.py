@@ -29,7 +29,23 @@ def test_agent_config_save_and_load(config_manager):
             name="test-model",
             provider="default"
         ),
-        system_prompt="You are a test agent"
+        system_prompt="You are a test agent",
+        workflow=WorkflowConfig(
+            id="test-workflow",
+            name="Test Workflow",
+            steps=[
+                WorkflowStep(
+                    id="step-1",
+                    name="step_1",
+                    type=WorkflowStepType.TRANSFORM,
+                    description="A test step",
+                    config=StepConfig(
+                        strategy="standard",
+                        params={}
+                    )
+                )
+            ]
+        )
     )
     
     # Save configuration
@@ -56,6 +72,7 @@ def test_workflow_config_save_and_load(config_manager):
                 id="step-1",
                 name="step_1",
                 type=WorkflowStepType.TRANSFORM,
+                description="A test transform step",
                 config=StepConfig(
                     strategy="standard",
                     params={}
@@ -98,6 +115,7 @@ def test_export_and_import_config(config_manager):
                 id="step-1",
                 name="step_1",
                 type=WorkflowStepType.TRANSFORM,
+                description="A test transform step",
                 config=StepConfig(
                     strategy="feature_engineering",
                     params={
@@ -126,11 +144,29 @@ def test_export_and_import_config(config_manager):
 def test_agent_config_from_dict():
     """Test loading agent configuration from dictionary."""
     config_dict = {
+        "id": "test-agent",
         "name": "test_agent",
         "type": "generic",
+        "description": "A test agent",
         "model": {
             "name": "gpt-4",
             "provider": "openai"
+        },
+        "workflow": {
+            "id": "test-workflow",
+            "name": "Test Workflow",
+            "steps": [
+                {
+                    "id": "step-1",
+                    "name": "step_1",
+                    "type": "transform",
+                    "description": "A test transform step",
+                    "config": {
+                        "strategy": "standard",
+                        "params": {}
+                    }
+                }
+            ]
         }
     }
     config = AgentConfig.model_validate(config_dict)
@@ -140,6 +176,7 @@ def test_agent_config_from_dict():
 def test_workflow_config_from_dict():
     """Test loading workflow configuration from dictionary."""
     config_dict = {
+        "id": "test-workflow",
         "name": "test_workflow",
         "max_iterations": 5,
         "timeout": 30,
@@ -148,6 +185,7 @@ def test_workflow_config_from_dict():
                 "id": "step-1",
                 "name": "step_1",
                 "type": "transform",
+                "description": "A test transform step",
                 "config": {
                     "strategy": "standard",
                     "params": {}

@@ -18,11 +18,11 @@ class AgentMode(str, Enum):
 
 class AgentStatus(str, Enum):
     """Agent status enum."""
-    IDLE = "IDLE"
-    PROCESSING = "PROCESSING"
-    FAILED = "FAILED"
-    COMPLETED = "COMPLETED"
-    INITIALIZED = "INITIALIZED"
+    IDLE = "idle"
+    PROCESSING = "processing"
+    FAILED = "failed"
+    COMPLETED = "completed"
+    INITIALIZED = "initialized"
 
 class DictKeyType(str, Enum):
     """Dictionary key type enum."""

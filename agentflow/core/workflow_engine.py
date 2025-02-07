@@ -201,6 +201,7 @@ class WorkflowEngine:
 
         Raises:
             WorkflowExecutionError: If workflow execution fails
+            TimeoutError: If workflow execution times out
         """
         try:
             # Convert Message to dict if needed
@@ -227,6 +228,8 @@ class WorkflowEngine:
             # Execute workflow
             result = await executor.execute(context_dict)
             return result
+        except TimeoutError:
+            raise  # Re-raise TimeoutError directly
         except Exception as e:
             if isinstance(e, WorkflowExecutionError):
                 raise

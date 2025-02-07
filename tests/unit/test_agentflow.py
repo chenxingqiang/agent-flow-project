@@ -318,7 +318,7 @@ async def test_workflow_error_handling():
     agent.metadata["test_mode"] = True
     
     # Configure mock to raise error for this test
-    error_message = "1 validation error for Message\ncontent\n  String should have at least 1 character [type=string_too_short, input_value='', input_type=str]"
+    error_message = "1 validation error for Message\ncontent\n  String should have at least 1 character [type=string_too_short, input_value='', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.9/v/string_too_short"
     mock_ell2a = AsyncMock()
     mock_ell2a.process_message.side_effect = WorkflowExecutionError(f"Step step-1 failed: {error_message}")
     agent._ell2a = mock_ell2a
@@ -354,10 +354,11 @@ async def test_workflow_error_handling():
         await engine.execute_workflow(agent.id, {"test": True})
     
     # Verify error message
-    assert str(exc_info.value) == f"Error executing step step-1: Step step-1 failed: {error_message}"
+    expected_error = f"Error executing step step-1: Step step-1 failed: {error_message}"
+    assert str(exc_info.value) == expected_error
     
     # Verify agent status
-    assert agent.state.status == AgentStatus.FAILED
+    assert agent.state.status == AgentStatus.FAILED  # Compare enum values
 
 @pytest.mark.asyncio
 async def test_parallel_workflow_execution(workflow_engine, mock_ell2a, mock_isa_manager, mock_instruction_selector):
@@ -617,12 +618,12 @@ async def test_workflow_engine_execution():
             WorkflowStep(
                 id="step-1",
                 name="Test Step 1",
-                type=WorkflowStepType.AGENT,  # Change to AGENT type for test mode
+                type=WorkflowStepType.AGENT,
                 description="Test transform step for workflow engine execution",
                 dependencies=[],
                 config=StepConfig(
-                    strategy=WorkflowStrategy.CUSTOM,  # Use CUSTOM strategy
-                    params={"should_fail": True},  # Set should_fail to trigger error
+                    strategy=WorkflowStrategy.CUSTOM,
+                    params={"should_fail": True},
                     retry_delay=1.0,
                     retry_backoff=2.0,
                     max_retries=3
@@ -650,7 +651,8 @@ async def test_workflow_engine_execution():
     
     # Set up mocks before initialization
     mock_ell2a = AsyncMock()
-    mock_ell2a.process_message.side_effect = WorkflowExecutionError("Agent step execution failed: 1 validation error for Message\ncontent\n  Value error, Message content cannot be empty [type=value_error, input_value='', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.9/v/value_error")
+    error_message = "1 validation error for Message\ncontent\n  String should have at least 1 character [type=string_too_short, input_value='', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.9/v/string_too_short"
+    mock_ell2a.process_message.side_effect = WorkflowExecutionError(f"Step step-1 failed: {error_message}")
     agent._ell2a = mock_ell2a
     
     mock_isa_manager = AsyncMock()
@@ -675,17 +677,17 @@ async def test_workflow_engine_execution():
         metadata={
             "role": MessageRole.USER,
             "type": MessageType.TEXT,
-            "test_mode": True  # Add test mode flag
+            "test_mode": True
         }
     )
     
     # Test error handling
     with pytest.raises(WorkflowExecutionError) as exc_info:
-        await engine.execute_workflow(agent.id, message)
+        await engine.execute_workflow(agent.id, {"test": True})
     
     # Verify error message
-    expected_error = "Error executing step step-1: Agent step execution failed: 1 validation error for Message\ncontent\n  Value error, Message content cannot be empty [type=value_error, input_value='', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.9/v/value_error"
+    expected_error = f"Error executing step step-1: Step step-1 failed: {error_message}"
     assert str(exc_info.value) == expected_error
     
     # Verify agent status
-    assert agent.state.status == AgentStatus.FAILED
+    assert agent.state.status == AgentStatus.FAILED  # Compare enum values

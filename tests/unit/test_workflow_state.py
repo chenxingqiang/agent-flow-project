@@ -3,6 +3,7 @@ from datetime import datetime
 from agentflow.core.workflow_state import WorkflowState
 from agentflow.core.exceptions import WorkflowStateError
 from agentflow.core.workflow_types import WorkflowStatus
+from pydantic import ValidationError
 
 @pytest.fixture
 def workflow_state():
@@ -64,9 +65,15 @@ class TestWorkflowState:
 
     def test_validate_state(self, workflow_state):
         workflow_state.validate()  # Should not raise
-        workflow_state.status = "invalid"  # Set invalid status
-        with pytest.raises(WorkflowStateError):
-            workflow_state.validate()
+        
+        # Test with invalid status by directly setting the attribute
+        with pytest.raises(ValidationError) as exc_info:
+            workflow_state.status = "invalid"  # This should trigger validation error
+        assert "Input should be" in str(exc_info.value)
+        
+        # Reset to valid status
+        workflow_state.status = WorkflowStatus.PENDING
+        workflow_state.validate()  # Should not raise
 
     def test_state_history(self, workflow_state):
         workflow_state.update_status(WorkflowStatus.RUNNING)

@@ -11,6 +11,7 @@ import uuid
 
 from agentflow.agents.agent import Agent, AgentStatus
 from agentflow.core.config import AgentConfig, ModelConfig, WorkflowConfig
+from agentflow.core.workflow_types import WorkflowStep, WorkflowStepType, StepConfig
 from agentflow.ell2a.integration import ELL2AIntegration
 from agentflow.ell2a.types.message import Message, MessageRole
 
@@ -95,7 +96,19 @@ def workflow_config():
         "id": "test-workflow-id",
         "name": "test-workflow",
         "max_iterations": 10,
-        "timeout": 3600
+        "timeout": 3600,
+        "steps": [
+            {
+                "id": "test-step-1",
+                "name": "test_step",
+                "type": WorkflowStepType.TRANSFORM,
+                "description": "Test workflow step",
+                "config": {
+                    "strategy": "standard",
+                    "params": {}
+                }
+            }
+        ]
     }
 
 @pytest.fixture
