@@ -71,11 +71,22 @@ class WorkflowExecutor:
 
     async def initialize(self):
         """Initialize the workflow executor."""
-        # Initialize state manager
-        self.state_manager = WorkflowStateManager()
+        # Validate workflow steps first
+        if self._has_circular_dependencies():
+            raise WorkflowExecutionError("Circular dependency detected in workflow steps")
         
-        # Initialize step statuses
+        if self._has_missing_dependencies():
+            raise WorkflowExecutionError("Missing dependencies detected in workflow steps")
+        
+        # Initialize state manager
+        await self.state_manager.initialize()
+        
+        # Initialize workflow state
+        self.state_manager.initialize_workflow(self.config.id, self.config.name)
+        
+        # Initialize step states
         for step in self.config.steps:
+            self.state_manager.initialize_step(self.config.id, step.id, step.name)
             self.state_manager.update_step_status(
                 self.config.id,
                 step.id,
@@ -127,7 +138,12 @@ class WorkflowExecutor:
             raise WorkflowExecutionError("Missing dependencies detected in workflow steps")
         
         # Validate step types
-        self._validate_step_types()
+        for step in self.config.steps:
+            if not isinstance(step.type, WorkflowStepType):
+                try:
+                    step.type = WorkflowStepType(step.type)
+                except ValueError:
+                    raise WorkflowExecutionError(f"Invalid step type: {step.type}")
 
     def _has_circular_dependencies(self) -> bool:
         """Check for circular dependencies in workflow steps."""
@@ -144,8 +160,9 @@ class WorkflowExecutor:
             visited.add(step_id)
             path.add(step_id)
             
+            # Find the step by ID
             step = next((s for s in self.config.steps if s.id == step_id), None)
-            if step:
+            if step and step.dependencies:
                 for dep in step.dependencies:
                     if dfs(dep):
                         return True
@@ -155,6 +172,8 @@ class WorkflowExecutor:
         
         # Check each step for cycles
         for step in self.config.steps:
+            visited.clear()  # Clear visited set for each starting point
+            path.clear()    # Clear path set for each starting point
             if dfs(step.id):
                 return True
             
@@ -164,19 +183,21 @@ class WorkflowExecutor:
         """Check for missing dependencies."""
         step_ids = {step.id for step in self.config.steps}
         for step in self.config.steps:
-            for dep in step.dependencies:
-                if dep not in step_ids:
-                    return True
+            if step.dependencies:  # Only check if step has dependencies
+                for dep in step.dependencies:
+                    if dep not in step_ids:
+                        return True
         return False
 
-    def _validate_step_types(self) -> None:
-        """Validate step types."""
-        for step in self.config.steps:
-            if not isinstance(step.type, WorkflowStepType):
-                try:
-                    step.type = WorkflowStepType(step.type)
-                except ValueError:
-                    raise WorkflowExecutionError(f"Invalid step type: {step.type}")
+    def _validate_dependencies(self) -> None:
+        """Validate workflow dependencies."""
+        # Check for circular dependencies
+        if self._has_circular_dependencies():
+            raise WorkflowExecutionError("Circular dependency detected in workflow steps")
+            
+        # Check for missing dependencies
+        if self._has_missing_dependencies():
+            raise WorkflowExecutionError("Missing dependencies detected in workflow steps")
 
     async def execute(self, context: Union[Dict[str, Any], Message]) -> Dict[str, Any]:
         """Execute workflow steps.
@@ -206,7 +227,15 @@ class WorkflowExecutor:
             # Validate workflow has steps
             if not self.config.steps:
                 raise WorkflowExecutionError("Workflow steps list cannot be empty")
-                
+            
+            # Check for circular dependencies
+            if self._has_circular_dependencies():
+                raise WorkflowExecutionError("Circular dependency detected in workflow steps")
+            
+            # Check for missing dependencies
+            if self._has_missing_dependencies():
+                raise WorkflowExecutionError("Missing dependencies detected in workflow steps")
+            
             # Initialize results
             results = {
                 "status": "running",
@@ -236,7 +265,7 @@ class WorkflowExecutor:
                     results["steps"][step.id] = {
                         "id": step.id,
                         "type": str(step.type),
-                        "status": "success",  # Use success instead of completed
+                        "status": "completed",  # Use completed instead of success
                         "result": step_result,
                         "error": None
                     }
@@ -249,7 +278,7 @@ class WorkflowExecutor:
                             context_dict.update({"data": step_result["data"]})
                         else:
                             context_dict.update({"data": step_result})
-                        
+                    
                     completed_steps.add(step.id)
                 except Exception as e:
                     results["steps"][step.id] = {
@@ -264,38 +293,22 @@ class WorkflowExecutor:
                         self.config.agent.state.status = AgentStatus.FAILED
                     if self.config.error_policy.fail_fast:
                         raise WorkflowExecutionError(f"Error executing step {step.id}: {str(e)}") from e
-                    if not self.config.error_policy.ignore_warnings:
-                        results["warnings"] = results.get("warnings", []) + [str(e)]
-                    
-            # Get the result from the last step
-            last_step = self.config.steps[-1]
-            last_step_result = results["steps"][last_step.id]["result"]
             
-            # Set the result based on the last step's result
-            if isinstance(last_step_result, dict):
-                content = last_step_result.get("content", "Test response")
-                results["result"] = last_step_result.get("result", last_step_result)  # Try to get result key or use entire dict
-            else:
-                content = str(last_step_result) if last_step_result is not None else "Test response"
-                results["result"] = last_step_result  # Use the raw result
-                
-            results["content"] = content
-            results["status"] = "completed"  # Update final status
+            # Update final status
+            results["status"] = "completed"
             
-            # Ensure result is never None
-            if results["result"] is None:
-                results["result"] = {
-                    "content": content,
-                    "steps": results["steps"]
-                }
-                
+            # Set final result from last step if not set
+            if results["result"] is None and completed_steps:
+                last_step = self.config.steps[-1]
+                if last_step.id in results["steps"]:
+                    results["result"] = results["steps"][last_step.id]["result"]
+            
             return results
             
         except Exception as e:
-            # Update agent status on failure
-            if self.config.agent:
-                self.config.agent.state.status = AgentStatus.FAILED
-            raise
+            if isinstance(e, WorkflowExecutionError):
+                raise
+            raise WorkflowExecutionError(f"Workflow execution failed: {str(e)}") from e
 
     async def _execute_step(self, step: WorkflowStep, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a workflow step.

@@ -80,7 +80,7 @@ async def test_circular_dependencies():
     executor = WorkflowExecutor(workflow)
     await executor.initialize()
     data = np.random.randn(10, 2)
-    with pytest.raises(WorkflowExecutionError, match="Circular dependency"):
+    with pytest.raises(WorkflowExecutionError, match="Circular dependency detected in workflow steps"):
         await executor.execute({"data": data})
 
 @pytest.mark.asyncio
