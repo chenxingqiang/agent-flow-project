@@ -191,6 +191,5 @@ async def test_workflow_timeout():
     executor = WorkflowExecutor(config)
     await executor.initialize()
     data = np.random.randn(10, 2)
-    with pytest.raises(WorkflowExecutionError) as exc_info:
+    with pytest.raises(TimeoutError):
         await executor.execute({"data": data})
-    assert "timed out" in str(exc_info.value).lower()

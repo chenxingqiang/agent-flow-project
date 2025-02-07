@@ -70,35 +70,22 @@ class WorkflowExecutor:
         )
 
     async def initialize(self):
-        """Initialize the workflow executor."""
-        # Validate workflow steps first
-        if self._has_circular_dependencies():
-            raise WorkflowExecutionError("Circular dependency detected in workflow steps")
-        
-        if self._has_missing_dependencies():
-            raise WorkflowExecutionError("Missing dependencies detected in workflow steps")
-        
-        # Initialize state manager
-        await self.state_manager.initialize()
-        
-        # Initialize workflow state
-        self.state_manager.initialize_workflow(self.config.id, self.config.name)
-        
-        # Initialize step states
-        for step in self.config.steps:
-            self.state_manager.initialize_step(self.config.id, step.id, step.name)
-            self.state_manager.update_step_status(
-                self.config.id,
-                step.id,
-                WorkflowStepStatus.PENDING
-            )
+        """Initialize workflow executor."""
+        if not self._initialized:
+            await self.state_manager.initialize()
+            # Initialize workflow state first
+            self.state_manager.initialize_workflow(self.config.id, self.config.name)
             
-        # Set workflow status to pending
-        self.status = WorkflowStatus.PENDING
-
-        # Set initialization flag
-        self._initialized = True
-        self.status = WorkflowStatus.INITIALIZED
+            # Initialize step states
+            for step in self.config.steps:
+                self.state_manager.initialize_step(self.config.id, step.id, step.name)
+                self.state_manager.update_step_status(
+                    self.config.id,
+                    step.id,
+                    WorkflowStepStatus.PENDING
+                )
+            
+            self._initialized = True
 
     def _validate_input(self, context: Dict[str, Any]) -> None:
         """Validate workflow input.
@@ -129,14 +116,6 @@ class WorkflowExecutor:
 
     def _validate_workflow_steps(self) -> None:
         """Validate workflow steps."""
-        # Check for circular dependencies first
-        if self._has_circular_dependencies():
-            raise WorkflowExecutionError("Circular dependency detected in workflow steps")
-        
-        # Check for missing dependencies
-        if self._has_missing_dependencies():
-            raise WorkflowExecutionError("Missing dependencies detected in workflow steps")
-        
         # Validate step types
         for step in self.config.steps:
             if not isinstance(step.type, WorkflowStepType):
@@ -200,18 +179,11 @@ class WorkflowExecutor:
             raise WorkflowExecutionError("Missing dependencies detected in workflow steps")
 
     async def execute(self, context: Union[Dict[str, Any], Message]) -> Dict[str, Any]:
-        """Execute workflow steps.
-        
-        Args:
-            context: Execution context, can be either a Dict or Message object
-            
-        Returns:
-            Dict containing execution results
-            
-        Raises:
-            WorkflowExecutionError: If execution fails
-        """
+        """Execute workflow steps."""
         try:
+            # Set start time for timeout tracking
+            self.start_time = time.time()
+
             # Convert Message to dict if needed
             if isinstance(context, Message):
                 context_dict = {
@@ -227,8 +199,8 @@ class WorkflowExecutor:
             # Validate workflow has steps
             if not self.config.steps:
                 raise WorkflowExecutionError("Workflow steps list cannot be empty")
-            
-            # Check for circular dependencies
+                
+            # Check for circular dependencies first
             if self._has_circular_dependencies():
                 raise WorkflowExecutionError("Circular dependency detected in workflow steps")
             
@@ -242,30 +214,36 @@ class WorkflowExecutor:
                 "steps": {},
                 "warnings": [],
                 "error": None,
-                "result": None  # Initialize result key
+                "result": None,  # Initialize result key
+                "content": None  # Initialize content field
             }
             
             completed_steps = set()
             
             # Execute steps in sequence
             for step in self.config.steps:
+                # Check for timeout before each step
+                if self._is_timeout():
+                    raise TimeoutError("Workflow execution timed out")
+
                 try:
-                    # Validate dependencies
-                    if step.dependencies:
-                        for dep_id in step.dependencies:
-                            if dep_id not in completed_steps:
-                                raise WorkflowExecutionError(f"Missing dependency '{dep_id}' required by step '{step.id}'")
-                    
                     # Validate protocol if specified
                     protocol = step.config.params.get("protocol")
                     if protocol is not None and protocol not in VALID_PROTOCOLS:
                         raise WorkflowExecutionError(f"Invalid protocol: {protocol}")
                     
+                    # Execute step with timeout check
+                    start_time = time.time()
                     step_result = await self._execute_step(step, context_dict)
+                    
+                    # Check for timeout after step execution
+                    if self._is_timeout():
+                        raise TimeoutError("Workflow execution timed out")
+                    
                     results["steps"][step.id] = {
                         "id": step.id,
                         "type": str(step.type),
-                        "status": "completed",  # Use completed instead of success
+                        "status": "completed",
                         "result": step_result,
                         "error": None
                     }
@@ -280,6 +258,22 @@ class WorkflowExecutor:
                             context_dict.update({"data": step_result})
                     
                     completed_steps.add(step.id)
+
+                    # Update content field with the latest step result
+                    if isinstance(step_result, dict) and "content" in step_result:
+                        results["content"] = step_result["content"]
+                    elif isinstance(step_result, str):
+                        results["content"] = step_result
+                    elif isinstance(step_result, dict) and "result" in step_result:
+                        results["content"] = str(step_result["result"])
+                    else:
+                        results["content"] = str(step_result)
+
+                except TimeoutError as e:
+                    # Update agent status to FAILED
+                    if self.config.agent:
+                        self.config.agent.state.status = AgentStatus.FAILED
+                    raise  # Re-raise TimeoutError directly
                 except Exception as e:
                     results["steps"][step.id] = {
                         "id": step.id,
@@ -296,15 +290,10 @@ class WorkflowExecutor:
             
             # Update final status
             results["status"] = "completed"
-            
-            # Set final result from last step if not set
-            if results["result"] is None and completed_steps:
-                last_step = self.config.steps[-1]
-                if last_step.id in results["steps"]:
-                    results["result"] = results["steps"][last_step.id]["result"]
-            
             return results
             
+        except TimeoutError:
+            raise  # Re-raise TimeoutError directly
         except Exception as e:
             if isinstance(e, WorkflowExecutionError):
                 raise
@@ -322,6 +311,7 @@ class WorkflowExecutor:
             
         Raises:
             WorkflowExecutionError: If step execution fails
+            TimeoutError: If step execution times out
         """
         try:
             # Convert step type to enum if it's a string
@@ -340,19 +330,44 @@ class WorkflowExecutor:
             if "test_mode" not in input_data:
                 input_data["test_mode"] = True
             
-            # Execute step based on type
+            # Calculate remaining time for timeout
+            if self.start_time and self.config.timeout:
+                elapsed = time.time() - self.start_time
+                remaining = max(0.1, self.config.timeout - elapsed)  # At least 0.1 seconds
+            else:
+                remaining = None
+            
+            # Execute step based on type with timeout
             if step_type == WorkflowStepType.TRANSFORM:
-                return await self._execute_transform_step(step, input_data)
+                result = await asyncio.wait_for(
+                    self._execute_transform_step(step, input_data),
+                    timeout=remaining
+                )
             elif step_type == WorkflowStepType.RESEARCH:
-                return await self._execute_research_step(step, input_data)
+                result = await asyncio.wait_for(
+                    self._execute_research_step(step, input_data),
+                    timeout=remaining
+                )
             elif step_type == WorkflowStepType.DOCUMENT:
-                return await self._execute_document_step(step, input_data)
+                result = await asyncio.wait_for(
+                    self._execute_document_step(step, input_data),
+                    timeout=remaining
+                )
             elif step_type == WorkflowStepType.AGENT:
-                return await self._execute_agent_step(step, input_data)
+                result = await asyncio.wait_for(
+                    self._execute_agent_step(step, input_data),
+                    timeout=remaining
+                )
             else:
                 raise WorkflowExecutionError(f"No execution handler for step type: {step_type}")
+            
+            return result
                 
+        except asyncio.TimeoutError:
+            raise TimeoutError(f"Step {step.id} execution timed out")
         except Exception as e:
+            if isinstance(e, (WorkflowExecutionError, TimeoutError)):
+                raise
             raise WorkflowExecutionError(f"Step {step.id} failed: {str(e)}") from e
 
     async def _execute_research_step(self, step: WorkflowStep, input_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -384,7 +399,7 @@ class WorkflowExecutor:
             # In test mode, return mock results
             if input_data.get("test_mode", True):
                 return {
-                    "status": "success",
+                    "status": "completed",
                     "result": {
                         "research_findings": {
                             "topic": topic,
@@ -412,7 +427,7 @@ class WorkflowExecutor:
             try:
                 result = await agent.execute(research_context)
                 return {
-                    "status": "success",
+                    "status": "completed",
                     "result": {
                         "research_findings": result.get("research_findings", {
                             "topic": topic,
@@ -460,7 +475,7 @@ class WorkflowExecutor:
             # In test mode, return mock results
             if input_data.get("test_mode"):
                 return {
-                    "status": "success",
+                    "status": "completed",
                     "result": {
                         "document": {
                             "title": "Test Document",
@@ -487,7 +502,7 @@ class WorkflowExecutor:
             try:
                 result = await agent.execute(document_context)
                 return {
-                    "status": "success",
+                    "status": "completed",
                     "result": {
                         "document": result.get("document", {
                             "title": "Generated Document",
@@ -549,7 +564,7 @@ class WorkflowExecutor:
             
             return {
                 "id": step.id,
-                "status": "success",
+                "status": "completed",
                 "error": None,
                 "result": {
                     "data": result,

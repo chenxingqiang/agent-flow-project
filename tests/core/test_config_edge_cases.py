@@ -5,6 +5,7 @@ from datetime import date
 from typing import Dict, Any, cast
 from pydantic import ValidationError
 from omegaconf import OmegaConf
+import uuid
 
 from agentflow.core.config import (
     AgentConfig, 
@@ -23,6 +24,7 @@ from agentflow.core.workflow_types import (
     RetryPolicy
 )
 from agentflow.core.exceptions import WorkflowExecutionError
+from agentflow.core.workflow_executor import WorkflowExecutor
 
 def test_empty_agent_config():
     """Test empty agent configuration."""
@@ -149,6 +151,7 @@ async def test_workflow_circular_dependencies():
     """Test workflow with circular dependencies."""
     with pytest.raises(WorkflowExecutionError):
         workflow = WorkflowConfig(
+            id=str(uuid.uuid4()),
             name="test_workflow",
             steps=[
                 WorkflowStep(
@@ -156,19 +159,22 @@ async def test_workflow_circular_dependencies():
                     name="Step 1",
                     type=WorkflowStepType.TRANSFORM,
                     dependencies=["step2"],
-                    config=StepConfig(strategy="test")
+                    description="First step in circular dependency test",
+                    config=StepConfig(strategy="standard")
                 ),
                 WorkflowStep(
                     id="step2",
                     name="Step 2",
                     type=WorkflowStepType.TRANSFORM,
                     dependencies=["step1"],
-                    config=StepConfig(strategy="test")
+                    description="Second step in circular dependency test",
+                    config=StepConfig(strategy="standard")
                 )
             ]
         )
-        # Trigger validation by executing workflow
-        await workflow.execute({})
+        executor = WorkflowExecutor(workflow)
+        await executor.initialize()
+        await executor.execute({"data": "test"})
 
 def test_duplicate_step_ids():
     """Test workflow with duplicate step IDs."""
@@ -180,13 +186,13 @@ def test_duplicate_step_ids():
                     id="step1",
                     name="Step 1",
                     type=WorkflowStepType.TRANSFORM,
-                    config=StepConfig(strategy="test")
+                    config=StepConfig(strategy="standard")
                 ),
                 WorkflowStep(
                     id="step1",  # Duplicate ID
                     name="Step 2",
                     type=WorkflowStepType.TRANSFORM,
-                    config=StepConfig(strategy="test")
+                    config=StepConfig(strategy="standard")
                 )
             ]
         )
@@ -229,7 +235,8 @@ def test_empty_step_dependencies():
         name="Step 1",
         type=WorkflowStepType.TRANSFORM,
         dependencies=[],
-        config=StepConfig(strategy="test")
+        description="Test step with empty dependencies",
+        config=StepConfig(strategy="standard")
     )
     assert step.dependencies == []
 

@@ -86,11 +86,11 @@ async def test_workflow_execution_basic(workflow_engine, agent):
     agent_instance = await anext(agent)
     
     workflow_id = await engine.register_workflow(agent_instance)
-    input_data = {"message": "Test input"}
+    input_data = {"message": "Test input", "data": "Test data content"}
     
     result = await engine.execute_workflow(workflow_id, input_data)
     assert result is not None
-    assert result["status"] == "success"
+    assert result["status"] == "completed"
     assert "content" in result
 
 @pytest.mark.asyncio
@@ -136,14 +136,14 @@ async def test_workflow_timeout(workflow_engine, agent):
     
     # Register workflow with timeout config
     workflow_id = await engine.register_workflow(agent_instance, workflow_config)
-    input_data = {"message": "Test input"}
+    input_data = {"message": "Test input", "data": "Test data content"}
     
     # Mock execute to take longer than timeout
     async def slow_execution(*args, **kwargs):
         await asyncio.sleep(0.2)  # Longer than timeout
         return {"content": "Test response", "status": "success", "steps": []}
     
-    with patch('agentflow.core.workflow_executor.WorkflowExecutor.execute', side_effect=slow_execution):
+    with patch('agentflow.core.workflow_executor.WorkflowExecutor._execute_step', side_effect=slow_execution):
         with pytest.raises(TimeoutError):
             await engine.execute_workflow(workflow_id, input_data)
 
@@ -165,7 +165,7 @@ async def test_parallel_workflow_execution(workflow_engine, agent_config):
         workflow_ids.append(workflow_id)
     
     # Execute workflows in parallel
-    input_data = {"message": "Test input"}
+    input_data = {"message": "Test input", "data": "Test data content"}
     tasks = [
         engine.execute_workflow(workflow_id, input_data)
         for workflow_id in workflow_ids
@@ -173,7 +173,7 @@ async def test_parallel_workflow_execution(workflow_engine, agent_config):
     
     results = await asyncio.gather(*tasks)
     assert all(result is not None for result in results)
-    assert all(result["status"] == "success" for result in results)
+    assert all(result["status"] == "completed" for result in results)
     
     # Cleanup agents
     for agent in agents:
@@ -186,7 +186,7 @@ async def test_workflow_cleanup(workflow_engine, agent):
     agent_instance = await anext(agent)
     
     workflow_id = await engine.register_workflow(agent_instance)
-    input_data = {"message": "Test input"}
+    input_data = {"message": "Test input", "data": "Test data content"}
     
     await engine.execute_workflow(workflow_id, input_data)
     await engine.cleanup()
