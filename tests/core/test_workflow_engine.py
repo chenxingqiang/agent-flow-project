@@ -23,6 +23,7 @@ def workflow_config() -> WorkflowConfig:
     """Return a workflow configuration for testing."""
     return WorkflowConfig.model_validate(
         {
+            "id": "test-workflow-1",
             "name": "test_workflow",
             "max_iterations": 3,
             "timeout": 60.0,
@@ -31,9 +32,10 @@ def workflow_config() -> WorkflowConfig:
                     "id": "step1",
                     "name": "test_step",
                     "type": WorkflowStepType.TRANSFORM,
+                    "description": "Test transformation step",
                     "config": {
-                        "strategy": "test",
-                        "params": {}
+                        "strategy": "custom",
+                        "params": {"method": "test"}
                     }
                 }
             ]

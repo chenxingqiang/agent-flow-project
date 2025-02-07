@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from agentflow.core.workflow_types import WorkflowStep, WorkflowConfig, WorkflowStepType
+from agentflow.core.workflow_types import WorkflowStep, WorkflowConfig, WorkflowStepType, StepConfig
 
 class TestAdvancedAgents:
     """Test cases for advanced agent functionality."""
@@ -19,7 +19,11 @@ class TestAdvancedAgents:
                     id="step-1",
                     name="Research Analysis",
                     type=WorkflowStepType.RESEARCH_EXECUTION,
-                    config={"strategy": "text_analysis"}
+                    description="Execute research analysis step",
+                    config=StepConfig(
+                        strategy="custom",
+                        params={"method": "text_analysis"}
+                    )
                 )
             ]
         )
@@ -44,7 +48,7 @@ class TestAdvancedAgents:
     async def test_agent_collaboration(self):
         """Test agent collaboration."""
         step = self.workflow_config.steps[0]
-        assert step.config["strategy"] == "text_analysis"
+        assert step.config.params["method"] == "text_analysis"
     
     @pytest.mark.asyncio
     async def test_async_execution(self):
@@ -55,7 +59,7 @@ class TestAdvancedAgents:
     @pytest.mark.asyncio
     async def test_error_handling(self):
         """Test error handling."""
-        assert self.workflow_config.timeout > 0
+        assert self.workflow_config.timeout is not None and self.workflow_config.timeout > 0
     
     @pytest.mark.asyncio
     async def test_pipeline_validation(self):

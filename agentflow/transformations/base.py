@@ -2,6 +2,7 @@
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 import abc
+from abc import ABC, abstractmethod
 
 @dataclass
 class TransformationResult:
@@ -23,12 +24,24 @@ class TransformationBase(abc.ABC):
         """Transform data."""
         pass
 
-class TransformationStrategy(TransformationBase):
+class TransformationStrategy(ABC):
     """Base class for transformation strategies."""
     
+    @abstractmethod
+    def transform(self, data):
+        """Transform the input data.
+        
+        Args:
+            data: Data to transform
+            
+        Returns:
+            Transformed data
+        """
+        pass
+
     def __init__(self, config: Dict[str, Any]):
         """Initialize transformation strategy."""
-        super().__init__(config)
+        self.config = config
         self.name = config.get('name', self.__class__.__name__)
         self.description = config.get('description', '')
         self.version = config.get('version', '1.0.0')

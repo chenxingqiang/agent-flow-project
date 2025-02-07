@@ -75,7 +75,8 @@ def create_test_steps():
         WorkflowStep(
             id='step-1',
             name='Research Step',
-            type=WorkflowStepType.RESEARCH,
+            type=WorkflowStepType.RESEARCH_EXECUTION,
+            description='Execute research analysis step',
             config=StepConfig(
                 strategy='standard',
                 params={
@@ -87,7 +88,8 @@ def create_test_steps():
         WorkflowStep(
             id='step-2',
             name='Document Step',
-            type=WorkflowStepType.DOCUMENT,
+            type=WorkflowStepType.DOCUMENT_GENERATION,
+            description='Generate documentation from research findings',
             config=StepConfig(
                 strategy='standard',
                 params={
@@ -126,7 +128,6 @@ async def test_complete_workflow(test_data_dir, mock_openai):
         name='Test Workflow',
         max_iterations=5,
         timeout=30,
-        distributed=False,
         steps=create_test_steps()
     )
 
@@ -154,8 +155,7 @@ async def test_complete_workflow(test_data_dir, mock_openai):
         assert 'result' in result['steps']['step-2']
 
         # Verify workflow status
-        assert result['status'] == 'completed'
-        assert 'final_result' in result
+        assert result['status'] == 'success'
         
     except WorkflowExecutionError as e:
         pytest.fail(f"Workflow execution failed: {str(e)}")
@@ -170,6 +170,7 @@ def test_workflow_validation():
             id='invalid-step',
             name='Invalid Step',
             type=WorkflowStepType.TRANSFORM,
+            description='Test invalid workflow step',
             config=StepConfig(
                 strategy='standard',
                 params={}
@@ -203,7 +204,21 @@ def test_workflow_context_validation():
         name='Test Workflow',
         max_iterations=5,
         timeout=30,
-        steps=create_test_steps()
+        steps=[
+            WorkflowStep(
+                id='step-1',
+                name='Research Step',
+                type=WorkflowStepType.RESEARCH_EXECUTION,
+                description='Execute research analysis step',
+                config=StepConfig(
+                    strategy='standard',
+                    params={
+                        'research_topic': 'AI Ethics',
+                        'depth': 'comprehensive'
+                    }
+                )
+            )
+        ]
     )
     
     executor = WorkflowExecutor(workflow_config)

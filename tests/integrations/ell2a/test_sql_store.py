@@ -1,7 +1,7 @@
 """Test SQL store module."""
 
 import pytest
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Generator
 
 from agentflow.ell2a.stores.sql import SQLStore, SerializedLMP, Base
 from sqlmodel import Session, select
@@ -13,14 +13,17 @@ from agentflow.ell2a.util.time import utc_now
 
 @pytest.fixture
 def in_memory_db():
-    """Create in-memory database engine."""
-    return create_engine("sqlite:///:memory:", echo=True)
+    """Create an in-memory SQLite database."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)  # Create all tables
+    yield engine
+    Base.metadata.drop_all(engine)  # Clean up tables
 
 @pytest.fixture
-def sql_store(in_memory_db: Engine) -> SQLStore:
-    """Create SQL store with in-memory database."""
+def sql_store(in_memory_db):
+    """Create a SQL store for testing."""
     store = SQLStore(in_memory_db)
-    return store
+    yield store
 
 def test_write_lmp(sql_store: SQLStore):
     """Test writing LMP to store."""

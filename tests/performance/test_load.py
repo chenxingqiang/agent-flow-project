@@ -49,18 +49,35 @@ def test_workflow_def() -> Dict[str, Any]:
 def workflow_config() -> Dict[str, Any]:
     """Test configuration."""
     return {
-        "max_retries": 3,
-        "retry_delay": 0.1,
-        "retry_backoff": 1.5,
-        "step_1_config": {
-            "max_retries": 3,
-            "retry_delay": 0.1,
-            "retry_backoff": 1.5
-        },
-        "step_2_config": {
-            "max_retries": 3,
-            "retry_delay": 0.1,
-            "retry_backoff": 1.5
+        "id": "test-workflow-1",
+        "name": "Test Workflow",
+        "max_iterations": 5,
+        "timeout": 300,
+        "steps": [
+            {
+                "id": "step-1",
+                "name": "Research Step",
+                "type": WorkflowStepType.RESEARCH_EXECUTION,
+                "description": "Execute research analysis step",
+                "config": {
+                    "strategy": "standard",
+                    "params": {
+                        "research_topic": "AI Ethics",
+                        "depth": "comprehensive"
+                    }
+                }
+            }
+        ],
+        "error_policy": {
+            "fail_fast": True,
+            "ignore_warnings": False,
+            "max_errors": 10,
+            "retry_policy": {
+                "max_retries": 3,
+                "retry_delay": 1.0,
+                "backoff": 2.0,
+                "max_delay": 60.0
+            }
         }
     }
 

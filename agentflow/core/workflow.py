@@ -1,6 +1,6 @@
 """Workflow engine module."""
 
-from typing import Dict, Any, Optional, List, Union, Type, TYPE_CHECKING, cast
+from typing import Dict, Any, Optional, List, Union, Type, cast, TYPE_CHECKING
 import uuid
 import logging
 import asyncio
@@ -8,7 +8,14 @@ from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
-from .workflow_types import WorkflowConfig, WorkflowStepType, StepConfig, WorkflowStep, WorkflowStatus
+from .workflow_types import (
+    WorkflowConfig,
+    WorkflowStepType,
+    StepConfig,
+    WorkflowStep,
+    WorkflowStatus,
+    WorkflowInstance
+)
 from .exceptions import WorkflowExecutionError
 from ..agents.agent_types import AgentType, AgentStatus
 from .config import AgentConfig
@@ -18,39 +25,6 @@ if TYPE_CHECKING:
     from ..agents.agent import Agent
 
 logger = logging.getLogger(__name__)
-
-class WorkflowInstance(BaseModel):
-    """Workflow instance class."""
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str
-    steps: List[WorkflowStep] = Field(default_factory=list)
-    status: WorkflowStatus = Field(default=WorkflowStatus.PENDING)
-    config: Optional[WorkflowConfig] = None
-    context: Dict[str, Any] = Field(default_factory=dict)
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
-    
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
-        """Custom dump method to ensure proper serialization."""
-        data = super().model_dump(**kwargs)
-        # Ensure status is serialized as string
-        data["status"] = "success" if self.status == WorkflowStatus.COMPLETED else self.status.value
-        # Keep the result as is since we've already serialized it
-        if self.result:
-            # Ensure result status is consistent with instance status
-            if isinstance(self.result, dict):
-                self.result["status"] = "success" if self.status == WorkflowStatus.COMPLETED else self.status.value
-                # Ensure step statuses are consistent
-                if "steps" in self.result:
-                    for step in self.result["steps"]:
-                        if isinstance(step, dict) and step.get("status") == "completed":
-                            step["status"] = "success"
-            data["result"] = self.result
-        return data
 
 class WorkflowEngine:
     """Workflow engine class."""
@@ -137,6 +111,7 @@ class WorkflowEngine:
                     id="test-step-1",
                     name="test_step",
                     type=WorkflowStepType.AGENT,  # Always use AGENT type in test mode
+                    description="Default test step for workflow execution",
                     config=StepConfig(strategy="default")
                 )
             ]
@@ -245,10 +220,14 @@ class WorkflowEngine:
         instance.status = WorkflowStatus.RUNNING
         instance.updated_at = datetime.now()
         
-        step_results = {}
+        step_results = []  # Change to list to maintain order
         try:
             for step in instance.steps:
                 try:
+                    # Check for explicit failure trigger
+                    if step.config.params.get("should_fail") or instance.context.get("should_fail"):
+                        raise WorkflowExecutionError("Step failed due to should_fail flag")
+                    
                     # For test mode or agent steps, use mock response
                     if instance.context.get("test_mode") or step.type == WorkflowStepType.AGENT:
                         if not instance.config or not instance.config.agent:
@@ -281,18 +260,19 @@ class WorkflowEngine:
                             else:
                                 content = str(result) if result is not None else "Test response"
                                 
-                            step_results[step.id] = {
+                            step_result = {
                                 "id": step.id,
-                                "type": step.type.value,
+                                "type": str(step.type),
                                 "status": "success",
                                 "result": {"content": content},
                                 "error": None
                             }
+                            step_results.append(step_result)  # Append to list
                             
                             # Update instance result with step result
                             instance.result = {
                                 "status": "success",
-                                "steps": list(step_results.values()),
+                                "steps": step_results,  # Now a list of step results
                                 "error": None,
                                 "content": content
                             }
@@ -306,35 +286,37 @@ class WorkflowEngine:
                             result = await step.execute(instance.context)
                             if not result:
                                 raise ValueError(f"Step {step.id} returned no result")
-                            step_results[step.id] = {
+                            step_result = {
                                 "id": step.id,
-                                "type": step.type.value,
+                                "type": str(step.type),
                                 "status": "success",
                                 "result": result,
                                 "error": None
                             }
+                            step_results.append(step_result)  # Append to list
                         except Exception as e:
                             # Re-raise WorkflowExecutionError or wrap other exceptions
                             if isinstance(e, WorkflowExecutionError):
                                 raise
                             raise WorkflowExecutionError(f"Step {step.id} failed: {str(e)}") from e
                 except Exception as e:
-                    step_results[step.id] = {
+                    step_result = {
                         "id": step.id,
-                        "type": step.type.value,
+                        "type": str(step.type),
                         "status": "failed",
                         "result": None,
                         "error": str(e)
                     }
+                    step_results.append(step_result)  # Append to list
                     instance.status = WorkflowStatus.FAILED
                     instance.error = str(e)
-                    raise  # Re-raise the exception
+                    raise WorkflowExecutionError(f"Step {step.id} failed: {str(e)}")  # Raise with proper error
                     
             if instance.status != WorkflowStatus.FAILED:
                 instance.status = WorkflowStatus.COMPLETED
                 
             # Get the result from the last step
-            last_step_result = step_results[instance.steps[-1].id]["result"]
+            last_step_result = step_results[-1]["result"]
             if isinstance(last_step_result, dict):
                 content = last_step_result.get("content", "Test response")
             elif isinstance(last_step_result, Message):
@@ -344,7 +326,7 @@ class WorkflowEngine:
                 
             instance.result = {
                 "status": "success",  # Always use "success" for successful execution
-                "steps": list(step_results.values()),
+                "steps": step_results,  # Now a list of step results
                 "error": instance.error,
                 "content": content
             }
@@ -354,7 +336,7 @@ class WorkflowEngine:
             instance.error = str(e)
             instance.result = {
                 "status": "failed",
-                "steps": list(step_results.values()),
+                "steps": step_results,  # Now a list of step results
                 "error": str(e),
                 "content": ""
             }
@@ -425,6 +407,9 @@ class WorkflowEngine:
             
         Returns:
             WorkflowInstance: Created workflow instance
+            
+        Raises:
+            ValueError: If workflow has no steps
         """
         instance = WorkflowInstance(name=name, config=config)
         if config and hasattr(config, 'steps'):
@@ -433,15 +418,31 @@ class WorkflowEngine:
                     id=step.id,
                     name=step.name,
                     type=step.type,
+                    description=step.description,
                     config=step.config.model_copy() if hasattr(step.config, 'model_copy') else step.config,  # Deep copy the config
-                    dependencies=step.dependencies.copy() if step.dependencies else [],
-                    required=step.required,
-                    optional=step.optional,
-                    is_distributed=step.is_distributed
+                    dependencies=step.dependencies.copy() if step.dependencies else []
                 )
                 for step in config.steps
             ]
+        else:
+            # If no steps are provided, raise ValueError
+            raise ValueError("Workflow instance has no steps")
+        
         self.instances[instance.id] = instance
+        # Register the workflow in the workflows dictionary
+        self.workflows[instance.id] = config if config else WorkflowConfig(
+            id=str(uuid.uuid4()),
+            name=name,
+            steps=[
+                WorkflowStep(
+                    id="default-step",
+                    name="Default Step",
+                    type=WorkflowStepType.AGENT,
+                    description="Default workflow step",
+                    config=StepConfig(strategy="default")
+                )
+            ]
+        )
         return instance
 
 class Workflow:

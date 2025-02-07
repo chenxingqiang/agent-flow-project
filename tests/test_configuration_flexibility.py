@@ -214,10 +214,11 @@ def test_flexible_configuration_loading(base_config):
                         "id": "step-1",
                         "name": "Research Step",
                         "type": WorkflowStepType.RESEARCH_EXECUTION.value,
-                        "config": StepConfig(
-                            strategy="research",
-                            params={}
-                        )
+                        "description": "Research execution step for testing",
+                        "config": {
+                            "strategy": "research",
+                            "params": {}
+                        }
                     }
                 ]
             }

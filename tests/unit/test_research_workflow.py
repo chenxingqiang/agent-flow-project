@@ -3,6 +3,7 @@
 import pytest
 import ray
 from typing import Dict, Any
+import uuid
 
 from agentflow.core.research_workflow import ResearchDistributedWorkflow
 from agentflow.core.workflow_types import WorkflowStepType
@@ -50,20 +51,13 @@ def test_workflow_def() -> Dict[str, Any]:
     }
 
 @pytest.fixture
-def workflow_config() -> Dict[str, Any]:
-    """Test configuration."""
+def workflow_config():
+    """Create test workflow configuration."""
     return {
-        "max_retries": 3,
-        "timeout": 3600,
+        "id": str(uuid.uuid4()),
+        "name": "test_research_workflow",
         "max_iterations": 5,
-        "logging_level": "INFO",
-        "required_fields": [],
-        "error_handling": {},
-        "retry_policy": {
-            "max_retries": 3,
-            "retry_delay": 0.1,
-            "retry_backoff": 1.5
-        },
+        "timeout": 3600,
         "error_policy": {
             "fail_fast": True,
             "ignore_warnings": False,
@@ -75,11 +69,26 @@ def workflow_config() -> Dict[str, Any]:
                 "max_delay": 60.0
             }
         },
-        "is_distributed": True,
+        "steps": [
+            {
+                "id": "step1",
+                "name": "research_step",
+                "type": "research_execution",
+                "description": "Research execution step",
+                "config": {
+                    "strategy": "standard",
+                    "params": {
+                        "research_topic": "Test Research",
+                        "methodology": "Test Methodology"
+                    }
+                }
+            }
+        ],
         "distributed": True,
-        "steps": [],
-        "metadata": {},
-        "agents": {}
+        "agents": {},
+        "error_handling": {},
+        "input_data": {},
+        "output_data": {}
     }
 
 @pytest.mark.asyncio

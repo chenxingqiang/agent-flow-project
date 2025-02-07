@@ -2,6 +2,8 @@
 
 from typing import Dict, Any, List, Optional
 from .base import BaseWorkflow
+from enum import Enum
+from pydantic import BaseModel, Field
 
 class StateManager:
     """Manages workflow state."""
@@ -34,4 +36,20 @@ class StateManager:
         Returns:
             List[BaseWorkflow]: List of workflows
         """
-        return list(self._workflows.values()) 
+        return list(self._workflows.values())
+
+class AgentStatus(str, Enum):
+    """Agent status."""
+
+    IDLE = "idle"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
+class AgentState(BaseModel):
+    """Agent state."""
+
+    status: AgentStatus = AgentStatus.IDLE
+    error: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict) 

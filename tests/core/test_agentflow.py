@@ -105,7 +105,8 @@ def workflow_config():
                 id="test-step-1",
                 name="test_step",
                 type=WorkflowStepType.TRANSFORM,
-                config=StepConfig(strategy="test")
+                description="Test workflow step",
+                config=StepConfig(strategy="standard")
             )
         ]
     )
@@ -157,13 +158,15 @@ async def agent(workflow_config, mock_ell2a):
 async def workflow_engine():
     """Create a workflow engine for testing."""
     default_workflow_config = WorkflowConfig(
+        id="test-workflow-1",
         name="test_workflow",
         steps=[
             WorkflowStep(
                 id="test-step-1", 
                 name="test_step", 
                 type=WorkflowStepType.TRANSFORM,
-                config=StepConfig(strategy="test")
+                description="Test workflow step",
+                config=StepConfig(strategy="standard")
             )
         ]
     )

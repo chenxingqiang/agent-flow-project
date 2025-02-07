@@ -44,12 +44,14 @@ def test_agent_config_defaults():
             "name": "gpt-4"
         },
         "workflow": {
+            "id": "test-workflow-1",
             "name": "Research Workflow",
             "steps": [
                 {
                     "id": "step1",
                     "name": "Research Step",
                     "type": WorkflowStepType.RESEARCH_EXECUTION.value,
+                    "description": "Execute research step",
                     "config": {
                         "strategy": "standard",
                         "params": {"protocol": "federated"}
@@ -63,8 +65,8 @@ def test_agent_config_defaults():
     
     # Check default values
     assert agent_config.workflow is not None
-    assert agent_config.workflow.max_iterations == 3  # Default value from WorkflowConfig
-    assert agent_config.workflow.timeout == 300.0  # Default value from WorkflowConfig
+    assert agent_config.workflow.max_iterations == 10  # Default value from WorkflowConfig
+    assert agent_config.workflow.timeout is None  # Default value from WorkflowConfig
 
 def test_agent_config_serialization():
     """Test configuration serialization and deserialization"""
@@ -76,6 +78,7 @@ def test_agent_config_serialization():
             "temperature": 0.7
         },
         "workflow": {
+            "id": "test-workflow-2",
             "name": "Research Workflow",
             "max_iterations": 5,
             "steps": [
@@ -83,6 +86,7 @@ def test_agent_config_serialization():
                     "id": "step1",
                     "name": "Research Step",
                     "type": WorkflowStepType.RESEARCH_EXECUTION.value,
+                    "description": "Execute research step",
                     "config": {
                         "strategy": "standard",
                         "params": {"protocol": "federated"}
@@ -110,6 +114,7 @@ def test_agent_config_complex_workflow():
             "name": "gpt-4"
         },
         "workflow": {
+            "id": "test-workflow-3",
             "name": "Research Workflow",
             "max_iterations": 10,
             "steps": [
@@ -117,6 +122,7 @@ def test_agent_config_complex_workflow():
                     "id": "step1",
                     "name": "Research Planning",
                     "type": WorkflowStepType.RESEARCH_EXECUTION.value,
+                    "description": "Plan research execution",
                     "config": {
                         "strategy": "standard",
                         "params": {"protocol": "federated"}

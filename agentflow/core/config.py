@@ -962,3 +962,18 @@ def convert_value(value: Any, target_type: type, schema: Optional[Dict[str, type
         return {'value': value}
             
     return value
+
+class DistributedConfig(BaseModel):
+    """Configuration for distributed workflow execution."""
+    ray_address: Optional[str] = Field(default="auto", description="Ray cluster address")
+    num_cpus: Optional[int] = Field(default=None, description="Number of CPUs to use")
+    num_gpus: Optional[int] = Field(default=None, description="Number of GPUs to use")
+    memory: Optional[int] = Field(default=None, description="Memory limit in bytes")
+    object_store_memory: Optional[int] = Field(default=None, description="Object store memory limit in bytes")
+    runtime_env: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Runtime environment configuration")
+    namespace: Optional[str] = Field(default=None, description="Ray namespace")
+    
+    class Config:
+        """Pydantic configuration."""
+        extra = "allow"
+        arbitrary_types_allowed = True

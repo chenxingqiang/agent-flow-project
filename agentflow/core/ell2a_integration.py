@@ -47,7 +47,7 @@ class ELL2AIntegration:
                 "track_memory": True
             }
         }
-        self.ell = ELL(model_name=self.config["default_model"], config=self.config)
+        self.ell = ELL(name=self.config["default_model"], config=self.config)
         self._is_initialized = True
         self._workflows = {}
         self._metrics = {}
@@ -231,6 +231,23 @@ class ELL2AIntegration:
                 
             return wrapper
         return decorator
+
+    def create_message(self, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> Message:
+        """Create a message.
+        
+        Args:
+            role: Message role
+            content: Message content
+            metadata: Optional metadata
+            
+        Returns:
+            Message: Created message
+        """
+        return Message(
+            role=MessageRole(role),
+            content=content,
+            metadata=metadata or {}
+        )
 
 # Global instance
 ell2a_integration = ELL2AIntegration() 

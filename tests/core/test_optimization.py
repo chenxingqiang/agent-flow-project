@@ -16,14 +16,16 @@ from agentflow.core.workflow_types import WorkflowConfig, WorkflowStep, StepConf
 def sample_workflow():
     """Create a sample workflow for testing."""
     return WorkflowConfig(
+        id="test-workflow-1",
         name="test_workflow",
         steps=[
             WorkflowStep(
                 id="step1",
                 name="process1",
                 type="transform",
+                description="First transformation step",
                 config=StepConfig(
-                    strategy="transform",
+                    strategy="custom",
                     params={"param": "value1"}
                 )
             ),
@@ -31,8 +33,9 @@ def sample_workflow():
                 id="step2",
                 name="process2",
                 type="transform",
+                description="Second transformation step",
                 config=StepConfig(
-                    strategy="transform",
+                    strategy="custom",
                     params={"param": "value2"}
                 )
             ),
@@ -40,20 +43,13 @@ def sample_workflow():
                 id="step3",
                 name="process3",
                 type="transform",
+                description="Third transformation step",
                 config=StepConfig(
-                    strategy="transform",
+                    strategy="custom",
                     params={"param": "value3"}
                 )
             )
-        ],
-        ell2a_config={
-            "mode": "simple",
-            "model": "test-model",
-            "complex": {
-                "track_performance": True,
-                "track_memory": True
-            }
-        }
+        ]
     )
 
 @pytest.fixture

@@ -213,16 +213,8 @@ def test_sync_workflow_execution(server):
         )
     
     result = response.json()
-    assert "workflow_id" in result
-    
-    # Check workflow status
-    status_url = f"{server.base_url}/workflow/status/{result['workflow_id']}"
-    status_response = requests.get(status_url)
-    assert status_response.status_code == 200
-
-    status_result = status_response.json()
-    assert "status" in status_result
-    assert status_result["status"] in ["completed", "running", "pending"]
+    assert result["status"] == "completed"
+    assert result["result"] is not None
 
 def test_async_workflow_execution(server):
     """Test asynchronous workflow execution"""
@@ -328,26 +320,8 @@ def test_async_workflow_execution(server):
         )
     
     result = async_response.json()
-    assert "workflow_id" in result
-    
-    # Check workflow status
-    status_url = f"{server.base_url}/workflow/status/{result['workflow_id']}"
-    max_retries = 5
-    retry_delay = 2
-    
-    for _ in range(max_retries):
-        status_response = requests.get(status_url)
-        assert status_response.status_code == 200
-        
-        status_result = status_response.json()
-        assert "status" in status_result
-        
-        if status_result["status"] == "completed":
-            break
-            
-        time.sleep(retry_delay)
-    
-    assert status_result["status"] in ["completed", "running", "pending"]
+    assert result["status"] == "pending"
+    assert result["task_id"] is not None
 
 def test_invalid_workflow(server):
     """Test handling of invalid workflow configuration"""

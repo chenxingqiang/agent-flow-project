@@ -31,13 +31,33 @@ def sample_workflow_config():
                 id="step-1",
                 name="step_1",
                 type=WorkflowStepType.TRANSFORM,
+                description="A test transformation step",
                 config=StepConfig(
                     strategy="standard",
                     params={"test": "value"}
                 )
             )
         ],
-        distributed=False
+        distributed=False,
+        metadata={
+            "ell2a_config": {
+                "simple": {
+                    "model": "test-model",
+                    "max_retries": 3,
+                    "retry_delay": 1.0,
+                    "timeout": 30.0
+                },
+                "complex": {
+                    "model": "test-model-complex",
+                    "track_performance": True,
+                    "track_memory": True,
+                    "max_retries": 3,
+                    "retry_delay": 1.0,
+                    "timeout": 60.0,
+                    "stream": True
+                }
+            }
+        }
     )
 
 @pytest.mark.asyncio
@@ -126,7 +146,24 @@ async def test_ell2a_performance_tracking():
 async def test_ell2a_mode_configuration(sample_workflow_config):
     """Test ELL2A mode configuration."""
     # Configure ELL2A
-    ell2a_integration.configure(sample_workflow_config.ell2a_config)
+    ell2a_config = {
+        "simple": {
+            "model": "test-model",
+            "max_retries": 3,
+            "retry_delay": 1.0,
+            "timeout": 30.0
+        },
+        "complex": {
+            "model": "test-model-complex",
+            "track_performance": True,
+            "track_memory": True,
+            "max_retries": 3,
+            "retry_delay": 1.0,
+            "timeout": 60.0,
+            "stream": True
+        }
+    }
+    ell2a_integration.configure(ell2a_config)
     
     # Get mode config
     simple_config = ell2a_integration.get_mode_config("simple")

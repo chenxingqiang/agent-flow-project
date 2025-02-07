@@ -36,6 +36,7 @@ async def test_workflow_execution():
                 id="step-1",
                 name="step_1",
                 type=WorkflowStepType.TRANSFORM,
+                description="Test transformation step",
                 config=StepConfig(
                     strategy="custom",
                     params={"execute": custom_transform}
@@ -82,6 +83,7 @@ async def test_workflow_with_dependencies():
                 id="step-1",
                 name="step_1",
                 type=WorkflowStepType.TRANSFORM,
+                description="First transformation step",
                 config=StepConfig(
                     strategy="custom",
                     params={"execute": transform1}
@@ -91,6 +93,7 @@ async def test_workflow_with_dependencies():
                 id="step-2",
                 name="step_2",
                 type=WorkflowStepType.TRANSFORM,
+                description="Second transformation step",
                 dependencies=["step-1"],
                 config=StepConfig(
                     strategy="custom",
@@ -134,6 +137,7 @@ async def test_workflow_error_handling():
                 id="step-1",
                 name="step_1",
                 type=WorkflowStepType.TRANSFORM,
+                description="Failing transformation step",
                 config=StepConfig(
                     strategy="custom",
                     params={"execute": failing_transform}
@@ -176,6 +180,7 @@ async def test_workflow_timeout():
                 id="step-1",
                 name="step_1",
                 type=WorkflowStepType.TRANSFORM,
+                description="Slow transformation step",
                 config=StepConfig(
                     strategy="custom",
                     params={"execute": slow_transform}

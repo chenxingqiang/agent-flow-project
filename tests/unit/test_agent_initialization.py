@@ -36,8 +36,22 @@ def test_agent_initialization(ray_context):
             "temperature": 0.5
         },
         "workflow": {
+            "id": "test-workflow-1",
+            "name": "Test Workflow",
             "max_iterations": 5,
-            "logging_level": "INFO"
+            "logging_level": "INFO",
+            "steps": [
+                {
+                    "id": "step1",
+                    "name": "Test Step",
+                    "type": "agent",
+                    "description": "Test step for initialization",
+                    "config": {
+                        "strategy": "standard",
+                        "params": {}
+                    }
+                }
+            ]
         }
     }
 
@@ -63,8 +77,22 @@ def test_agent_distributed_initialization(ray_context):
             "name": "gpt-4"
         },
         "workflow": {
+            "id": "test-workflow-2",
+            "name": "Distributed Workflow",
             "max_iterations": 10,
-            "distributed": True
+            "distributed": True,
+            "steps": [
+                {
+                    "id": "step1",
+                    "name": "Distributed Step",
+                    "type": "agent",
+                    "description": "Test step for distributed execution",
+                    "config": {
+                        "strategy": "standard",
+                        "params": {}
+                    }
+                }
+            ]
         }
     }
 
@@ -91,7 +119,21 @@ def test_agent_model_configuration():
             "max_tokens": 1000
         },
         "workflow": {
-            "max_iterations": 5
+            "id": "test-workflow-3",
+            "name": "Model Test Workflow",
+            "max_iterations": 5,
+            "steps": [
+                {
+                    "id": "step1",
+                    "name": "Model Test Step",
+                    "type": "agent",
+                    "description": "Test step for model configuration",
+                    "config": {
+                        "strategy": "standard",
+                        "params": {}
+                    }
+                }
+            ]
         }
     }
 
@@ -117,10 +159,23 @@ def test_agent_workflow_configuration():
             "name": "gpt-4"
         },
         "workflow": {
+            "id": "test-workflow-4",
+            "name": "Test Workflow",
             "max_iterations": 7,
-            "logging_level": "DEBUG",
             "timeout": 300,
-            "distributed": False
+            "distributed": False,
+            "steps": [
+                {
+                    "id": "step1",
+                    "name": "Workflow Test Step",
+                    "type": "agent",
+                    "description": "Test step for workflow configuration",
+                    "config": {
+                        "strategy": "standard",
+                        "params": {}
+                    }
+                }
+            ]
         }
     }
 
@@ -131,7 +186,6 @@ def test_agent_workflow_configuration():
     assert agent.config is not None
     assert isinstance(agent.config.workflow, WorkflowConfig)
     assert agent.config.workflow.max_iterations == 7
-    assert agent.config.workflow.logging_level == "DEBUG"
     assert agent.config.workflow.timeout == 300
     assert agent.config.workflow.distributed is False
 
@@ -148,9 +202,22 @@ def test_agent_file_initialization(test_data_dir):
             "name": "gpt-4"
         },
         "workflow": {
+            "id": "test-workflow-5",
+            "name": "File Test Workflow",
             "max_iterations": 10,
             "distributed": False,
-            "steps": []
+            "steps": [
+                {
+                    "id": "step1",
+                    "name": "File Test Step",
+                    "type": "agent",
+                    "description": "Test step for file initialization",
+                    "config": {
+                        "strategy": "standard",
+                        "params": {}
+                    }
+                }
+            ]
         }
     }
 
@@ -178,7 +245,21 @@ def test_agent_state_initialization():
             "name": "gpt-4"
         },
         "workflow": {
-            "max_iterations": 5
+            "id": "test-workflow-6",
+            "name": "State Test Workflow",
+            "max_iterations": 5,
+            "steps": [
+                {
+                    "id": "step1",
+                    "name": "State Test Step",
+                    "type": "agent",
+                    "description": "Test step for state initialization",
+                    "config": {
+                        "strategy": "standard",
+                        "params": {}
+                    }
+                }
+            ]
         }
     }
 
@@ -186,7 +267,7 @@ def test_agent_state_initialization():
     agent = Agent(config=config)
     
     assert agent.name == "StateAgent"
-    assert agent.status.value == "INITIALIZED"
+    assert agent.status.value == "IDLE"
     assert agent.config is not None
 
 def test_agent_invalid_initialization():

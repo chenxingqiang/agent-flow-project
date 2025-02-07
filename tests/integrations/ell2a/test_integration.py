@@ -8,17 +8,38 @@ from agentflow.ell2a.types.message import Message, MessageRole
 @pytest.fixture
 def ell2a_integration():
     """Create an ELL2AIntegration instance for testing."""
-    return ELL2AIntegration()
+    # Clear the singleton instance before each test
+    ELL2AIntegration._instance = None
+    integration = ELL2AIntegration()
+    return integration
 
 def test_ell2a_integration_initial_state(ell2a_integration):
     """Test the initial state of ELL2AIntegration."""
     assert ell2a_integration.enabled is True
     assert ell2a_integration.tracking_enabled is True
-    assert ell2a_integration.config == {}
+    assert ell2a_integration.config == {
+        "default_model": "gpt-4",
+        "temperature": 0.7,
+        "max_tokens": 2000,
+        "simple": {
+            "max_retries": 3,
+            "retry_delay": 1.0,
+            "timeout": 30.0
+        },
+        "complex": {
+            "max_retries": 3,
+            "retry_delay": 1.0,
+            "timeout": 60.0,
+            "stream": True,
+            "track_performance": True,
+            "track_memory": True
+        }
+    }
     assert ell2a_integration.metrics == {
         "function_calls": 0,
         "total_execution_time": 0.0,
-        "errors": 0
+        "errors": 0,
+        "function_metrics": {}
     }
 
 def test_ell2a_integration_configure(ell2a_integration):
@@ -59,6 +80,8 @@ async def test_ell2a_process_message(ell2a_integration):
 
 def test_ell2a_integration_disabled():
     """Test integration when disabled."""
+    # Clear the singleton instance
+    ELL2AIntegration._instance = None
     integration = ELL2AIntegration()
     integration.configure({"enabled": False})
     

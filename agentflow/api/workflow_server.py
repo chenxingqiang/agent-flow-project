@@ -24,6 +24,9 @@ from agentflow.core.distributed_workflow import ResearchDistributedWorkflow, Dis
 from agentflow.core.config import AgentConfig
 from agentflow.core.workflow import WorkflowEngine
 from agentflow.core.workflow_types import WorkflowConfig
+from agentflow.agents.agent import Agent
+from agentflow.core.model_config import ModelConfig
+from agentflow.agents.agent_types import AgentType
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -68,6 +71,15 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
+# Create a global workflow engine instance
+workflow_engine = WorkflowEngine()
+
+# Initialize workflow engine on startup
+@app.on_event("startup")
+async def startup_event():
+    """Initialize workflow engine on startup."""
+    await workflow_engine.initialize()
+
 class WorkflowRequest(BaseModel):
     """Workflow request model."""
     workflow: Dict[str, Any] = Field(description="Workflow configuration")
@@ -109,172 +121,126 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 @app.post("/workflow/execute")
-async def execute_workflow(request: WorkflowRequest):
-    """Execute workflow synchronously"""
+async def execute_workflow(request: WorkflowRequest) -> Dict[str, Any]:
+    """Execute workflow synchronously.
+    
+    Args:
+        request: Workflow request
+        
+    Returns:
+        Dict[str, Any]: Workflow execution results
+    """
     try:
-        logger.debug(f"Received workflow request: {request}")
+        # Create workflow config
+        workflow_config = WorkflowConfig(**request.workflow)
         
-        # Validate input data
-        input_data = request.input_data or {}
-        
-        # Generate workflow ID if not provided
-        workflow_id = request.workflow.get('id', str(uuid.uuid4()))
-        
-        # Create distributed config from request config
-        dist_config = DistributedConfig(
-            num_workers=request.config.get('num_workers', 4),
-            batch_size=request.config.get('batch_size', 10),
-            timeout=request.config.get('timeout', 30.0),
-            retry_limit=request.config.get('max_retries', 3),
-            worker_init_timeout=request.config.get('worker_init_timeout', 5.0)
-        )
-
-        # Create workflow instance with proper name and config
-        workflow = ResearchDistributedWorkflow(
-            name=request.workflow.get('name', f"workflow_{workflow_id}"),
-            config=dist_config.model_dump(),
-            steps=request.workflow.get('steps', [])
-        )
-        
-        # Store workflow info
-        task_refs[workflow_id] = {
-            'workflow_def': request.workflow,
-            'config': request.config or {},
-            'input_data': input_data,
-            'status': 'pending',
-            'result': None,
-            'error': None
-        }
-        
-        # Execute workflow with input data
-        try:
-            result = await workflow.execute(input_data)
-            task_refs[workflow_id]['status'] = 'completed'
-            task_refs[workflow_id]['result'] = result
+        # Initialize workflow engine if needed
+        if not workflow_engine._initialized:
+            await workflow_engine.initialize()
             
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "status": "success",
-                    "workflow_id": workflow_id,
-                    "result": result
-                }
-            )
-        except Exception as e:
-            task_refs[workflow_id]['status'] = 'failed'
-            task_refs[workflow_id]['error'] = str(e)
-            logger.error(f"Error executing workflow: {e}")
-            raise
+        # Create and register an agent for this workflow
+        agent_config = AgentConfig(
+            id=str(uuid.uuid4()),
+            name=f"agent_{workflow_config.id}",
+            type=AgentType.RESEARCH,
+            model={
+                "provider": "openai",
+                "name": "gpt-4",
+                "temperature": 0.7,
+                "max_tokens": 4096
+            },
+            workflow=workflow_config
+        )
+        agent = Agent(config=agent_config)
+        await agent.initialize()
+        await workflow_engine.register_workflow(agent, workflow_config)
         
+        # Execute workflow
+        result = await workflow_engine.execute_workflow(agent.id, request.input_data)
+        
+        # Update status for consistency
+        if result.get("status") == "success":
+            result["status"] = "completed"
+        
+        return result
     except Exception as e:
-        logger.error(f"Unexpected error in workflow execution: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Error executing workflow: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/workflow/execute_async")
-async def execute_workflow_async(request: WorkflowRequest, background_tasks: BackgroundTasks):
-    """Execute workflow asynchronously"""
-    logger.info("Received async workflow execution request")
+async def execute_workflow_async(request: WorkflowRequest) -> Dict[str, Any]:
+    """Execute workflow asynchronously.
+    
+    Args:
+        request: Workflow request
+        
+    Returns:
+        Dict[str, Any]: Initial response with task ID
+    """
     try:
-        # Validate input data
-        input_data = request.input_data or {}
+        # Create workflow config
+        workflow_config = WorkflowConfig(**request.workflow)
         
-        # Generate workflow ID if not provided
-        workflow_id = request.workflow.get('id', str(uuid.uuid4()))
-        
-        # Create distributed config from request config
-        dist_config = DistributedConfig(
-            num_workers=request.config.get('num_workers', 4),
-            batch_size=request.config.get('batch_size', 10),
-            timeout=request.config.get('timeout', 30.0),
-            retry_limit=request.config.get('max_retries', 3),
-            worker_init_timeout=request.config.get('worker_init_timeout', 5.0)
+        # Initialize workflow engine if needed
+        if not workflow_engine._initialized:
+            await workflow_engine.initialize()
+            
+        # Create and register an agent for this workflow
+        agent_config = AgentConfig(
+            id=str(uuid.uuid4()),
+            name=f"agent_{workflow_config.id}",
+            type=AgentType.RESEARCH,
+            model={
+                "provider": "openai",
+                "name": "gpt-4",
+                "temperature": 0.7,
+                "max_tokens": 4096
+            },
+            workflow=workflow_config
         )
-
-        # Create workflow instance with proper name and config
-        workflow = ResearchDistributedWorkflow(
-            name=request.workflow.get('name', f"workflow_{workflow_id}"),
-            config=dist_config.model_dump(),
-            steps=request.workflow.get('steps', [])
-        )
+        agent = Agent(config=agent_config)
+        await agent.initialize()
+        await workflow_engine.register_workflow(agent, workflow_config)
         
-        # Store workflow info
-        task_refs[workflow_id] = {
-            'workflow_def': request.workflow,
-            'config': request.config or {},
-            'input_data': input_data,
-            'status': 'pending',
-            'result': None,
-            'error': None,
-            'workflow': workflow
+        # Generate task ID
+        task_id = str(uuid.uuid4())
+        
+        # Store task info
+        workflow_engine._pending_tasks[task_id] = {
+            "status": "pending",
+            "result": None,
+            "error": None
         }
         
-        # Start background task for execution
-        async def execute_workflow_task():
-            try:
-                result = await workflow.execute(input_data)
-                task_refs[workflow_id]['status'] = 'completed'
-                task_refs[workflow_id]['result'] = result
-            except Exception as e:
-                task_refs[workflow_id]['status'] = 'failed'
-                task_refs[workflow_id]['error'] = str(e)
-                logger.error(f"Error executing workflow: {e}")
-        
-        background_tasks.add_task(execute_workflow_task)
-        task_refs[workflow_id]['status'] = 'running'
-        
-        # Return workflow ID
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "success",
-                "workflow_id": workflow_id
-            }
+        # Start execution in background
+        asyncio.create_task(
+            workflow_engine.execute_workflow(agent.id, request.input_data)
         )
+        
+        return {
+            "task_id": task_id,
+            "status": "pending"
+        }
     except Exception as e:
-        logger.error(f"Unexpected error in async workflow execution: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Error executing workflow asynchronously: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/workflow/status/{workflow_id}")
-async def get_workflow_status(workflow_id: str):
-    """Get workflow execution status"""
+@app.get("/workflow/status/{task_id}")
+async def get_workflow_status(task_id: str) -> Dict[str, Any]:
+    """Get workflow execution status.
+    
+    Args:
+        task_id: Task ID
+        
+    Returns:
+        Dict[str, Any]: Task status
+    """
     try:
-        # Check if workflow exists
-        if workflow_id not in task_refs:
-            raise HTTPException(status_code=404, detail="Workflow not found")
-        
-        workflow_info = task_refs[workflow_id]
-        
-        # If workflow is completed, return the result
-        if workflow_info['status'] == 'completed':
-            return {
-                "status": "completed",
-                "result": workflow_info['result']
-            }
-        
-        # If workflow has a result reference, check its status
-        if workflow_info.get('result_ref') is not None:
-            try:
-                # Try to get the result
-                result = ray.get(workflow_info['result_ref'])
-                workflow_info['status'] = 'completed'
-                workflow_info['result'] = result
-                return {
-                    "status": "completed",
-                    "result": result
-                }
-            except ray.exceptions.GetTimeoutError:
-                return {"status": "running"}
-            except Exception as e:
-                logger.error(f"Error checking workflow status: {e}")
-                return {"status": "running"}  # Return running instead of failed
-        
-        # Return current status
-        return {"status": workflow_info['status']}
-        
+        task = workflow_engine._pending_tasks.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        return task
     except Exception as e:
-        logger.error(f"Error checking workflow status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 def _format_workflow_result(result: Any) -> Any:

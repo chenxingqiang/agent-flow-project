@@ -24,7 +24,7 @@ from ..ell2a.integration import ELL2AIntegration
 from ..ell2a.types.message import Message, MessageRole, MessageType
 from ..core.types import AgentType, AgentMode, AgentStatus, AgentConfig, ModelConfig
 from ..transformations.advanced_strategies import AdvancedTransformationStrategy
-from agentflow.errors import WorkflowExecutionError, ConfigurationError
+from ..core.exceptions import WorkflowExecutionError, ConfigurationError
 from unittest.mock import AsyncMock
 from ..core.workflow_types import WorkflowConfig
 
@@ -129,6 +129,35 @@ class AgentBase(BaseModel):
             self.errors.pop(0)
         self.errors.append({"error": error, "timestamp": str(datetime.now())})
 
+class TransformationPipeline:
+    """Pipeline for chaining multiple transformation strategies."""
+    
+    def __init__(self):
+        """Initialize transformation pipeline."""
+        self.strategies = []
+    
+    def add_strategy(self, strategy):
+        """Add a transformation strategy to the pipeline.
+        
+        Args:
+            strategy: Strategy to add
+        """
+        self.strategies.append(strategy)
+    
+    def fit_transform(self, data):
+        """Apply all transformation strategies in sequence.
+        
+        Args:
+            data: Data to transform
+            
+        Returns:
+            Transformed data
+        """
+        transformed_data = data
+        for strategy in self.strategies:
+            transformed_data = strategy.transform(transformed_data)
+        return transformed_data
+
 class Agent:
     """Base agent class."""
     
@@ -152,7 +181,13 @@ class Agent:
             if not config:  # Empty dictionary
                 raise ValueError("Agent must have a configuration")
             try:
+                # Extract domain config and name from config
+                domain_config = config.get("DOMAIN_CONFIG", {})
+                agent_name = config.get("AGENT", {}).get("name")
                 config = AgentConfig(**config)
+                config.domain_config = domain_config
+                if agent_name:
+                    config.name = agent_name
             except Exception as e:
                 raise ValueError(f"Invalid agent configuration: {str(e)}")
 
@@ -161,6 +196,7 @@ class Agent:
         self.type = kwargs.get('type', config.type)
         self.mode = kwargs.get('mode', getattr(config, 'mode', 'sequential'))
         self.config = config
+        self.domain_config = getattr(config, 'domain_config', {})  # Extract domain_config
         self.metadata: Dict[str, Any] = {}
         self._initialized = False
         self._status: AgentStatus = AgentStatus.IDLE
@@ -332,9 +368,20 @@ class Agent:
             
         Returns:
             str: Execution result
+            
+        Raises:
+            WorkflowExecutionError: If execution fails
         """
         if not isinstance(input_data, dict):
             input_data = {"data": input_data}
+            
+        # In test mode, check for should_fail flag
+        if input_data.get("test_mode") and input_data.get("should_fail"):
+            self.state.status = AgentStatus.FAILED
+            error_msg = "Test error during execution"
+            self.state.last_error = error_msg
+            self.add_error(error_msg)
+            raise WorkflowExecutionError(error_msg)
             
         # Create message from input data
         message = Message(

@@ -43,7 +43,7 @@ def valid_workflow_def():
                     "name": "Test Step",
                     "description": "Test step",
                     "input": ["data"],
-                    "type": WorkflowStepType.TRANSFORM.value,
+                    "type": WorkflowStepType.TRANSFORM,
                     "agent_config": {}
                 }
             }
@@ -54,6 +54,7 @@ def valid_workflow_def():
 def workflow_config():
     """Create a workflow configuration."""
     return WorkflowConfig(
+        id="test-workflow",
         name="test_workflow",
         max_iterations=5,
         error_policy=ErrorPolicy(
@@ -71,7 +72,8 @@ def workflow_config():
             WorkflowStep(
                 id="step1",
                 name="Test Step",
-                type=WorkflowStepType.TRANSFORM.value,
+                type=WorkflowStepType.TRANSFORM,
+                description="Test workflow step",
                 config=StepConfig(
                     strategy="standard",
                     params={"protocol": "federated"}
@@ -166,6 +168,7 @@ async def test_workflow_execution(workflow_engine, mock_ell2a, mock_isa_manager,
     assert result is not None
     assert "steps" in result
     assert "step1" in result["steps"]
+    assert result["status"] == "success"
     assert result["steps"]["step1"]["status"] == "success"
 
 @pytest.mark.asyncio
@@ -190,7 +193,7 @@ async def test_workflow_with_retry_mechanism():
                     "name": "Test Step",
                     "description": "Test step",
                     "input": ["data"],
-                    "type": WorkflowStepType.TRANSFORM.value,
+                    "type": WorkflowStepType.TRANSFORM,
                     "agent_config": {}
                 }
             }
@@ -198,6 +201,7 @@ async def test_workflow_with_retry_mechanism():
     }
     
     workflow_config = WorkflowConfig(
+        id="test-workflow",
         name="test_workflow",
         max_iterations=5,
         error_policy=ErrorPolicy(
@@ -215,7 +219,8 @@ async def test_workflow_with_retry_mechanism():
             WorkflowStep(
                 id="step1",
                 name="Test Step",
-                type=WorkflowStepType.TRANSFORM.value,
+                type=WorkflowStepType.TRANSFORM,
+                description="Test workflow step",
                 config=StepConfig(
                     strategy="standard",
                     params={"protocol": "federated"}
@@ -231,7 +236,7 @@ async def test_workflow_with_retry_mechanism():
         name="test_agent",
         type="research",
         model=ModelConfig(name="gpt-4", provider="openai"),
-        workflow=ConfigWorkflowConfig(**workflow_config.model_dump())
+        workflow=workflow_config
     )
     agent = Agent(config=agent_config)
     await agent.initialize()
@@ -239,4 +244,4 @@ async def test_workflow_with_retry_mechanism():
     
     result = await engine.execute_workflow(agent.id, {"data": "test_input"})
     assert result is not None
-    assert result["status"] == "completed"
+    assert result["status"] == "success"

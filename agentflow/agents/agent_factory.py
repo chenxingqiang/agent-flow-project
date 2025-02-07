@@ -1,6 +1,6 @@
 """Agent factory module."""
 
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List, Union, Type
 from pydantic import BaseModel, Field
 import uuid
 import logging
@@ -11,6 +11,7 @@ from .base import Agent
 from .default_agent import DefaultAgent
 from .test_agent import TestAgent
 from ..core.config import AgentConfig
+from ..core.types import AgentType
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class AgentFactory:
     
     _instance = None
     _agents: Dict[str, Agent] = {}
+    _agent_types: Dict[str, Type[Agent]] = {}
     
     def __init__(self):
         """Initialize agent factory."""
@@ -57,37 +59,55 @@ class AgentFactory:
         return cls._instance
     
     @classmethod
-    def create_agent(cls, config: Union[Dict[str, Any], AgentConfig]) -> Agent:
-        """Create an agent."""
-        if isinstance(config, dict):
-            # First try the new format
-            agent_type = config.get("agent_type")
-            if not agent_type:
-                # Try the old format
-                agent_type = config.get("AGENT", {}).get("type")
-            if not agent_type:
-                raise ValueError("Agent type not specified in configuration")
-            
-            # Convert to AgentConfig if needed
-            if not isinstance(config, AgentConfig):
-                config = AgentConfig(
-                    type=agent_type,
-                    name=config.get("name", str(uuid.uuid4()))
-                )
+    def register_agent(cls, agent_type: str, agent_class: Type[Agent]) -> None:
+        """Register an agent type.
         
-        return cls._create_agent_instance(config)
+        Args:
+            agent_type: Agent type identifier
+            agent_class: Agent class to register
+        """
+        cls._agent_types[agent_type] = agent_class
     
     @classmethod
-    def _create_agent_instance(cls, config: AgentConfig) -> Agent:
-        """Create an agent instance based on configuration."""
-        agent_type = config.type.lower()
+    def create_agent(cls, config: Union[Dict[str, Any], AgentConfig]) -> Agent:
+        """Create an agent instance.
         
-        if agent_type == "default":
-            return DefaultAgent(config)
-        elif agent_type == "test":
-            return TestAgent(config)
+        Args:
+            config: Agent configuration
+            
+        Returns:
+            Agent: Created agent instance
+            
+        Raises:
+            ValueError: If agent type is not registered
+        """
+        # Extract agent type from config
+        if isinstance(config, dict):
+            agent_type = config.get("AGENT", {}).get("type")
+            if not agent_type:
+                raise ValueError("Agent type not specified in configuration")
         else:
-            raise ValueError(f"Unknown agent type: {agent_type}")
+            agent_type = config.type
+            
+        if agent_type not in cls._agent_types:
+            raise ValueError(f"Agent type {agent_type} not registered")
+            
+        agent_class = cls._agent_types[agent_type]
+        return agent_class(config=config)
+    
+    @classmethod
+    def get_registered_types(cls) -> Dict[str, Type[Agent]]:
+        """Get registered agent types.
+        
+        Returns:
+            Dict[str, Type[Agent]]: Dictionary of registered agent types
+        """
+        return cls._agent_types.copy()
+    
+    @classmethod
+    def clear_registrations(cls) -> None:
+        """Clear all registered agent types."""
+        cls._agent_types.clear()
     
     def get_agent(self, agent_id: str) -> Optional[Agent]:
         """Get an agent."""

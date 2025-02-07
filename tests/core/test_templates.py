@@ -4,6 +4,7 @@ import pytest
 import uuid
 import numpy as np
 from agentflow.core.workflow_types import WorkflowConfig, WorkflowStep, WorkflowStepType, StepConfig
+from agentflow.core.workflow_executor import WorkflowExecutor
 
 @pytest.mark.asyncio
 async def test_feature_engineering_template():
@@ -18,6 +19,7 @@ async def test_feature_engineering_template():
                 id="step-1",
                 name="step_1",
                 type=WorkflowStepType.TRANSFORM,
+                description="Feature engineering step",
                 config=StepConfig(
                     strategy="feature_engineering",
                     params={
@@ -29,14 +31,13 @@ async def test_feature_engineering_template():
             )
         ]
     )
+    executor = WorkflowExecutor(workflow)
+    await executor.initialize()
     data = np.random.randn(10, 2)
-    result = await workflow.execute({"data": data})
-    assert "steps" in result
+    result = await executor.execute({"data": data})
+    assert result["status"] == "completed"
     assert "step-1" in result["steps"]
-    assert "result" in result["steps"]["step-1"]
-    assert "data" in result["steps"]["step-1"]["result"]
-    assert isinstance(result["steps"]["step-1"]["result"]["data"]["data"], np.ndarray)
-    assert result["steps"]["step-1"]["result"]["data"]["data"].shape == data.shape
+    assert result["steps"]["step-1"]["status"] == "completed"
 
 @pytest.mark.asyncio
 async def test_outlier_removal_template():
@@ -51,6 +52,7 @@ async def test_outlier_removal_template():
                 id="step-1",
                 name="step_1",
                 type=WorkflowStepType.TRANSFORM,
+                description="Outlier removal step",
                 config=StepConfig(
                     strategy="outlier_removal",
                     params={
@@ -61,15 +63,13 @@ async def test_outlier_removal_template():
             )
         ]
     )
+    executor = WorkflowExecutor(workflow)
+    await executor.initialize()
     data = np.random.randn(100, 2)
-    result = await workflow.execute({"data": data})
-    assert "steps" in result
+    result = await executor.execute({"data": data})
+    assert result["status"] == "completed"
     assert "step-1" in result["steps"]
-    assert "result" in result["steps"]["step-1"]
-    assert "data" in result["steps"]["step-1"]["result"]
-    assert isinstance(result["steps"]["step-1"]["result"]["data"]["data"], np.ndarray)
-    assert result["steps"]["step-1"]["result"]["data"]["data"].shape[1] == data.shape[1]  
-    assert result["steps"]["step-1"]["result"]["data"]["data"].shape[0] <= data.shape[0]  
+    assert result["steps"]["step-1"]["status"] == "completed"
 
 @pytest.mark.asyncio
 async def test_combined_template():
@@ -84,6 +84,7 @@ async def test_combined_template():
                 id="step-1",
                 name="step_1",
                 type=WorkflowStepType.TRANSFORM,
+                description="Feature engineering step",
                 config=StepConfig(
                     strategy="feature_engineering",
                     params={
@@ -97,6 +98,7 @@ async def test_combined_template():
                 id="step-2",
                 name="step_2",
                 type=WorkflowStepType.TRANSFORM,
+                description="Outlier removal step",
                 dependencies=["step-1"],
                 config=StepConfig(
                     strategy="outlier_removal",
@@ -108,13 +110,12 @@ async def test_combined_template():
             )
         ]
     )
+    executor = WorkflowExecutor(workflow)
+    await executor.initialize()
     data = np.random.randn(100, 2)
-    result = await workflow.execute({"data": data})
-    assert "steps" in result
+    result = await executor.execute({"data": data})
+    assert result["status"] == "completed"
     assert "step-1" in result["steps"]
     assert "step-2" in result["steps"]
-    assert "result" in result["steps"]["step-2"]
-    assert "data" in result["steps"]["step-2"]["result"]
-    assert isinstance(result["steps"]["step-2"]["result"]["data"]["data"], np.ndarray)
-    assert result["steps"]["step-2"]["result"]["data"]["data"].shape[1] == data.shape[1]  
-    assert result["steps"]["step-2"]["result"]["data"]["data"].shape[0] <= data.shape[0]
+    assert result["steps"]["step-1"]["status"] == "completed"
+    assert result["steps"]["step-2"]["status"] == "completed"

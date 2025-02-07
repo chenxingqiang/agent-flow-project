@@ -20,38 +20,49 @@ def setup_ray():
 def test_workflow_def() -> Dict[str, Any]:
     """Test workflow definition."""
     return {
-        "COLLABORATION": {
-            "MODE": "SEQUENTIAL",
-            "COMMUNICATION_PROTOCOL": {
-                "TYPE": "HIERARCHICAL"
-            },
-            "WORKFLOW": {
-                "step_1": {
-                    "step": 1,
-                    "name": "Test Step 1",
-                    "description": "First test step",
-                    "input": ["test_input"],
-                    "type": WorkflowStepType.RESEARCH_EXECUTION,
-                    "agent_config": {}
+        "id": "test-workflow-1",
+        "name": "Test Workflow",
+        "max_iterations": 5,
+        "timeout": 300,
+        "steps": [
+            {
+                "id": "step-1",
+                "name": "Test Step 1",
+                "type": WorkflowStepType.RESEARCH_EXECUTION,
+                "description": "First test step",
+                "config": {
+                    "strategy": "standard",
+                    "params": {}
                 }
             }
-        },
-        "INPUT": ["test_input"],
-        "OUTPUT": ["test_output"]
+        ]
     }
 
 @pytest.fixture
 def workflow_config() -> Dict[str, Any]:
     """Test configuration."""
     return {
+        "id": "test-workflow-2",
+        "name": "Test Workflow 2",
         "max_retries": 3,
         "retry_delay": 0.1,
         "retry_backoff": 1.5,
-        "step_1_config": {
-            "max_retries": 3,
-            "retry_delay": 0.1,
-            "retry_backoff": 1.5
-        }
+        "steps": [
+            {
+                "id": "step-1",
+                "name": "Test Step 1",
+                "type": WorkflowStepType.RESEARCH_EXECUTION,
+                "description": "First test step",
+                "config": {
+                    "strategy": "standard",
+                    "params": {
+                        "max_retries": 3,
+                        "retry_delay": 0.1,
+                        "retry_backoff": 1.5
+                    }
+                }
+            }
+        ]
     }
 
 @pytest.mark.asyncio

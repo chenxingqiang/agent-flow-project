@@ -16,13 +16,15 @@ from agentflow.core.exceptions import WorkflowExecutionError
 async def workflow_engine():
     """Create a workflow engine for testing."""
     default_workflow_config = WorkflowConfig(
+        id="test-workflow-1",
         name="test_workflow",
         steps=[
             WorkflowStep(
-                id="test-step-1", 
-                name="test_step", 
+                id="test-step-1",
+                name="test_step",
                 type=WorkflowStepType.TRANSFORM,
-                config=StepConfig(strategy="default")
+                description="Test workflow step",
+                config=StepConfig(strategy="standard")
             )
         ]
     )
@@ -56,7 +58,8 @@ def agent_config():
                     id="test-step-1",
                     name="test_step",
                     type=WorkflowStepType.TRANSFORM,
-                    config=StepConfig(strategy="default")
+                    description="Test workflow step",
+                    config=StepConfig(strategy="standard")
                 )
             ]
         ),
@@ -117,6 +120,7 @@ async def test_workflow_timeout(workflow_engine, agent):
     
     # Create workflow config with short timeout
     workflow_config = WorkflowConfig(
+        id="test-workflow-2",
         name="test_workflow",
         timeout=0.1,  # Very short timeout
         steps=[
@@ -124,11 +128,8 @@ async def test_workflow_timeout(workflow_engine, agent):
                 id="test-step-1",
                 name="test_step",
                 type=WorkflowStepType.TRANSFORM,
-                config=StepConfig(strategy="default"),
-                required=True,
-                optional=False,
-                is_distributed=False,
-                dependencies=[]
+                description="Test workflow step",
+                config=StepConfig(strategy="standard")
             )
         ]
     )
@@ -137,12 +138,12 @@ async def test_workflow_timeout(workflow_engine, agent):
     workflow_id = await engine.register_workflow(agent_instance, workflow_config)
     input_data = {"message": "Test input"}
     
-    # Mock execute_workflow_instance to take longer than timeout
+    # Mock execute to take longer than timeout
     async def slow_execution(*args, **kwargs):
         await asyncio.sleep(0.2)  # Longer than timeout
         return {"content": "Test response", "status": "success", "steps": []}
     
-    with patch.object(engine, 'execute_workflow_instance', side_effect=slow_execution):
+    with patch('agentflow.core.workflow_executor.WorkflowExecutor.execute', side_effect=slow_execution):
         with pytest.raises(TimeoutError):
             await engine.execute_workflow(workflow_id, input_data)
 

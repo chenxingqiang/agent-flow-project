@@ -4,10 +4,14 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from agentflow.core.workflow import WorkflowEngine, WorkflowInstance
 from agentflow.core.metrics import MetricType
 from agentflow.core.workflow_types import (
-    WorkflowConfig, WorkflowStep, StepConfig, WorkflowStepType
+    WorkflowConfig, WorkflowStep, StepConfig, WorkflowStepType,
+    ErrorPolicy, RetryPolicy
 )
 from agentflow.core.enums import WorkflowStatus
 from agentflow.agents.agent_types import AgentType
+from agentflow.core.exceptions import WorkflowExecutionError
+from agentflow.core.config import AgentConfig, ModelConfig
+from agentflow.agents.agent import Agent
 
 class MockAgent:
     """Mock agent for testing."""
@@ -36,88 +40,143 @@ class TestWorkflowExecution:
             name="Test Workflow",
             max_iterations=5,
             timeout=3600,
-            error_policy={
-                "fail_fast": True,
-                "ignore_warnings": False,
-                "max_errors": 10,
-                "retry_policy": {
-                    "max_retries": 3,
-                    "retry_delay": 1.0,
-                    "backoff": 2.0,
-                    "max_delay": 60.0
-                }
-            },
+            error_policy=ErrorPolicy(
+                fail_fast=True,
+                ignore_warnings=False,
+                max_errors=10,
+                retry_policy=RetryPolicy(
+                    max_retries=3,
+                    retry_delay=1.0,
+                    backoff=2.0,
+                    max_delay=60.0
+                )
+            ),
             steps=[
                 WorkflowStep(
                     id="step1",
                     name="Agent Step",
                     type=WorkflowStepType.AGENT,
+                    description="Test agent step for workflow execution",
                     config=StepConfig(
-                        type=WorkflowStepType.AGENT,
-                        agent_type=AgentType.GENERIC,
-                        config=None
+                        strategy="standard",
+                        params={}
                     )
                 )
             ]
         )
     
+    @pytest.fixture
+    async def test_agent(self, workflow_config):
+        """Create a test agent."""
+        agent_config = AgentConfig(
+            id="test-agent-1",
+            name="test_agent",
+            type="generic",
+            mode="sequential",
+            version="1.0.0",
+            model=ModelConfig(
+                provider="openai",
+                name="gpt-4",
+                temperature=0.7,
+                max_tokens=4096
+            ),
+            workflow=workflow_config
+        )
+        agent = Agent(config=agent_config)
+        await agent.initialize()
+        return agent
+    
     @pytest.mark.asyncio
-    async def test_workflow_execution(self, workflow_config):
+    async def test_workflow_execution(self, workflow_config, test_agent):
         """Test workflow execution."""
         engine = WorkflowEngine(workflow_config)
         await engine.initialize()
+        
+        # Get the agent instance
+        agent = await test_agent
+        
+        # Register the agent
+        await engine.register_workflow(agent, workflow_config)
         
         # Create workflow instance
         instance = await engine.create_workflow("test_workflow", workflow_config)
         instance.context["test_mode"] = True
         
         # Execute workflow
-        result = await engine.execute_workflow(instance)
+        result = await engine.execute_workflow(agent.id, instance.context)
         
         assert result is not None
-        assert result["status"] == WorkflowStatus.COMPLETED.value
-        assert "result" in result
-        assert "steps" in result["result"]
-        assert len(result["result"]["steps"]) == 1
-        assert result["result"]["steps"][0]["id"] == "step1"
-        assert result["result"]["steps"][0]["status"] == WorkflowStatus.COMPLETED.value
+        assert result["status"] == "success"
+        assert "steps" in result
+        assert len(result["steps"]) > 0
+        assert isinstance(result["steps"], list)  # Steps should be a list now
+        
+        # Check first step
+        first_step = result["steps"][0]
+        assert first_step["id"] == "step1"
+        assert first_step["type"] == "agent"
+        assert first_step["status"] == "success"
+        assert "result" in first_step
+        assert "content" in first_step["result"]
     
     @pytest.mark.asyncio
-    async def test_workflow_validation(self, workflow_config):
+    async def test_workflow_validation(self, workflow_config, test_agent):
         """Test workflow validation."""
         engine = WorkflowEngine(workflow_config)
         await engine.initialize()
         
+        # Get the agent instance
+        agent = await test_agent
+        
+        # Register the agent
+        await engine.register_workflow(agent, workflow_config)
+        
         # Test with invalid workflow instance
         with pytest.raises(ValueError, match="Workflow instance has no steps"):
             instance = await engine.create_workflow("test_workflow")
-            await engine.execute_workflow(instance)
+            await engine.execute_workflow(agent.id, {})
     
     @pytest.mark.asyncio
-    async def test_workflow_error_handling(self, workflow_config):
+    async def test_workflow_error_handling(self, workflow_config, test_agent):
         """Test workflow error handling."""
         engine = WorkflowEngine(workflow_config)
         await engine.initialize()
         
+        # Get the agent instance
+        agent = await test_agent
+        
+        # Register the agent
+        await engine.register_workflow(agent, workflow_config)
+        
         # Create workflow instance with failing step
         instance = await engine.create_workflow("test_workflow", workflow_config)
-        instance.steps[0].type = WorkflowStepType.AGENT  # Change to agent type to trigger error
+        
+        # Modify the step to trigger an error
+        instance.steps[0].config.params["should_fail"] = True  # Add parameter to trigger failure
+        instance.context = {
+            "test_mode": True,
+            "should_fail": True  # Add flag to trigger failure
+        }
         
         # Execute workflow
-        result = await engine.execute_workflow(instance)
-        
-        assert result["status"] == WorkflowStatus.FAILED.value
-        assert result["error"] is not None
+        with pytest.raises(WorkflowExecutionError):
+            await engine.execute_workflow(agent.id, instance.context)
     
     @pytest.mark.asyncio
-    async def test_workflow_metrics(self, workflow_config):
+    async def test_workflow_metrics(self, workflow_config, test_agent):
         """Test workflow metrics collection."""
         engine = WorkflowEngine(workflow_config)
         await engine.initialize()
         
+        # Get the agent instance
+        agent = await test_agent
+        
+        # Register the agent
+        await engine.register_workflow(agent, workflow_config)
+        
         # Create workflow instance
         instance = await engine.create_workflow("test_workflow", workflow_config)
-        instance.context = {
+        context = {
             "test_mode": True,
             "metrics": {
                 MetricType.LATENCY.value: [
@@ -127,9 +186,10 @@ class TestWorkflowExecution:
         }
         
         # Execute workflow
-        result = await engine.execute_workflow(instance)
+        result = await engine.execute_workflow(agent.id, context)
         
         assert result is not None
-        assert result["status"] == WorkflowStatus.COMPLETED.value
-        assert "result" in result
-        assert "steps" in result["result"]
+        assert result["status"] == "success"
+        assert "steps" in result
+        assert len(result["steps"]) > 0
+        assert isinstance(result["steps"], list)  # Steps should be a list now

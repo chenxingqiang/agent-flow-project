@@ -6,6 +6,7 @@ from agentflow.core.workflow_types import WorkflowConfig, WorkflowStep, Workflow
 from agentflow.core.exceptions import WorkflowExecutionError
 from agentflow.core.workflow_executor import WorkflowExecutor
 from agentflow.core.workflow import Workflow
+from pydantic import ValidationError
 
 @pytest.mark.asyncio
 async def test_empty_workflow():
@@ -16,32 +17,31 @@ async def test_empty_workflow():
 @pytest.mark.asyncio
 async def test_invalid_step_type():
     """Test workflow with invalid step type."""
-    workflow = WorkflowConfig(
-        name="invalid_workflow",
-        max_iterations=5,
-        timeout=30,
-        steps=[
-            WorkflowStep(
-                id="step-1",
-                name="step_1",
-                type=WorkflowStepType.TRANSFORM,
-                config=StepConfig(
-                    strategy="invalid_strategy",
-                    params={}
+    with pytest.raises(ValidationError, match="Invalid step type: invalid_type"):
+        WorkflowConfig(
+            id="test-workflow-1",
+            name="invalid_workflow",
+            max_iterations=5,
+            timeout=30,
+            steps=[
+                WorkflowStep(
+                    id="step-1",
+                    name="step_1",
+                    type="invalid_type",
+                    description="Test step for invalid type",
+                    config=StepConfig(
+                        strategy="standard",
+                        params={}
+                    )
                 )
-            )
-        ]
-    )
-    executor = WorkflowExecutor(workflow)
-    await executor.initialize()
-    data = np.random.randn(10, 2)
-    with pytest.raises(WorkflowExecutionError, match="Invalid strategy"):
-        await executor.execute({"data": data})
+            ]
+        )
 
 @pytest.mark.asyncio
 async def test_circular_dependencies():
     """Test workflow with circular dependencies."""
     workflow = WorkflowConfig(
+        id="test-workflow-2",
         name="circular_workflow",
         max_iterations=5,
         timeout=30,
@@ -50,6 +50,7 @@ async def test_circular_dependencies():
                 id="step-1",
                 name="step_1",
                 type=WorkflowStepType.TRANSFORM,
+                description="First step with circular dependency",
                 dependencies=["step-2"],
                 config=StepConfig(
                     strategy="feature_engineering",
@@ -64,6 +65,7 @@ async def test_circular_dependencies():
                 id="step-2",
                 name="step_2",
                 type=WorkflowStepType.TRANSFORM,
+                description="Second step with circular dependency",
                 dependencies=["step-1"],
                 config=StepConfig(
                     strategy="outlier_removal",
@@ -75,14 +77,17 @@ async def test_circular_dependencies():
             )
         ]
     )
+    executor = WorkflowExecutor(workflow)
+    await executor.initialize()
     data = np.random.randn(10, 2)
-    with pytest.raises(WorkflowExecutionError):
-        await workflow.execute({"data": data})
+    with pytest.raises(WorkflowExecutionError, match="Circular dependency"):
+        await executor.execute({"data": data})
 
 @pytest.mark.asyncio
 async def test_missing_dependencies():
     """Test workflow with missing dependencies."""
     workflow = WorkflowConfig(
+        id="test-workflow-3",
         name="missing_deps_workflow",
         max_iterations=5,
         timeout=30,
@@ -91,6 +96,7 @@ async def test_missing_dependencies():
                 id="step-1",
                 name="step_1",
                 type=WorkflowStepType.TRANSFORM,
+                description="Step with missing dependency",
                 dependencies=["nonexistent-step"],
                 config=StepConfig(
                     strategy="feature_engineering",
@@ -103,6 +109,8 @@ async def test_missing_dependencies():
             )
         ]
     )
+    executor = WorkflowExecutor(workflow)
+    await executor.initialize()
     data = np.random.randn(10, 2)
-    with pytest.raises(WorkflowExecutionError):
-        await workflow.execute({"data": data})
+    with pytest.raises(WorkflowExecutionError, match="Missing dependencies detected in workflow steps"):
+        await executor.execute({"data": data})
