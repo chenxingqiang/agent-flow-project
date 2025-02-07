@@ -168,8 +168,8 @@ async def test_workflow_execution(workflow_engine, mock_ell2a, mock_isa_manager,
     assert result is not None
     assert "steps" in result
     assert "step1" in result["steps"]
-    assert result["status"] == "success"
-    assert result["steps"]["step1"]["status"] == "success"
+    assert result["status"] == "completed"
+    assert result["steps"]["step1"]["status"] == "completed"
 
 @pytest.mark.asyncio
 async def test_workflow_cleanup(workflow_engine):
@@ -244,4 +244,4 @@ async def test_workflow_with_retry_mechanism():
     
     result = await engine.execute_workflow(agent.id, {"data": "test_input"})
     assert result is not None
-    assert result["status"] == "success"
+    assert result["status"] == "completed"

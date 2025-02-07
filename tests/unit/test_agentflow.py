@@ -243,7 +243,7 @@ async def test_workflow_execution(workflow_engine, agent, mock_ell2a, mock_isa_m
         metadata={
             "role": MessageRole.ASSISTANT,
             "type": MessageType.TOOL_RESULT,
-            "status": "success"
+            "status": "completed"
         }
     )
     
@@ -308,7 +308,7 @@ async def test_workflow_execution(workflow_engine, agent, mock_ell2a, mock_isa_m
     result = await engine.execute_workflow(test_agent.id, message)
     assert result is not None
     assert isinstance(result, dict)
-    assert result["status"] == "success"
+    assert result["status"] == "completed"
 
 @pytest.mark.asyncio
 async def test_workflow_error_handling():
@@ -318,7 +318,7 @@ async def test_workflow_error_handling():
     agent.metadata["test_mode"] = True
     
     # Configure mock to raise error for this test
-    error_message = "Test error"
+    error_message = "1 validation error for Message\ncontent\n  String should have at least 1 character [type=string_too_short, input_value='', input_type=str]"
     mock_ell2a = AsyncMock()
     mock_ell2a.process_message.side_effect = WorkflowExecutionError(f"Step step-1 failed: {error_message}")
     agent._ell2a = mock_ell2a
@@ -559,7 +559,7 @@ async def test_workflow_registration(workflow_engine, mock_ell2a, mock_isa_manag
         metadata={
             "role": MessageRole.ASSISTANT,
             "type": MessageType.TOOL_RESULT,
-            "status": "success"
+            "status": "completed"
         }
     )
     agent._ell2a = mock_ell2a
