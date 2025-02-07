@@ -20,6 +20,13 @@ from .exceptions import WorkflowExecutionError
 from ..agents.agent_types import AgentType, AgentStatus
 from .config import AgentConfig
 from ..ell2a.types.message import Message, MessageRole, MessageType
+from .workflow_state import WorkflowStateManager
+from .metrics import MetricsManager, MetricType
+from .processors.transformers import TransformProcessor, ProcessorResult
+from .enums import StepStatus
+import time
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import IsolationForest
 
 if TYPE_CHECKING:
     from ..agents.agent import Agent
@@ -55,6 +62,10 @@ class WorkflowEngine:
         else:
             self.config = workflow_config
             
+        self._pending_tasks = {}  # Dictionary to store pending tasks
+        self.metrics = MetricsManager()
+        self.state = WorkflowStateManager()
+        
     async def initialize(self) -> None:
         """Initialize workflow engine."""
         if not self._initialized:
@@ -69,6 +80,9 @@ class WorkflowEngine:
             await self._isa_manager.initialize()
             self._instruction_selector = InstructionSelector()
             await self._instruction_selector.initialize()
+            
+            await self.metrics.initialize()
+            await self.state.initialize()
             
             self._initialized = True
             
@@ -393,6 +407,13 @@ class WorkflowEngine:
             self.workflows.clear()
             self.agents.clear()
             self._initialized = False
+            
+            # Clean up components
+            await self.metrics.cleanup()
+            await self.state.cleanup()
+            
+            # Reset state
+            self._pending_tasks.clear()
             
         except Exception as e:
             logger.error(f"Error during cleanup: {str(e)}")

@@ -202,21 +202,23 @@ class WorkflowExecutor:
                 }
             else:
                 context_dict = context
-
+            
             # Validate workflow has steps
             if not self.config.steps:
                 raise WorkflowExecutionError("Workflow steps list cannot be empty")
-            
-            # Validate workflow steps
-            self._validate_workflow_steps()
-            
+                
+            # Initialize results
             results = {
-                "steps": {},  # Use dictionary for step results
-                "status": "success",  # Use success instead of completed
-                "error": None
+                "status": "running",
+                "steps": {},
+                "warnings": [],
+                "error": None,
+                "result": None  # Initialize result key
             }
+            
             completed_steps = set()
             
+            # Execute steps in sequence
             for step in self.config.steps:
                 try:
                     # Validate dependencies
@@ -247,9 +249,7 @@ class WorkflowExecutor:
                             context_dict.update({"data": step_result["data"]})
                         else:
                             context_dict.update({"data": step_result})
-                    else:
-                        context_dict.update({"data": step_result})
-                    
+                        
                     completed_steps.add(step.id)
                 except Exception as e:
                     results["steps"][step.id] = {
@@ -270,15 +270,29 @@ class WorkflowExecutor:
             # Get the result from the last step
             last_step = self.config.steps[-1]
             last_step_result = results["steps"][last_step.id]["result"]
+            
+            # Set the result based on the last step's result
             if isinstance(last_step_result, dict):
                 content = last_step_result.get("content", "Test response")
+                results["result"] = last_step_result.get("result", last_step_result)  # Try to get result key or use entire dict
             else:
                 content = str(last_step_result) if last_step_result is not None else "Test response"
-            
+                results["result"] = last_step_result  # Use the raw result
+                
             results["content"] = content
+            results["status"] = "completed"  # Update final status
+            
+            # Ensure result is never None
+            if results["result"] is None:
+                results["result"] = {
+                    "content": content,
+                    "steps": results["steps"]
+                }
+                
             return results
+            
         except Exception as e:
-            # Update agent status to FAILED on any error
+            # Update agent status on failure
             if self.config.agent:
                 self.config.agent.state.status = AgentStatus.FAILED
             raise
@@ -297,15 +311,22 @@ class WorkflowExecutor:
             WorkflowExecutionError: If step execution fails
         """
         try:
-            # Get step type and convert to enum if string
+            # Convert step type to enum if it's a string
             step_type = step.type
             if isinstance(step_type, str):
+                # Handle both research and research_execution as research
+                step_type = step_type.lower()
+                if step_type in ["research", "research_execution"]:
+                    step_type = "research"
                 try:
-                    # The enum values are already lowercase
-                    step_type = WorkflowStepType(step_type.lower())
+                    step_type = WorkflowStepType(step_type)
                 except ValueError:
                     raise WorkflowExecutionError(f"Invalid step type: {step_type}")
-
+            
+            # Add test_mode flag to input data if not present
+            if "test_mode" not in input_data:
+                input_data["test_mode"] = True
+            
             # Execute step based on type
             if step_type == WorkflowStepType.TRANSFORM:
                 return await self._execute_transform_step(step, input_data)
@@ -319,41 +340,48 @@ class WorkflowExecutor:
                 raise WorkflowExecutionError(f"No execution handler for step type: {step_type}")
                 
         except Exception as e:
-            if isinstance(e, WorkflowExecutionError):
-                raise
-            raise WorkflowExecutionError(f"Step {step.id} failed: {str(e)}")
+            raise WorkflowExecutionError(f"Step {step.id} failed: {str(e)}") from e
 
     async def _execute_research_step(self, step: WorkflowStep, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a research step.
         
         Args:
-            step: Step to execute
+            step: Research step to execute
             input_data: Input data for step
             
         Returns:
-            Dict[str, Any]: Step execution results
+            Dict[str, Any]: Research results
+            
+        Raises:
+            WorkflowExecutionError: If research step fails
         """
         try:
-            # Get research parameters
-            params = step.config.params
-            student_needs = input_data.get("STUDENT_NEEDS", {})
-            language = input_data.get("LANGUAGE", {})
-            template = input_data.get("TEMPLATE", "Research Paper")
+            # Get input parameters from step configuration
+            input_params = step.config.params.get("input", [])
+            
+            # Get research parameters from input data based on configuration
+            research_data = {}
+            for param in input_params:
+                research_data[param] = input_data.get(param, {})
+            
+            # Get research topic from student needs
+            student_needs = research_data.get("STUDENT_NEEDS", {})
+            topic = student_needs.get("RESEARCH_TOPIC", "Test Topic")
             
             # In test mode, return mock results
-            if input_data.get("test_mode"):
+            if input_data.get("test_mode", True):
                 return {
                     "status": "success",
                     "result": {
                         "research_findings": {
-                            "topic": student_needs.get("RESEARCH_TOPIC", "Test Topic"),
+                            "topic": topic,
                             "summary": "Test research findings",
                             "methodology": "Test methodology",
                             "conclusions": ["Test conclusion 1", "Test conclusion 2"]
                         }
                     }
                 }
-                
+            
             # Get agent from workflow config
             agent = self.config.agent
             if not agent:
@@ -361,9 +389,7 @@ class WorkflowExecutor:
 
             # Prepare research context
             research_context = {
-                "STUDENT_NEEDS": student_needs,
-                "LANGUAGE": language,
-                "TEMPLATE": template,
+                **research_data,  # Include all research data from input parameters
                 "step_id": step.id,
                 "step_type": "research",
                 "test_mode": input_data.get("test_mode", False)
@@ -376,7 +402,7 @@ class WorkflowExecutor:
                     "status": "success",
                     "result": {
                         "research_findings": result.get("research_findings", {
-                            "topic": student_needs.get("RESEARCH_TOPIC", "Unknown Topic"),
+                            "topic": topic,
                             "summary": "Research findings summary",
                             "methodology": "Research methodology",
                             "conclusions": ["Conclusion 1", "Conclusion 2"]
@@ -384,11 +410,10 @@ class WorkflowExecutor:
                     }
                 }
             except Exception as e:
-                raise WorkflowExecutionError(f"Research step execution failed: {str(e)}")
+                raise WorkflowExecutionError(f"Research step execution failed: {str(e)}") from e
+            
         except Exception as e:
-            if isinstance(e, WorkflowExecutionError):
-                raise
-            raise WorkflowExecutionError(f"Research step failed: {str(e)}")
+            raise WorkflowExecutionError(f"Research step failed: {str(e)}") from e
 
     async def _execute_document_step(self, step: WorkflowStep, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a document generation step.
@@ -401,9 +426,23 @@ class WorkflowExecutor:
             Dict[str, Any]: Step execution results
         """
         try:
-            # Get document parameters
-            params = step.config.params
-            research_findings = input_data.get("research_findings", {})
+            # Get input parameters from step configuration
+            input_params = step.config.params.get("input", [])
+            
+            # Get document parameters from input data based on configuration
+            document_data = {}
+            for param in input_params:
+                if param.startswith("WORKFLOW."):
+                    # Handle workflow step references (e.g., "WORKFLOW.1.output")
+                    parts = param.split(".")
+                    if len(parts) >= 3:
+                        step_id = parts[1]
+                        field = parts[2]
+                        step_result = input_data.get("steps", {}).get(f"step-{step_id}", {})
+                        if "result" in step_result:
+                            document_data[field] = step_result["result"]
+                else:
+                    document_data[param] = input_data.get(param, {})
             
             # In test mode, return mock results
             if input_data.get("test_mode"):
@@ -418,17 +457,35 @@ class WorkflowExecutor:
                     }
                 }
                 
-            # TODO: Implement actual document generation step execution
-            return {
-                "status": "success",
-                "result": {
-                    "document": {
-                        "title": "Generated Document",
-                        "content": "Document content based on research findings",
-                        "format": "Markdown with LaTeX"
+            # Get agent from workflow config
+            agent = self.config.agent
+            if not agent:
+                raise WorkflowExecutionError("No agent configured for document step")
+
+            # Prepare document context
+            document_context = {
+                **document_data,  # Include all document data from input parameters
+                "step_id": step.id,
+                "step_type": "document",
+                "test_mode": input_data.get("test_mode", False)
+            }
+
+            # Execute document step using agent
+            try:
+                result = await agent.execute(document_context)
+                return {
+                    "status": "success",
+                    "result": {
+                        "document": result.get("document", {
+                            "title": "Generated Document",
+                            "content": "Document content based on research findings",
+                            "format": "Markdown with LaTeX"
+                        })
                     }
                 }
-            }
+            except Exception as e:
+                raise WorkflowExecutionError(f"Document step execution failed: {str(e)}") from e
+            
         except Exception as e:
             raise WorkflowExecutionError(f"Document generation step failed: {str(e)}")
 

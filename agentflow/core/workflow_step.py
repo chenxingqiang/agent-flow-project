@@ -11,8 +11,10 @@ class WorkflowStepType(str, Enum):
     """Workflow step type."""
 
     TRANSFORM = "transform"
-    RESEARCH_EXECUTION = "research"
-    DOCUMENT_GENERATION = "document"
+    RESEARCH = "research"
+    RESEARCH_EXECUTION = "research"  # Map research_execution to research
+    DOCUMENT = "document"
+    DOCUMENT_GENERATION = "document"  # Map document_generation to document
     AGENT = "agent"
 
 
@@ -66,6 +68,10 @@ class WorkflowStep(BaseModel):
     def validate_type(cls, v: Union[WorkflowStepType, str]) -> Union[WorkflowStepType, str]:
         """Validate step type."""
         if isinstance(v, str):
+            # Handle both research and research_execution as research
+            v = v.lower()
+            if v in ["research", "research_execution"]:
+                v = "research"
             try:
                 return WorkflowStepType(v)
             except ValueError:

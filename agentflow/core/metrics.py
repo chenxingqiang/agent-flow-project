@@ -5,6 +5,9 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 class MetricType(str, Enum):
     """Metric type enum."""
@@ -47,6 +50,24 @@ class MetricsManager:
         """
         self.metrics: Dict[str, List[MetricPoint]] = {}
         self.persistence = persistence
+        self._initialized = False
+        
+    async def initialize(self):
+        """Initialize metrics manager."""
+        if not self._initialized:
+            # Initialize metrics storage
+            self.metrics = {}
+            self._initialized = True
+            
+    async def cleanup(self) -> None:
+        """Clean up metrics manager resources."""
+        try:
+            # Reset metrics
+            self.metrics = {}
+            self._initialized = False
+        except Exception as e:
+            logger.error(f"Error during metrics cleanup: {str(e)}")
+            raise
         
     def record_metric(
         self,
@@ -120,14 +141,46 @@ class MetricsManager:
         """Clear all metrics."""
         self.metrics = {}
 
-    async def cleanup(self) -> None:
-        """Clean up metrics manager resources."""
-        # Clear metrics
-        self.clear_metrics()
+    def get_metric(self, name: str, metric_type: MetricType) -> Optional[Any]:
+        """Get a metric value.
         
-        # Clean up persistence if available
-        if self.persistence and hasattr(self.persistence, 'cleanup'):
-            await self.persistence.cleanup()
+        Args:
+            name: Metric name
+            metric_type: Type of metric
+            
+        Returns:
+            Metric value if found, None otherwise
+            
+        Raises:
+            ValueError: If metric type is invalid
+        """
+        if not self._initialized:
+            raise RuntimeError("Metrics manager not initialized")
+            
+        if metric_type == MetricType.COUNTER:
+            return self.metrics["counters"].get(name)
+        elif metric_type == MetricType.GAUGE:
+            return self.metrics["gauges"].get(name)
+        elif metric_type == MetricType.HISTOGRAM:
+            return self.metrics["histograms"].get(name)
+        elif metric_type == MetricType.SUMMARY:
+            return self.metrics["summaries"].get(name)
+        else:
+            raise ValueError(f"Invalid metric type: {metric_type}")
+            
+    def get_all_metrics(self) -> Dict[str, Any]:
+        """Get all metrics.
+        
+        Returns:
+            Dict of all metrics
+            
+        Raises:
+            RuntimeError: If metrics manager is not initialized
+        """
+        if not self._initialized:
+            raise RuntimeError("Metrics manager not initialized")
+            
+        return self.metrics
 
 # Alias for backward compatibility with existing tests
 MetricsCollector = MetricsManager

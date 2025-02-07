@@ -215,15 +215,25 @@ class WorkflowStepType(str, Enum):
     """Workflow step type enum."""
     TRANSFORM = "transform"
     RESEARCH = "research"
-    RESEARCH_EXECUTION = "research_execution"
+    RESEARCH_EXECUTION = "research"  # Map research_execution to research
     DOCUMENT = "document"
-    DOCUMENT_GENERATION = "document_generation"
+    DOCUMENT_GENERATION = "document"  # Map document_generation to document
     ANALYZE = "analyze"
     SUMMARIZE = "summarize"
     AGENT = "agent"
     CUSTOM = "custom"
     FILTER = "filter"
     AGGREGATE = "aggregate"
+
+    @classmethod
+    def _missing_(cls, value: str) -> Optional['WorkflowStepType']:
+        """Handle missing values by mapping aliases."""
+        value = value.lower()
+        if value in ["research", "research_execution"]:
+            return cls.RESEARCH
+        if value in ["document", "document_generation"]:
+            return cls.DOCUMENT
+        return None
 
 
 class WorkflowStatus(str, Enum):

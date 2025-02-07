@@ -8,349 +8,348 @@ from dataclasses import dataclass, field
 from .workflow_types import WorkflowStatus, WorkflowStepStatus as StepStatus
 from ..agents.agent_types import AgentStatus
 from .exceptions import WorkflowStateError
+import logging
 
-class WorkflowState:
+logger = logging.getLogger(__name__)
+
+class WorkflowState(BaseModel):
     """Workflow state class."""
-
-    def __init__(self, workflow_id: str, name: str, status: str = "pending"):
-        """Initialize workflow state.
-        
-        Args:
-            workflow_id: Unique identifier for the workflow
-            name: Name of the workflow
-            status: Initial status of the workflow (default: pending)
-        """
-        self.workflow_id = workflow_id
-        self.name = name
-        self._status = status
-        self.created_at = datetime.now()
-        self.updated_at = None
-        self.error = None
-        self.metadata = {}
-        self.step_states = {}
-        self.status_history = [{"status": status, "timestamp": self.created_at}]
-        self.validate()
-        
+    
+    workflow_id: str = Field(description="Unique identifier for the workflow")
+    name: str = Field(description="Name of the workflow")
+    status: WorkflowStatus = Field(default=WorkflowStatus.PENDING, description="Current workflow status")
+    start_time: Optional[datetime] = Field(default=None, description="Workflow start time")
+    end_time: Optional[datetime] = Field(default=None, description="Workflow end time")
+    metrics: Dict[str, Any] = Field(default_factory=dict, description="Workflow metrics")
+    result: Optional[Dict[str, Any]] = Field(default=None, description="Workflow result")
+    
+    model_config = ConfigDict(
+        validate_assignment=True,
+        use_enum_values=True
+    )
+    
     def validate(self) -> None:
         """Validate workflow state."""
-        try:
-            WorkflowStatus(self._status)
-        except ValueError:
-            raise WorkflowStateError(f"Invalid workflow status: {self._status}")
-            
-    def update_status(self, status: str) -> None:
+        if not self.workflow_id:
+            raise WorkflowStateError("Workflow ID is required")
+        if not self.name:
+            raise WorkflowStateError("Workflow name is required")
+    
+    def update_status(self, status: WorkflowStatus) -> None:
         """Update workflow status.
         
         Args:
             status: New workflow status
         """
-        try:
-            WorkflowStatus(status)
-        except ValueError:
-            raise WorkflowStateError(f"Invalid workflow status: {status}")
-            
-        self._status = status
-        self.updated_at = datetime.now()
-        self.status_history.append({
-            "status": status,
-            "timestamp": self.updated_at
-        })
-        
-    @property
-    def status(self) -> WorkflowStatus:
-        """Get current workflow status."""
-        return self._status
-
-    @status.setter
-    def status(self, value: WorkflowStatus) -> None:
-        """Set workflow status and update status history."""
-        if value != self._status:
-            self._status = value
-            self.status_history.append({
-                "status": value,
-                "timestamp": datetime.now()
-            })
-            self.updated_at = datetime.now()
-        
+        if not isinstance(status, WorkflowStatus):
+            raise TypeError(f"Expected WorkflowStatus, got {type(status)}")
+        self.status = status
+    
     def to_dict(self) -> Dict[str, Any]:
-        """Convert workflow state to dictionary."""
+        """Convert workflow state to dictionary.
+        
+        Returns:
+            Dict containing workflow state
+        """
         return {
             "workflow_id": self.workflow_id,
             "name": self.name,
-            "status": self._status,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "error": self.error,
-            "metadata": self.metadata,
-            "status_history": [
-                {
-                    "status": h["status"],
-                    "timestamp": h["timestamp"].isoformat()
-                }
-                for h in self.status_history
-            ]
+            "status": self.status,
+            "start_time": self.start_time.isoformat() if self.start_time else None,
+            "end_time": self.end_time.isoformat() if self.end_time else None,
+            "metrics": self.metrics,
+            "result": self.result
         }
-        
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowState":
-        """Create workflow state from dictionary.
-        
-        Args:
-            data: Dictionary containing workflow state data
-            
-        Returns:
-            WorkflowState instance
-        """
-        state = cls(
-            workflow_id=data["workflow_id"],
-            name=data["name"],
-            status=data["status"]
-        )
-        if data.get("created_at"):
-            state.created_at = datetime.fromisoformat(data["created_at"])
-        if data.get("updated_at"):
-            state.updated_at = datetime.fromisoformat(data["updated_at"])
-        state.error = data.get("error")
-        state.metadata = data.get("metadata", {})
-        return state
 
-class StepState:
+class StepState(BaseModel):
     """Step state class."""
     
-    def __init__(self):
-        """Initialize step state."""
-        self.status = StepStatus.PENDING
-        self.result = None
-        self.start_time = None
-        self.end_time = None
-        self.success_count = 0
-        self.failure_count = 0
-        self.retry_count = 0
-        self.metadata = {}
+    step_id: str = Field(description="Unique identifier for the step")
+    name: str = Field(description="Name of the step")
+    status: StepStatus = Field(default=StepStatus.PENDING, description="Current step status")
+    start_time: Optional[datetime] = Field(default=None, description="Step start time")
+    end_time: Optional[datetime] = Field(default=None, description="Step end time")
+    metrics: Dict[str, Any] = Field(default_factory=dict, description="Step metrics")
+    result: Optional[Dict[str, Any]] = Field(default=None, description="Step result")
+    
+    model_config = ConfigDict(
+        validate_assignment=True,
+        use_enum_values=True
+    )
+    
+    def validate(self) -> None:
+        """Validate step state."""
+        if not self.step_id:
+            raise WorkflowStateError("Step ID is required")
+        if not self.name:
+            raise WorkflowStateError("Step name is required")
+    
+    def update_status(self, status: StepStatus) -> None:
+        """Update step status.
         
-    def start(self) -> None:
-        """Start step execution."""
-        self.start_time = datetime.now().timestamp()
-        self.status = StepStatus.RUNNING
+        Args:
+            status: New step status
+        """
+        if not isinstance(status, StepStatus):
+            raise TypeError(f"Expected StepStatus, got {type(status)}")
+        self.status = status
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert step state to dictionary.
         
-    def complete(self, result: Optional[Dict[str, Any]] = None) -> None:
-        """Complete step execution."""
-        self.end_time = datetime.now().timestamp()
-        self.status = StepStatus.COMPLETED
-        self.result = result
-        self.success_count += 1
-        
-    def fail(self, error: str) -> None:
-        """Fail step execution."""
-        self.end_time = datetime.now().timestamp()
-        self.status = StepStatus.FAILED
-        self.metadata['error'] = error
-        self.failure_count += 1
-        
-    def increment_retry(self) -> None:
-        """Increment retry count."""
-        self.retry_count += 1
-        
-    def get_execution_time(self) -> Optional[float]:
-        """Get execution time in seconds."""
-        if self.start_time and self.end_time:
-            return self.end_time - self.start_time
-        return None
+        Returns:
+            Dict containing step state
+        """
+        return {
+            "step_id": self.step_id,
+            "name": self.name,
+            "status": self.status,
+            "start_time": self.start_time.isoformat() if self.start_time else None,
+            "end_time": self.end_time.isoformat() if self.end_time else None,
+            "metrics": self.metrics,
+            "result": self.result
+        }
 
-class AgentState:
+class AgentState(BaseModel):
     """Agent state class."""
     
-    def __init__(self):
-        """Initialize agent state."""
-        self.start_time: Optional[datetime] = None
-        self.end_time: Optional[datetime] = None
-        self.status: AgentStatus = AgentStatus.INITIALIZED
-        self.error: Optional[str] = None
-        self.metrics: Dict[str, Any] = {}
-        self.step_results: Dict[str, Any] = {}
-        self.retry_count = 0
-        self.max_retries = 3
-        self.timeout = 60.0
-        self.last_error: Optional[str] = None
+    agent_id: str = Field(description="Unique identifier for the agent")
+    name: str = Field(description="Name of the agent")
+    status: AgentStatus = Field(default=AgentStatus.INITIALIZED, description="Current agent status")
+    start_time: Optional[datetime] = Field(default=None, description="Agent start time")
+    end_time: Optional[datetime] = Field(default=None, description="Agent end time")
+    metrics: Dict[str, Any] = Field(default_factory=dict, description="Agent metrics")
+    result: Optional[Dict[str, Any]] = Field(default=None, description="Agent result")
+    
+    model_config = ConfigDict(
+        validate_assignment=True,
+        use_enum_values=True
+    )
+    
+    def validate(self) -> None:
+        """Validate agent state."""
+        if not self.agent_id:
+            raise WorkflowStateError("Agent ID is required")
+        if not self.name:
+            raise WorkflowStateError("Agent name is required")
+    
+    def update_status(self, status: AgentStatus) -> None:
+        """Update agent status.
         
-    def start(self) -> None:
-        """Start agent execution."""
-        self.start_time = datetime.now()
-        self.status = AgentStatus.RUNNING
+        Args:
+            status: New agent status
+        """
+        if not isinstance(status, AgentStatus):
+            raise TypeError(f"Expected AgentStatus, got {type(status)}")
+        self.status = status
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert agent state to dictionary.
         
-    def complete(self) -> None:
-        """Complete agent execution."""
-        self.end_time = datetime.now()
-        self.status = AgentStatus.COMPLETED
-        
-    def fail(self, error: str) -> None:
-        """Fail agent execution."""
-        self.end_time = datetime.now()
-        self.status = AgentStatus.FAILED
-        self.error = error
-        self.last_error = error
-        
-    def stop(self) -> None:
-        """Stop agent execution."""
-        self.end_time = datetime.now()
-        self.status = AgentStatus.STOPPED
-        
-    def add_metric(self, name: str, value: Any) -> None:
-        """Add a metric to the state."""
-        self.metrics[name] = value
-        
-    def add_step_result(self, step_id: str, result: Any) -> None:
-        """Add a step result to the state."""
-        self.step_results[step_id] = result
-        
-    def get_execution_time(self) -> Optional[float]:
-        """Get execution time in seconds."""
-        if self.start_time and self.end_time:
-            return (self.end_time - self.start_time).total_seconds()
-        return None
-
-    def should_retry(self) -> bool:
-        """Check if agent should retry execution."""
-        return self.retry_count < self.max_retries and self.status == AgentStatus.FAILED
-
-    def increment_retry(self) -> None:
-        """Increment retry count."""
-        self.retry_count += 1
-        if self.retry_count >= self.max_retries:
-            self.status = AgentStatus.FAILED
+        Returns:
+            Dict containing agent state
+        """
+        return {
+            "agent_id": self.agent_id,
+            "name": self.name,
+            "status": self.status,
+            "start_time": self.start_time.isoformat() if self.start_time else None,
+            "end_time": self.end_time.isoformat() if self.end_time else None,
+            "metrics": self.metrics,
+            "result": self.result
+        }
 
 class WorkflowStateManager:
     """Workflow state manager class."""
-
+    
     def __init__(self):
         """Initialize workflow state manager."""
-        self.step_states = {}  # Map of step_id to StepState
-        self.workflow_states = {}  # Map of workflow_id to WorkflowState
-        self.workflow_result = None
-
-    def initialize_workflow(self, workflow_id: str) -> None:
-        """Initialize workflow state."""
-        # Try to get the name from the workflow configuration if available
-        name = workflow_id  # Fallback to using workflow_id as name
-        self.workflow_states[workflow_id] = WorkflowState(workflow_id=workflow_id, name=name)
-
-    def update_workflow_status(self, workflow_id: str, status: WorkflowStatus) -> None:
-        """Update workflow status."""
-        if workflow_id not in self.workflow_states:
-            self.initialize_workflow(workflow_id)
+        self.workflow_states: Dict[str, WorkflowState] = {}
+        self.step_states: Dict[str, Dict[str, StepState]] = {}
+        self.agent_states: Dict[str, Dict[str, AgentState]] = {}
+        self._initialized = False
+    
+    async def initialize(self) -> None:
+        """Initialize workflow state manager."""
+        if not self._initialized:
+            # Initialize state storage
+            self.workflow_states = {}
+            self.step_states = {}
+            self.agent_states = {}
+            self._initialized = True
+            
+    async def cleanup(self) -> None:
+        """Clean up workflow state manager."""
+        try:
+            # Reset state
+            self.workflow_states = {}
+            self.step_states = {}
+            self.agent_states = {}
+            self._initialized = False
+        except Exception as e:
+            logger.error(f"Error during state cleanup: {str(e)}")
+            raise
+    
+    def initialize_workflow(self, workflow_id: str, name: str) -> None:
+        """Initialize workflow state.
         
-        workflow_state = self.workflow_states[workflow_id]
-        workflow_state.status = status
-        
-        if status == WorkflowStatus.RUNNING:
-            workflow_state.start_time = datetime.now().timestamp()
-        elif status in [WorkflowStatus.COMPLETED, WorkflowStatus.FAILED]:
-            workflow_state.end_time = datetime.now().timestamp()
-
-    def get_workflow_status(self, workflow_id: str) -> WorkflowStatus:
-        """Get workflow status."""
-        if workflow_id not in self.workflow_states:
-            return WorkflowStatus.PENDING
-        return self.workflow_states[workflow_id].status
-
-    def set_workflow_error(self, workflow_id: str, error: str) -> None:
-        """Set workflow error."""
-        if workflow_id not in self.workflow_states:
-            self.initialize_workflow(workflow_id)
-        self.workflow_states[workflow_id].error = error
-
-    def update_step_status(self, workflow_id: str, step_id: str, status: StepStatus) -> None:
-        """Update step status."""
-        if workflow_id not in self.workflow_states:
-            self.initialize_workflow(workflow_id)
-        
-        workflow_state = self.workflow_states[workflow_id]
-        if step_id not in workflow_state.step_states:
-            workflow_state.step_states[step_id] = StepState()
-        
-        step_state = workflow_state.step_states[step_id]
-        step_state.status = status
-        
-        if status == StepStatus.RUNNING:
-            step_state.start()
-        elif status == StepStatus.COMPLETED:
-            step_state.complete()
-        elif status == StepStatus.FAILED:
-            step_state.fail("")
-
-    def get_step_status(self, workflow_id: str, step_id: str) -> Optional[StepStatus]:
-        """Get step status."""
-        if workflow_id not in self.workflow_states:
-            return None
-        workflow_state = self.workflow_states[workflow_id]
-        if step_id not in workflow_state.step_states:
-            return None
-        return workflow_state.step_states[step_id].status
-
-    def set_step_result(self, workflow_id: str, step_id: str, result: Dict[str, Any]) -> None:
-        """Set step result."""
-        if workflow_id not in self.workflow_states:
-            self.initialize_workflow(workflow_id)
-        
-        workflow_state = self.workflow_states[workflow_id]
-        if step_id not in workflow_state.step_states:
-            workflow_state.step_states[step_id] = StepState()
-        
-        workflow_state.step_states[step_id].complete(result)
-
-    def get_step_result(self, workflow_id: str, step_id: str) -> Optional[Dict[str, Any]]:
-        """Get step result."""
-        if workflow_id not in self.workflow_states:
-            return None
-        workflow_state = self.workflow_states[workflow_id]
-        if step_id not in workflow_state.step_states:
-            return None
-        return workflow_state.step_states[step_id].result
-
-    def get_workflow_result(self) -> Optional[Dict[str, Any]]:
-        """Get workflow result."""
-        return self.workflow_result
-
-    def set_workflow_result(self, result: Dict[str, Any]) -> None:
-        """Set workflow result."""
-        self.workflow_result = result
-
-    def initialize_step(self, step_id: str) -> None:
+        Args:
+            workflow_id: Workflow ID
+            name: Workflow name
+        """
+        self.workflow_states[workflow_id] = WorkflowState(
+            workflow_id=workflow_id,
+            name=name
+        )
+        self.step_states[workflow_id] = {}
+        self.agent_states[workflow_id] = {}
+    
+    def initialize_step(self, workflow_id: str, step_id: str, name: str) -> None:
         """Initialize step state.
         
         Args:
-            step_id: Step ID to initialize
+            workflow_id: Workflow ID
+            step_id: Step ID
+            name: Step name
         """
-        if step_id not in self.step_states:
-            step_state = StepState()
-            self.step_states[step_id] = step_state
-            self.workflow_states[step_id] = WorkflowState(step_states={step_id: step_state})
-
-    def start_step(self, step_id: str) -> None:
-        """Start step execution.
+        if workflow_id not in self.step_states:
+            self.step_states[workflow_id] = {}
+        self.step_states[workflow_id][step_id] = StepState(
+            step_id=step_id,
+            name=name
+        )
+    
+    def initialize_agent(self, workflow_id: str, agent_id: str, name: str) -> None:
+        """Initialize agent state.
         
         Args:
-            step_id: Step ID to start
+            workflow_id: Workflow ID
+            agent_id: Agent ID
+            name: Agent name
         """
-        if step_id in self.step_states:
-            self.step_states[step_id].start()
-
-    def complete_step(self, step_id: str, result: Dict[str, Any] = None) -> None:
-        """Complete step execution.
+        if workflow_id not in self.agent_states:
+            self.agent_states[workflow_id] = {}
+        self.agent_states[workflow_id][agent_id] = AgentState(
+            agent_id=agent_id,
+            name=name
+        )
+    
+    def update_workflow_status(self, workflow_id: str, status: WorkflowStatus) -> None:
+        """Update workflow status.
         
         Args:
-            step_id: Step ID to complete
-            result: Optional step result
+            workflow_id: Workflow ID
+            status: New workflow status
         """
-        if step_id in self.step_states:
-            self.step_states[step_id].complete(result)
-
-    def fail_step(self, step_id: str, error: str = None) -> None:
-        """Fail step execution.
+        if workflow_id not in self.workflow_states:
+            raise WorkflowStateError(f"Workflow {workflow_id} not found")
+        self.workflow_states[workflow_id].update_status(status)
+    
+    def update_step_status(self, workflow_id: str, step_id: str, status: StepStatus) -> None:
+        """Update step status.
         
         Args:
-            step_id: Step ID to fail
-            error: Optional error message
+            workflow_id: Workflow ID
+            step_id: Step ID
+            status: New step status
         """
-        if step_id in self.step_states:
-            self.step_states[step_id].fail(error)
+        if workflow_id not in self.step_states:
+            raise WorkflowStateError(f"Workflow {workflow_id} not found")
+        if step_id not in self.step_states[workflow_id]:
+            raise WorkflowStateError(f"Step {step_id} not found in workflow {workflow_id}")
+        self.step_states[workflow_id][step_id].update_status(status)
+    
+    def update_agent_status(self, workflow_id: str, agent_id: str, status: AgentStatus) -> None:
+        """Update agent status.
+        
+        Args:
+            workflow_id: Workflow ID
+            agent_id: Agent ID
+            status: New agent status
+        """
+        if workflow_id not in self.agent_states:
+            raise WorkflowStateError(f"Workflow {workflow_id} not found")
+        if agent_id not in self.agent_states[workflow_id]:
+            raise WorkflowStateError(f"Agent {agent_id} not found in workflow {workflow_id}")
+        self.agent_states[workflow_id][agent_id].update_status(status)
+    
+    def get_workflow_state(self, workflow_id: str) -> Dict[str, Any]:
+        """Get workflow state.
+        
+        Args:
+            workflow_id: Workflow ID
+            
+        Returns:
+            Dict containing workflow state
+        """
+        if workflow_id not in self.workflow_states:
+            raise WorkflowStateError(f"Workflow {workflow_id} not found")
+        return self.workflow_states[workflow_id].to_dict()
+    
+    def get_step_state(self, workflow_id: str, step_id: str) -> Dict[str, Any]:
+        """Get step state.
+        
+        Args:
+            workflow_id: Workflow ID
+            step_id: Step ID
+            
+        Returns:
+            Dict containing step state
+        """
+        if workflow_id not in self.step_states:
+            raise WorkflowStateError(f"Workflow {workflow_id} not found")
+        if step_id not in self.step_states[workflow_id]:
+            raise WorkflowStateError(f"Step {step_id} not found in workflow {workflow_id}")
+        return self.step_states[workflow_id][step_id].to_dict()
+    
+    def get_agent_state(self, workflow_id: str, agent_id: str) -> Dict[str, Any]:
+        """Get agent state.
+        
+        Args:
+            workflow_id: Workflow ID
+            agent_id: Agent ID
+            
+        Returns:
+            Dict containing agent state
+        """
+        if workflow_id not in self.agent_states:
+            raise WorkflowStateError(f"Workflow {workflow_id} not found")
+        if agent_id not in self.agent_states[workflow_id]:
+            raise WorkflowStateError(f"Agent {agent_id} not found in workflow {workflow_id}")
+        return self.agent_states[workflow_id][agent_id].to_dict()
+    
+    def get_all_states(self, workflow_id: str) -> Dict[str, Any]:
+        """Get all states for a workflow.
+        
+        Args:
+            workflow_id: Workflow ID
+            
+        Returns:
+            Dict containing all states
+        """
+        if workflow_id not in self.workflow_states:
+            raise WorkflowStateError(f"Workflow {workflow_id} not found")
+        return {
+            "workflow": self.workflow_states[workflow_id].to_dict(),
+            "steps": {
+                step_id: step.to_dict()
+                for step_id, step in self.step_states[workflow_id].items()
+            },
+            "agents": {
+                agent_id: agent.to_dict()
+                for agent_id, agent in self.agent_states[workflow_id].items()
+            }
+        }
+    
+    def cleanup_workflow(self, workflow_id: str) -> None:
+        """Clean up workflow state.
+        
+        Args:
+            workflow_id: Workflow ID
+        """
+        if workflow_id in self.workflow_states:
+            del self.workflow_states[workflow_id]
+        if workflow_id in self.step_states:
+            del self.step_states[workflow_id]
+        if workflow_id in self.agent_states:
+            del self.agent_states[workflow_id]

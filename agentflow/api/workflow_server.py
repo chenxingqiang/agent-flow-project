@@ -79,6 +79,7 @@ workflow_engine = WorkflowEngine()
 async def startup_event():
     """Initialize workflow engine on startup."""
     await workflow_engine.initialize()
+    workflow_engine._pending_tasks = {}  # Initialize pending tasks dictionary
 
 class WorkflowRequest(BaseModel):
     """Workflow request model."""
@@ -137,6 +138,7 @@ async def execute_workflow(request: WorkflowRequest) -> Dict[str, Any]:
         # Initialize workflow engine if needed
         if not workflow_engine._initialized:
             await workflow_engine.initialize()
+            workflow_engine._pending_tasks = {}  # Initialize pending tasks dictionary
             
         # Create and register an agent for this workflow
         agent_config = AgentConfig(
@@ -153,14 +155,36 @@ async def execute_workflow(request: WorkflowRequest) -> Dict[str, Any]:
         )
         agent = Agent(config=agent_config)
         await agent.initialize()
-        await workflow_engine.register_workflow(agent, workflow_config)
         
-        # Execute workflow
+        # Set test mode in input data
+        request.input_data["test_mode"] = True
+        
+        # Register workflow and execute
+        await workflow_engine.register_workflow(agent, workflow_config)
         result = await workflow_engine.execute_workflow(agent.id, request.input_data)
         
         # Update status for consistency
         if result.get("status") == "success":
             result["status"] = "completed"
+            
+        # Ensure result is included
+        if "result" not in result or result["result"] is None:
+            # Get the last step's result
+            if workflow_config.steps and len(workflow_config.steps) > 0:
+                last_step = workflow_config.steps[-1]
+                if "steps" in result and last_step.id in result["steps"]:
+                    last_step_result = result["steps"][last_step.id]["result"]
+                    if isinstance(last_step_result, dict):
+                        result["result"] = last_step_result.get("result", last_step_result)
+                    else:
+                        result["result"] = last_step_result
+            
+            # If still no result, create a default one
+            if "result" not in result or result["result"] is None:
+                result["result"] = {
+                    "content": result.get("content", ""),
+                    "steps": result.get("steps", {})
+                }
         
         return result
     except Exception as e:

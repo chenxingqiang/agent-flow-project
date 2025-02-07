@@ -41,28 +41,28 @@ class WorkflowEngine:
         Args:
             workflow_config: Optional workflow configuration
         """
+        self.workflows = {}
         self._initialized = False
-        self.workflows: Dict[str, WorkflowConfig] = {}
+        self._ell2a = None
+        self._isa_manager = None
+        self._instruction_selector = None
+        self._pending_tasks = {}  # Dictionary to store pending tasks
         self.agents = {}  # Map of agent IDs to agent instances
         self.state_manager = WorkflowStateManager()
         self.metrics = MetricsManager()
         self.status = "initialized"
         self.start_time = None
         self.end_time = None
-        self._instruction_selector = None
-        self._isa_manager = None
-        self._ell2a = None
         self.is_distributed = False  # Add is_distributed attribute
         self._default_agent_id: Optional[str] = None  # Store the default agent ID
-        self._pending_tasks: Dict[str, Dict[str, Any]] = {}  # Add pending tasks dictionary
         
-        # Store workflow configuration
-        if workflow_config:
+        if workflow_config is not None:
             if isinstance(workflow_config, dict):
-                workflow_config = WorkflowConfig(**workflow_config)
-            elif not isinstance(workflow_config, WorkflowConfig):
+                self.workflow_config = WorkflowConfig(**workflow_config)
+            elif isinstance(workflow_config, WorkflowConfig):
+                self.workflow_config = workflow_config
+            else:
                 raise ValueError("workflow_config must be an instance of WorkflowConfig, a dictionary, or None")
-            self.workflows[workflow_config.id] = workflow_config
         else:
             self.workflow_config = None
             

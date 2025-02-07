@@ -11,6 +11,7 @@ from agentflow.ell2a import (
 )
 from typing import Dict, Any
 import logging
+from pydantic import ValidationError
 
 class TestMessage:
     def test_message_creation(self):
@@ -21,7 +22,7 @@ class TestMessage:
 
     def test_message_validation(self):
         """Test message validation."""
-        with pytest.raises(ValueError):  # Pydantic raises ValueError for invalid types
+        with pytest.raises(ValidationError):  # Pydantic raises ValidationError for invalid types
             Message(
                 role=MessageRole.USER,
                 content=""  # Invalid: empty content
@@ -103,9 +104,10 @@ class TestMessageValidation:
         with pytest.raises(TypeError, match=f"Expected Message object, got {type(invalid_msg)}"):
             await ell.process_message(invalid_msg)
 
-    def test_validation_error_context(self):
+    @pytest.mark.asyncio
+    async def test_validation_error_context(self):
         """Test that validation errors include helpful context."""
-        with pytest.raises(ValueError):  # Pydantic raises ValueError for invalid types
+        with pytest.raises(ValidationError):  # Pydantic raises ValidationError for invalid types
             Message(
                 role=MessageRole.USER,
                 content="",  # Invalid: empty content
