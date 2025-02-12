@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { FiChevronDown, FiChevronRight, FiMaximize2, FiMinimize2, FiCopy, FiRefreshCw } from 'react-icons/fi';
 import '../../styles/SourceCodeView.css';
 import { OldCard } from "../OldCard";
@@ -119,29 +117,31 @@ const LMPSourceView = ({ lmp, showDependenciesInitial = false, selectedInvocatio
       </BoundedVariableWrapper>
     );
 
-    return [{
-    name: 'boundedVariable',
-    startTag: '# <BV>',
-    endTag: '# </BV>',
-    wrapper: ({children, key, content}) => {
-      return <>{children}</>
-    }},
-    {
-      name: 'boundedMutableVariable',
-      startTag: '# <BmV>',
-      endTag: '# </BmV>',
-      wrapper: mutableBVWrapper
-    },
-    {
-      name: 'usedLMP',
-      startTag: '# <LMP>',
-      endTag: '# </LMP>',
-      wrapper: ({children, selectedInvocation, content}) => {
-        return <UsedLMPWrapper uses={uses} selectedInvocation={selectedInvocation} content={content}>{children}</UsedLMPWrapper>
+    return [
+      {
+        name: 'boundedVariable',
+        startTag: '# <BV>',
+        endTag: '# </BV>',
+        wrapper: ({children, key, content}) => {
+          return <>{children}</>;
+        }
+      },
+      {
+        name: 'boundedMutableVariable',
+        startTag: '# <BmV>',
+        endTag: '# </BmV>',
+        wrapper: mutableBVWrapper
+      },
+      {
+        name: 'usedLMP',
+        startTag: '# <LMP>',
+        endTag: '# </LMP>',
+        wrapper: ({children, selectedInvocation, content}) => {
+          return <UsedLMPWrapper uses={uses} selectedInvocation={selectedInvocation} content={content}>{children}</UsedLMPWrapper>;
+        }
       }
-    }
-  ];
-  }, [selectedInvocation, uses]);
+    ];
+  }, [selectedInvocation, uses, initial_free_vars, initial_global_vars]);
 
   useEffect(() => {
     if (dependencyLines > 0 && dependencyLines < 6) {

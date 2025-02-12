@@ -14,6 +14,7 @@ import ReactFlow, {
   Handle,
   Position,
   ReactFlowProvider,
+  MiniMap,
 } from "reactflow";
 import { getBezierPath } from 'reactflow';
 import { Link } from "react-router-dom";
@@ -26,7 +27,8 @@ import { Button } from "components/common/Button";
 
 import { getInitialGraph } from "./graphUtils";
 import { useLayoutedElements } from "./layoutUtils";
-
+import CustomNode from './CustomNode';
+import CustomEdge from './CustomEdge';
 
 function LMPNode({ data }) {
   const { lmp } = data;
@@ -86,7 +88,12 @@ const LayoutFlow = ({ initialNodes, initialEdges }) => {
 
   const nodeTypes = useMemo(() => ({ 
     lmp: LMPNode,
-    evaluation: EvalNode // Add the new EvalNode type
+    evaluation: EvalNode,
+    custom: CustomNode,
+  }), []);
+
+  const edgeTypes = useMemo(() => ({
+    custom: CustomEdge,
   }), []);
 
   return (
@@ -97,10 +104,12 @@ const LayoutFlow = ({ initialNodes, initialEdges }) => {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
       >
         <Panel>
         </Panel>
         <Background />
+        <MiniMap />
         <CustomControls />
       </ReactFlow>
     </div>

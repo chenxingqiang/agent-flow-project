@@ -41,7 +41,7 @@ class ModelConfig(BaseModel):
         if isinstance(obj, dict):
             # Validate provider
             provider = obj.get('provider', 'openai')
-            valid_providers = {'openai', 'anthropic', 'mistral', 'cohere', 'ai21', 'default'}
+            valid_providers = {'openai', 'anthropic', 'mistral', 'cohere', 'ai21', 'default', 'deepseek'}
             if provider not in valid_providers:
                 raise ValueError(f"Invalid provider: {provider}. Must be one of {valid_providers}")
             # Convert stop sequence to proper format
