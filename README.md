@@ -1,6 +1,14 @@
 # AgentFlow
 
-AgentFlow is a flexible and extensible framework for building and managing AI agents and workflows. It provides a modular architecture for creating, configuring, and orchestrating AI agents.
+AgentFlow is a flexible and extensible framework for building and managing AI agents and workflows. It provides a modular architecture for creating, configuring, and orchestrating AI agents with advanced features for workflow management and testing.
+
+## Latest Version
+
+Current version: v0.1.1
+- Fixed workflow transform functions to handle step and context parameters
+- Added feature engineering and outlier removal transforms
+- Improved test suite and type hints
+- Enhanced error handling and validation
 
 ## Project Structure
 
@@ -8,31 +16,49 @@ AgentFlow is a flexible and extensible framework for building and managing AI ag
 agentflow/
 ├── agents/             # Agent implementations
 │   ├── agent.py       # Base agent implementation
-│   └── types/         # Agent type definitions
-├── api/               # API endpoints
+│   └── agent_types.py # Agent type definitions
 ├── core/              # Core framework components
-│   ├── base.py        # Base classes
-│   ├── config.py      # Configuration classes
-│   └── workflow.py    # Workflow engine
-├── models/            # Model implementations
-├── monitoring/        # Monitoring and metrics
-│   └── monitor.py     # System monitor
-├── services/          # Service providers
-│   └── registry.py    # Service registry
-├── strategies/        # Strategy implementations
+│   ├── base_types.py  # Base type definitions
+│   ├── config.py      # Configuration management
+│   ├── workflow.py    # Workflow engine
+│   └── workflow_executor.py # Workflow execution
+├── ell2a/             # ELL2A integration
+│   └── types/         # Message and content types
 ├── transformations/   # Data transformation tools
-└── utils/            # Utility functions
+│   └── text.py       # Text processing utilities
+└── tests/            # Comprehensive test suite
+    ├── unit/         # Unit tests
+    ├── core/         # Core component tests
+    └── performance/  # Performance tests
 ```
 
 ## Features
 
-- Flexible agent architecture
-- Configurable workflows
-- Service provider registry
-- System monitoring and metrics
-- Data transformation tools
-- Async/await support
-- Error handling and retry policies
+- **Flexible Agent Architecture**
+  - Configurable agent types and behaviors
+  - Support for research and data science agents
+  - Extensible agent factory system
+
+- **Advanced Workflow Management**
+  - Step-based workflow execution
+  - Dependency management
+  - Error handling and retry policies
+  - Performance monitoring
+
+- **Robust Testing Framework**
+  - Unit and integration tests
+  - Performance testing
+  - Test-driven development support
+
+- **Data Transformation Tools**
+  - Feature engineering
+  - Outlier removal
+  - Text processing utilities
+
+- **Type Safety**
+  - Comprehensive type hints
+  - Pydantic model validation
+  - Runtime type checking
 
 ## Installation
 
@@ -43,31 +69,43 @@ pip install agentflow
 ## Quick Start
 
 ```python
-from agentflow import Agent, AgentConfig, WorkflowEngine
+from agentflow import Agent, AgentConfig, WorkflowConfig, WorkflowStep, WorkflowStepType
 
-# Create agent configuration
-config = AgentConfig(
-    name="my_agent",
-    type="generic",
-    parameters={
-        "max_retries": 3,
-        "timeout": 30
-    }
+# Create workflow configuration
+workflow_config = WorkflowConfig(
+    id="test-workflow",
+    name="test_workflow",
+    steps=[
+        WorkflowStep(
+            id="step-1",
+            name="transform_step",
+            type=WorkflowStepType.TRANSFORM,
+            description="Data transformation step",
+            config={
+                "strategy": "standard",
+                "params": {
+                    "method": "standard",
+                    "with_mean": True,
+                    "with_std": True
+                }
+            }
+        )
+    ]
 )
 
-# Create agent
-agent = Agent(config)
+# Create agent configuration
+agent_config = AgentConfig(
+    name="test_agent",
+    type="data_science",
+    workflow=workflow_config
+)
 
-# Create workflow engine
-engine = WorkflowEngine()
+# Create and initialize agent
+agent = Agent(config=agent_config)
+await agent.initialize()
 
-# Register workflow
-await engine.register_workflow(agent)
-
-# Execute workflow
-result = await engine.execute_workflow(agent.id, {
-    "input": "Hello, World!"
-})
+# Process data
+result = await agent.execute({"data": your_data})
 ```
 
 ## Configuration
@@ -76,32 +114,57 @@ Agents and workflows can be configured using Python dictionaries or YAML files:
 
 ```yaml
 AGENT:
-  name: my_agent
-  type: generic
+  name: data_science_agent
+  type: data_science
   version: 1.0.0
-  parameters:
-    max_retries: 3
-    timeout: 30
+  mode: sequential
 
 MODEL:
-  name: gpt-3
   provider: openai
-  version: 1.0.0
+  name: gpt-4
+  temperature: 0.7
+  max_tokens: 4096
 
 WORKFLOW:
-  max_iterations: 100
-  timeout: 3600
-  distributed: false
-  logging_level: INFO
+  id: transform-workflow
+  name: Data Transformation Workflow
+  max_iterations: 5
+  timeout: 30
+  steps:
+    - id: step-1
+      name: feature_engineering
+      type: transform
+      description: Feature engineering step
+      config:
+        strategy: standard
+        params:
+          method: standard
+          with_mean: true
+          with_std: true
+```
+
+## Testing
+
+Run the test suite:
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test categories
+pytest tests/unit/
+pytest tests/core/
+pytest tests/performance/
 ```
 
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+3. Write tests for your changes
+4. Implement your changes
+5. Run the test suite
+6. Create a Pull Request
 
 ## License
 

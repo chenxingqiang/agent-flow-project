@@ -2,15 +2,23 @@
 
 ## Overview
 
-AgentFlow is a powerful and flexible AI Agent Workflow Management System that enables the creation, configuration, and management of intelligent agents. It provides a comprehensive framework for building agent-based applications with features like dynamic configuration, advanced visualization, and real-time monitoring.
+AgentFlow is a powerful and flexible AI Agent Workflow Management System that enables the creation, configuration, and management of intelligent agents. It provides a comprehensive framework for building agent-based applications with features like dynamic configuration, workflow management, and extensive testing capabilities.
+
+## Latest Version
+
+Current version: v0.1.1
+- Fixed workflow transform functions to handle step and context parameters
+- Added feature engineering and outlier removal transforms
+- Improved test suite and type hints
+- Enhanced error handling and validation
 
 ## Table of Contents
 
 1. [Installation](#installation)
 2. [Core Components](#core-components)
-3. [Configuration](#configuration)
-4. [API Reference](#api-reference)
-5. [Visualization](#visualization)
+3. [Workflow Management](#workflow-management)
+4. [Testing Framework](#testing-framework)
+5. [API Reference](#api-reference)
 6. [Examples](#examples)
 7. [Development](#development)
 
@@ -29,198 +37,191 @@ pip install -r requirements.txt
 
 ### Agent Configuration
 
-The system uses a flexible DSL (Domain Specific Language) for configuring agents:
+The system uses a flexible configuration system for agents:
 
 ```python
 from agentflow.core.config import AgentConfig
+from agentflow.core.workflow_types import WorkflowConfig, WorkflowStep, WorkflowStepType
 
-agent_config = {
-    "agent": {
-        "name": "research_agent",
-        "version": "1.0.0",
-        "type": "research"
-    },
-    "input_specification": {
-        "MODES": ["DIRECT_INPUT", "CONTEXT_INJECTION"],
-        "TYPES": {
-            "CONTEXT": {
-                "sources": ["PREVIOUS_AGENT_OUTPUT"]
-            }
-        }
-    },
-    "output_specification": {
-        "MODES": ["RETURN", "FORWARD"],
-        "STRATEGIES": {
-            "RETURN": {
-                "options": ["FULL_RESULT"]
-            }
-        }
-    }
-}
-
-config = AgentConfig(**agent_config)
-```
-
-### Input/Output Processing
-
-The system provides flexible input and output processing:
-
-```python
-from agentflow.core.input_processor import InputProcessor
-from agentflow.core.output_processor import OutputProcessor
-
-# Process input
-input_processor = InputProcessor(config.input_specification)
-processed_input = input_processor.process_input(data, mode="DIRECT_INPUT")
-
-# Process output
-output_processor = OutputProcessor(config.output_specification)
-processed_output = output_processor.process_output(result, mode="RETURN")
-```
-
-### Flow Control
-
-Control the flow of data and execution:
-
-```python
-from agentflow.core.flow_controller import FlowController
-
-flow_config = {
-    "ROUTING_RULES": {
-        "DEFAULT_BEHAVIOR": "FORWARD_ALL",
-        "CONDITIONAL_ROUTING": {
-            "CONDITIONS": [
-                {
-                    "when": "data.get('type') == 'special'",
-                    "action": "TRANSFORM"
+# Create workflow configuration
+workflow_config = WorkflowConfig(
+    id="test-workflow",
+    name="test_workflow",
+    steps=[
+        WorkflowStep(
+            id="step-1",
+            name="transform_step",
+            type=WorkflowStepType.TRANSFORM,
+            description="Data transformation step",
+            config={
+                "strategy": "standard",
+                "params": {
+                    "method": "standard",
+                    "with_mean": True,
+                    "with_std": True
                 }
-            ]
-        }
-    }
-}
+            }
+        )
+    ]
+)
 
-controller = FlowController(flow_config)
-result = controller.route_data(data)
+# Create agent configuration
+agent_config = AgentConfig(
+    name="test_agent",
+    type="data_science",
+    workflow=workflow_config
+)
 ```
 
-## Visualization
+## Workflow Management
 
-AgentFlow provides powerful visualization capabilities through integration with ell2a.studio.
+### Transform Functions
 
-### Basic Usage
+Transform functions are a key component of workflow steps. They must accept both step and context parameters:
 
 ```python
-from agentflow.visualization.service import VisualizationService
-
-# Create visualization service
-service = VisualizationService({
-    "api_key": "your_ell2a_studio_api_key",
-    "project_id": "your_project_id"
-})
-
-# Start service
-service.start()
+async def feature_engineering_transform(step: WorkflowStep, context: Dict[str, Any]) -> Dict[str, Any]:
+    """Feature engineering transform function.
+    
+    Args:
+        step: The workflow step being executed
+        context: The execution context containing the data
+        
+    Returns:
+        Dict containing the transformed data
+    """
+    data = context["data"]
+    scaler = StandardScaler(
+        with_mean=step.config.params["with_mean"],
+        with_std=step.config.params["with_std"]
+    )
+    transformed_data = scaler.fit_transform(data)
+    return {"data": transformed_data}
 ```
 
-### Real-time Visualization
+### Workflow Execution
 
 ```python
-import asyncio
-import websockets
-import json
+from agentflow.core.workflow_executor import WorkflowExecutor
 
-async def monitor_agent():
-    async with websockets.connect("ws://localhost:8001/live") as websocket:
-        while True:
-            # Send agent status
-            await websocket.send(json.dumps({
-                "type": "agent_status",
-                "data": {"status": "processing"}
-            }))
-            
-            # Receive updates
-            response = await websocket.recv()
-            print(json.loads(response))
-            
-            await asyncio.sleep(1)
+# Create executor
+executor = WorkflowExecutor(workflow_config)
+await executor.initialize()
 
-# Run monitoring
-asyncio.run(monitor_agent())
+# Execute workflow
+result = await executor.execute({"data": your_data})
+```
+
+## Testing Framework
+
+### Unit Tests
+
+```python
+import pytest
+from agentflow.core.workflow_types import WorkflowConfig, WorkflowStep
+
+@pytest.mark.asyncio
+async def test_workflow_execution():
+    """Test basic workflow execution."""
+    config = WorkflowConfig(
+        id="test-workflow",
+        name="test_workflow",
+        steps=[
+            WorkflowStep(
+                id="step-1",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="standard",
+                    params={"execute": your_transform_function}
+                )
+            )
+        ]
+    )
+    executor = WorkflowExecutor(config)
+    await executor.initialize()
+    result = await executor.execute({"data": test_data})
+    assert result["status"] == "success"
+```
+
+### Performance Tests
+
+```python
+@pytest.mark.asyncio
+async def test_workflow_performance():
+    """Test workflow performance."""
+    workflow = WorkflowConfig(
+        id="perf-workflow",
+        name="performance_workflow",
+        steps=[
+            WorkflowStep(
+                id="step-1",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="feature_engineering",
+                    params={
+                        "method": "standard",
+                        "with_mean": True,
+                        "with_std": True,
+                        "execute": feature_engineering_transform
+                    }
+                )
+            )
+        ]
+    )
+    start_time = time.time()
+    result = await workflow.execute({"data": large_dataset})
+    execution_time = time.time() - start_time
+    assert execution_time < 5  # Should complete within 5 seconds
 ```
 
 ## API Reference
 
-### REST API Endpoints
+### Core Components
 
-- `POST /visualize/agent`: Visualize agent configuration
-- `POST /visualize/workflow`: Visualize workflow configuration
-- `WS /live`: WebSocket endpoint for real-time updates
+- `AgentConfig`: Configuration for agents
+- `WorkflowConfig`: Configuration for workflows
+- `WorkflowStep`: Individual workflow step
+- `WorkflowExecutor`: Executes workflows
+- `Agent`: Base agent class
 
-### Python API
+### Transform Types
 
-#### Agent Configuration
-
-```python
-from agentflow.core.config import AgentConfig
-
-# Create configuration
-config = AgentConfig.from_dict({...})
-
-# Convert to dictionary
-config_dict = config.to_dict()
-```
-
-#### Visualization Components
-
-```python
-from agentflow.visualization.components import VisualGraph, VisualNode, VisualEdge
-
-# Create graph
-graph = VisualGraph()
-
-# Add nodes and edges
-graph.add_node(VisualNode(...))
-graph.add_edge(VisualEdge(...))
-
-# Convert to ell2a.studio format
-ell2a_data = graph.to_ell2a_format()
-```
+- `feature_engineering_transform`: Feature engineering transform
+- `outlier_removal_transform`: Outlier removal transform
+- `text_transform`: Text processing transform
 
 ## Examples
 
-### Basic Agent Setup
+### Basic Workflow
 
 ```python
-from agentflow.core.agent import Agent
-from agentflow.core.config import AgentConfig
+from agentflow import Agent, AgentConfig, WorkflowConfig
 
-# Create agent configuration
-config = AgentConfig(...)
+# Create configuration
+config = AgentConfig(
+    name="example_agent",
+    type="data_science",
+    workflow=WorkflowConfig(
+        id="example-workflow",
+        steps=[
+            WorkflowStep(
+                id="transform",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="feature_engineering",
+                    params={"execute": feature_engineering_transform}
+                )
+            )
+        ]
+    )
+)
 
-# Initialize agent
+# Create agent
 agent = Agent(config)
+await agent.initialize()
 
 # Process data
-result = agent.process({"input": "data"})
-```
-
-### Workflow Visualization
-
-```python
-from agentflow.visualization.renderer import AgentVisualizer
-
-# Create visualizer
-visualizer = AgentVisualizer()
-
-# Visualize workflow
-visual_data = visualizer.visualize_workflow({
-    "name": "Research Workflow",
-    "steps": [
-        {"name": "Data Collection", "type": "input"},
-        {"name": "Analysis", "type": "processor"},
-        {"name": "Report Generation", "type": "output"}
-    ]
-})
+result = await agent.execute({"data": your_data})
 ```
 
 ## Development
@@ -230,29 +231,28 @@ visual_data = visualizer.visualize_workflow({
 ```
 agentflow/
 ├── core/
-│   ├── agent.py
+│   ├── base_types.py
 │   ├── config.py
-│   ├── input_processor.py
-│   ├── output_processor.py
-│   └── flow_controller.py
-├── visualization/
-│   ├── components.py
-│   ├── renderer.py
-│   └── service.py
-├── api/
-│   └── base_service.py
-└── examples/
-    └── workflow_example.py
+│   ├── workflow.py
+│   └── workflow_executor.py
+├── transformations/
+│   └── text.py
+└── tests/
+    ├── unit/
+    ├── core/
+    └── performance/
 ```
 
 ### Running Tests
 
 ```bash
 # Run all tests
-pytest tests/
+pytest
 
-# Run specific test file
-pytest tests/core/test_agent.py
+# Run specific test categories
+pytest tests/unit/
+pytest tests/core/
+pytest tests/performance/
 
 # Run with coverage
 pytest --cov=agentflow tests/
