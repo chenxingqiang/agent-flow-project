@@ -23,31 +23,45 @@ from agentflow.core.workflow_types import WorkflowConfig
 class TestAgentConfiguration(unittest.TestCase):
     """Test cases for agent configuration and initialization."""
 
+    class ResearchAgent(Agent):
+        def __init__(self, config: Optional[Union[Dict[str, Any], AgentConfig]] = None):
+            super().__init__(config)
+            # Handle both dictionary and Pydantic model configurations
+            if isinstance(config, dict):
+                self.research_domains = config.get('DOMAIN_CONFIG', {}).get('research_domains', [])
+            elif isinstance(config, AgentConfig):
+                self.research_domains = config.domain_config.get('research_domains', [])
+            else:
+                self.research_domains = []
+
+        def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+            return {"result": "research_processed"}
+
+    class DataScienceAgent(Agent):
+        def __init__(self, config: Optional[Union[Dict[str, Any], AgentConfig]] = None):
+            super().__init__(config)
+            # Handle both dictionary and Pydantic model configurations
+            if isinstance(config, dict):
+                domain_config = config.get('DOMAIN_CONFIG', {})
+                self.metrics = domain_config.get('metrics', [])
+                self.model_type = domain_config.get('model_type')
+            elif isinstance(config, AgentConfig):
+                self.metrics = config.domain_config.get('metrics', [])
+                self.model_type = config.domain_config.get('model_type')
+            else:
+                self.metrics = []
+                self.model_type = None
+
+        def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+            return {"result": "data_science_processed"}
+
     def setUp(self):
         """Set up test cases."""
-        # Define agent classes
-        class ResearchAgent(Agent):
-            def __init__(self, config: Union[Dict[str, Any], str, AgentConfig]):
-                super().__init__(config)
-                self.research_domains = self.domain_config.get("research_domains", [])
+        # Register custom agent types
+        AgentFactory.register_agent(AgentType.RESEARCH.value, self.ResearchAgent)
+        AgentFactory.register_agent(AgentType.DATA_SCIENCE.value, self.DataScienceAgent)
 
-            def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-                return {"result": "research_processed"}
-
-        class DataScienceAgent(Agent):
-            def __init__(self, config: Union[Dict[str, Any], str, AgentConfig]):
-                super().__init__(config)
-                self.metrics = self.domain_config.get("metrics", [])
-                self.model_type = self.domain_config.get("model_type")
-
-            def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-                return {"result": "data_science_processed"}
-
-        # Register agent types
-        AgentFactory.register_agent(AgentType.RESEARCH.value, ResearchAgent)
-        AgentFactory.register_agent(AgentType.DATA_SCIENCE.value, DataScienceAgent)
-
-        # Set up configurations
+        # Configurations for different agent types
         self.research_config = {
             "AGENT": {
                 "type": AgentType.RESEARCH.value,
@@ -64,7 +78,17 @@ class TestAgentConfiguration(unittest.TestCase):
                 "name": "research_workflow",
                 "max_iterations": 10,
                 "timeout": 300,
-                "steps": []
+                "steps": [
+                    {
+                        "id": "default-step-1",
+                        "name": "default_step",
+                        "type": "agent",
+                        "description": "Default research workflow step",
+                        "config": {
+                            "strategy": "custom"
+                        }
+                    }
+                ]
             },
             "TRANSFORMATIONS": {
                 "input": [
@@ -98,7 +122,17 @@ class TestAgentConfiguration(unittest.TestCase):
                 "name": "data_science_workflow",
                 "max_iterations": 10,
                 "timeout": 300,
-                "steps": []
+                "steps": [
+                    {
+                        "id": "default-step-1",
+                        "name": "default_step",
+                        "type": "agent",
+                        "description": "Default data science workflow step",
+                        "config": {
+                            "strategy": "custom"
+                        }
+                    }
+                ]
             },
             "TRANSFORMATIONS": {
                 "input": [
@@ -124,7 +158,7 @@ class TestAgentConfiguration(unittest.TestCase):
 
         # Verify agent configuration
         self.assertEqual(research_agent.name, "QuantumResearchAgent")
-        self.assertEqual(research_agent.type, AgentType.RESEARCH.value)
+        self.assertEqual(research_agent.type, "research")
         self.assertEqual(research_agent.mode, "sequential")
         self.assertEqual(research_agent.research_domains, ["quantum computing"])
 
@@ -135,7 +169,7 @@ class TestAgentConfiguration(unittest.TestCase):
 
         # Verify agent configuration
         self.assertEqual(data_science_agent.name, "FinancialDataAgent")
-        self.assertEqual(data_science_agent.type, AgentType.DATA_SCIENCE.value)
+        self.assertEqual(data_science_agent.type, "data_science")
         self.assertEqual(data_science_agent.mode, "sequential")
         self.assertEqual(data_science_agent.metrics, ["r2_score", "mse"])
         self.assertEqual(data_science_agent.model_type, "regression")
@@ -144,14 +178,25 @@ class TestAgentConfiguration(unittest.TestCase):
         """Test agent factory registration and agent creation."""
         # Register a custom agent type
         class CustomAgent(Agent):
-            def __init__(self, config: Union[Dict[str, Any], str, AgentConfig]):
+            def __init__(self, config: Optional[Union[Dict[str, Any], AgentConfig]] = None):
                 super().__init__(config)
                 self.custom_attribute = "custom"
+                # Handle both dictionary and Pydantic model configurations
+                if isinstance(config, dict):
+                    domain_config = config.get('DOMAIN_CONFIG', {})
+                    self.metrics = domain_config.get('metrics', [])
+                    self.research_domains = domain_config.get('research_domains', [])
+                elif isinstance(config, AgentConfig):
+                    self.metrics = getattr(config.domain_config, 'metrics', [])
+                    self.research_domains = getattr(config.domain_config, 'research_domains', [])
+                else:
+                    self.metrics = []
+                    self.research_domains = []
 
             def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
                 return {"result": "custom_processed"}
 
-        AgentFactory.register_agent(AgentType.CUSTOM.value, CustomAgent)
+        AgentFactory.register_agent("custom", CustomAgent)
 
         # Create a configuration for the custom agent
         custom_config = {
@@ -170,7 +215,21 @@ class TestAgentConfiguration(unittest.TestCase):
                 "name": "custom_workflow",
                 "max_iterations": 10,
                 "timeout": 300,
-                "steps": []
+                "steps": [
+                    {
+                        "id": "default-step-1",
+                        "name": "default_step",
+                        "type": "agent",
+                        "description": "Default custom workflow step",
+                        "config": {
+                            "strategy": "custom"
+                        }
+                    }
+                ]
+            },
+            "DOMAIN_CONFIG": {
+                "metrics": [],
+                "research_domains": []
             }
         }
 
@@ -182,6 +241,8 @@ class TestAgentConfiguration(unittest.TestCase):
         self.assertEqual(custom_agent.type, AgentType.CUSTOM.value)
         self.assertEqual(custom_agent.mode, "sequential")
         self.assertEqual(custom_agent.custom_attribute, "custom")
+        self.assertEqual(custom_agent.metrics, [])
+        self.assertEqual(custom_agent.research_domains, [])
 
         # Test processing
         result = custom_agent.process({"input": "test"})

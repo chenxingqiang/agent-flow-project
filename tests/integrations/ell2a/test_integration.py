@@ -1,16 +1,22 @@
-"""Tests for ELL2A integration module."""
+"""Tests for ELL2A integration functionality."""
 
 import pytest
-import time
-from agentflow.ell2a.integration import ELL2AIntegration
-from agentflow.ell2a.types.message import Message, MessageRole
+import asyncio
+from typing import Dict, Any
+from agentflow.core.ell2a_integration import ELL2AIntegration
+from agentflow.ell2a.types.message import Message, MessageRole, MessageType
 
 @pytest.fixture
 def ell2a_integration():
-    """Create an ELL2AIntegration instance for testing."""
-    # Clear the singleton instance before each test
-    ELL2AIntegration._instance = None
+    """Create ELL2A integration instance."""
     integration = ELL2AIntegration()
+    integration.configure({
+        "enabled": True,
+        "tracking_enabled": True,
+        "model": {
+            "name": "test-model"
+        }
+    })
     return integration
 
 def test_ell2a_integration_initial_state(ell2a_integration):
@@ -18,21 +24,10 @@ def test_ell2a_integration_initial_state(ell2a_integration):
     assert ell2a_integration.enabled is True
     assert ell2a_integration.tracking_enabled is True
     assert ell2a_integration.config == {
-        "default_model": "gpt-4",
-        "temperature": 0.7,
-        "max_tokens": 2000,
-        "simple": {
-            "max_retries": 3,
-            "retry_delay": 1.0,
-            "timeout": 30.0
-        },
-        "complex": {
-            "max_retries": 3,
-            "retry_delay": 1.0,
-            "timeout": 60.0,
-            "stream": True,
-            "track_performance": True,
-            "track_memory": True
+        "enabled": True,
+        "tracking_enabled": True,
+        "model": {
+            "name": "test-model"
         }
     }
     assert ell2a_integration.metrics == {
@@ -62,7 +57,10 @@ async def test_ell2a_process_message(ell2a_integration):
     # Create an input message
     input_message = Message(
         role=MessageRole.USER,
-        content="Test message"
+        content="Test message",
+        metadata={
+            "type": MessageType.TEXT
+        }
     )
     
     # Process the message
@@ -75,7 +73,9 @@ async def test_ell2a_process_message(ell2a_integration):
     assert isinstance(response, Message)
     assert response.role == MessageRole.ASSISTANT
     assert response.content == input_message.content
-    assert "model" in response.metadata
+    assert response.metadata["model"] == "test-model"
+    assert response.metadata["type"] == MessageType.RESULT
+    assert response.metadata["status"] == "success"
     assert "timestamp" in response.metadata
 
 def test_ell2a_integration_disabled():
@@ -88,13 +88,16 @@ def test_ell2a_integration_disabled():
     # Create an input message
     input_message = Message(
         role=MessageRole.USER,
-        content="Test message"
+        content="Test message",
+        type=MessageType.TEXT
     )
     
     # Process the message
     async def test_disabled():
         response = await integration.process_message(input_message)
-        assert response == input_message
+        assert response.role == input_message.role
+        assert response.content == input_message.content
+        assert response.type == input_message.type
     
     # Run the async test
     import asyncio

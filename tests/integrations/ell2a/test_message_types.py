@@ -44,17 +44,19 @@ def test_message_creation():
     assert msg1.content == "Hello"
     assert msg1.timestamp is not None
     assert isinstance(msg1.timestamp, float)
-    assert msg1.metadata == {}
+    assert msg1.metadata is None
 
     # Test with content block
     content_block = ContentBlock(text="Test block")
     msg2 = Message(
-        role=MessageRole.ASSISTANT, 
-        content=[content_block],
+        role=MessageRole.ASSISTANT,
+        content=[content_block],  # Pass as list
         metadata={"source": "test"}
     )
     assert msg2.role == MessageRole.ASSISTANT
-    assert isinstance(msg2.content, list)
+    assert isinstance(msg2.content, list)  # Check for list type
+    assert len(msg2.content) == 1
+    assert isinstance(msg2.content[0], ContentBlock)
     assert msg2.content[0].text == "Test block"
     assert msg2.metadata == {"source": "test"}
 

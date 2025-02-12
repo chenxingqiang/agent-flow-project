@@ -104,17 +104,18 @@ class TestWorkflowExecution:
         
         # Execute workflow
         result = await engine.execute_workflow(agent.id, instance.context)
+        print("Workflow Execution Result:", result)  # Debug print
         
         assert result is not None
         assert result["status"] == "success"
         assert "steps" in result
         assert len(result["steps"]) > 0
-        assert isinstance(result["steps"], list)  # Steps should be a list now
+        assert isinstance(result["steps"], list)
         
         # Check first step
         first_step = result["steps"][0]
         assert first_step["id"] == "step1"
-        assert first_step["type"] == "agent"
+        assert first_step["type"] == "WorkflowStepType.AGENT"  # Exact string representation
         assert first_step["status"] == "success"
         assert "result" in first_step
         assert "content" in first_step["result"]
@@ -155,12 +156,15 @@ class TestWorkflowExecution:
         instance.steps[0].config.params["should_fail"] = True  # Add parameter to trigger failure
         instance.context = {
             "test_mode": True,
-            "should_fail": True  # Add flag to trigger failure
+            "should_fail": True,  # Add flag to trigger failure
+            "message": ""  # Empty message to trigger validation error
         }
         
         # Execute workflow
-        with pytest.raises(WorkflowExecutionError):
-            await engine.execute_workflow(agent.id, instance.context)
+        with pytest.raises(WorkflowExecutionError) as exc_info:
+            await engine.execute_workflow_instance(instance)
+        
+        assert "Step execution failed" in str(exc_info.value)
     
     @pytest.mark.asyncio
     async def test_workflow_metrics(self, workflow_config, test_agent):

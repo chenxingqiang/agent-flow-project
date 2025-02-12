@@ -89,25 +89,11 @@ def test_variable_extraction(test_data_dir):
     agent_config = AgentConfig(
         id="test-agent",
         name="Test Agent",
+        type="generic",
         domain_config={
             "test_var": "test_value"
         },
-        workflow={
-            "id": "test-workflow",
-            "name": "Test Workflow",
-            "steps": [
-                {
-                    "id": "step1",
-                    "name": "test_step",
-                    "type": "transform",
-                    "description": "Test transformation step",
-                    "config": {
-                        "strategy": "custom",
-                        "params": {}
-                    }
-                }
-            ]
-        }
+        workflow=WorkflowConfig(test_mode=True)
     )
     config_manager.save_agent_config(agent_config)
     
@@ -116,8 +102,8 @@ def test_variable_extraction(test_data_dir):
     assert loaded_config.domain_config["test_var"] == "test_value"
 
 @pytest.mark.parametrize("config_update,expected_error", [
-    ({"invalid_key": "value"}, ValueError),
-    ({"variables": {"invalid_type": {"type": "invalid"}}}, ValueError),
+    ({"type": "invalid_type"}, ValueError),  # Invalid type value
+    ({"model_provider": "invalid_provider"}, ValueError),  # Invalid provider value
 ])
 def test_config_update_validation(test_data_dir, config_update, expected_error):
     """Test configuration update validation"""
@@ -126,12 +112,21 @@ def test_config_update_validation(test_data_dir, config_update, expected_error):
     # Create base agent config
     agent_config = AgentConfig(
         id="test-agent",
-        name="Test Agent"
+        name="Test Agent",
+        type="generic",
+        workflow=WorkflowConfig(test_mode=True)
     )
     config_manager.save_agent_config(agent_config)
     
     # Try to update with invalid config
     with pytest.raises(expected_error):
         loaded_config = config_manager.load_agent_config("test-agent")
-        for key, value in config_update.items():
-            setattr(loaded_config, key, value)
+        if loaded_config is None:
+            raise ValueError("Failed to load config")
+        
+        # Create a new config dict with the updates
+        config_dict = loaded_config.model_dump()
+        config_dict.update(config_update)
+        
+        # Try to validate the updated config
+        AgentConfig.model_validate(config_dict)

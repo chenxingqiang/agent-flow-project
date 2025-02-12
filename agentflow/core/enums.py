@@ -26,7 +26,7 @@ class WorkflowStatus(str, Enum):
     """Workflow status enum."""
     PENDING = "pending"
     RUNNING = "running"
-    COMPLETED = "completed"
+    SUCCESS = "success"
     FAILED = "failed"
     STOPPED = "stopped"
     

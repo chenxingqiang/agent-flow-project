@@ -90,8 +90,9 @@ async def test_workflow_execution_basic(workflow_engine, agent):
     
     result = await engine.execute_workflow(workflow_id, input_data)
     assert result is not None
-    assert result["status"] == "completed"
-    assert "content" in result
+    assert "steps" in result
+    assert "test-step-1" in result["steps"]
+    assert result["steps"]["test-step-1"]["status"] == "success"
 
 @pytest.mark.asyncio
 async def test_empty_workflow(workflow_engine):
@@ -173,7 +174,7 @@ async def test_parallel_workflow_execution(workflow_engine, agent_config):
     
     results = await asyncio.gather(*tasks)
     assert all(result is not None for result in results)
-    assert all(result["status"] == "completed" for result in results)
+    assert all(result["status"] == "success" for result in results)
     
     # Cleanup agents
     for agent in agents:

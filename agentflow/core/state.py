@@ -41,10 +41,19 @@ class StateManager:
 class AgentStatus(str, Enum):
     """Agent status."""
 
+    PENDING = "pending"
     IDLE = "idle"
+    PROCESSING = "processing"
     RUNNING = "running"
     SUCCESS = "success"
     FAILED = "failed"
+    CANCELLED = "cancelled"
+    PAUSED = "paused"
+    ERROR = "error"
+    INITIALIZED = "initialized"
+    COMPLETED = "completed"
+    STOPPED = "stopped"
+    WAITING = "waiting"
 
 
 class AgentState(BaseModel):

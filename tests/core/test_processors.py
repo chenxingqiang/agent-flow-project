@@ -155,6 +155,27 @@ async def test_transform_processor_process_data():
     assert list_result[1]["name_upper"] == "TEST2"
 
 @pytest.mark.asyncio
+async def test_transform_processor_error_handling():
+    """Test TransformProcessor error handling"""
+    processor = TransformProcessor({
+        "transformations": {
+            "missing_field": "$input.does_not_exist",
+            "nested_missing": "$input.nested.missing"
+        }
+    })
+    
+    result = await processor.process({
+        "id": 1,
+        "name": "Test"
+    })
+    
+    # Check that missing fields are handled gracefully
+    assert "missing_field" not in result.output
+    assert "nested_missing" not in result.output
+    assert "transformed_fields" in result.metadata
+    assert len(result.metadata["transformed_fields"]) == 0
+
+@pytest.mark.asyncio
 async def test_aggregate_processor():
     """Test AggregateProcessor functionality"""
     processor = AggregateProcessor({
@@ -284,24 +305,3 @@ async def test_processor_validation():
     output_schema = processor.get_output_schema()
     assert output_schema["type"] == "object"
     assert "properties" in output_schema
-
-@pytest.mark.asyncio
-async def test_transform_processor_error_handling():
-    """Test TransformProcessor error handling"""
-    processor = TransformProcessor({
-        "transformations": {
-            "missing_field": "$input.does_not_exist",
-            "nested_missing": "$input.nested.missing"
-        }
-    })
-    
-    result = await processor.process({
-        "id": 1,
-        "name": "Test"
-    })
-    
-    # Check that missing fields are handled gracefully
-    assert "missing_field" not in result.output
-    assert "nested_missing" not in result.output
-    assert "transformed_fields" in result.metadata
-    assert len(result.metadata["transformed_fields"]) == 0

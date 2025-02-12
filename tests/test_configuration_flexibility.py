@@ -39,7 +39,7 @@ def base_config():
                     "type": WorkflowStepType.RESEARCH_EXECUTION.value,
                     "description": "Perform research on the given topic",
                     "config": {
-                        "strategy": "research",
+                        "strategy": "standard",  # Changed from "research"
                         "params": {
                             "max_retries": 3,
                             "retry_delay": 1.0,
@@ -216,7 +216,7 @@ def test_flexible_configuration_loading(base_config):
                         "type": WorkflowStepType.RESEARCH_EXECUTION.value,
                         "description": "Research execution step for testing",
                         "config": {
-                            "strategy": "research",
+                            "strategy": "standard",  # Changed from "research"
                             "params": {}
                         }
                     }

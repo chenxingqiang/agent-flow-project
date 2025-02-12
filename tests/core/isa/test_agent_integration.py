@@ -64,7 +64,34 @@ class TestAgentISAIntegration:
     @pytest.mark.asyncio
     async def test_initialization(self, sample_config):
         """Test agent initialization with ISA."""
-        config = AgentConfig.from_dict(sample_config)
+        # Extract agent config from nested structure
+        config_dict = {
+            "name": sample_config["AGENT"]["name"],
+            "type": sample_config["AGENT"]["type"],
+            "system_prompt": sample_config["AGENT"]["system_prompt"],
+            "model": sample_config["MODEL"],
+            "workflow": {
+                "id": "test-workflow",
+                "name": "Test Workflow",
+                "max_iterations": sample_config["WORKFLOW"]["max_iterations"],
+                "steps": [
+                    {
+                        "id": "test-step-1",
+                        "name": "test_step",
+                        "type": "agent",
+                        "description": "Test step for ISA integration",
+                        "config": {
+                            "strategy": "standard",
+                            "params": {}
+                        }
+                    }
+                ]
+            },
+            "domain_config": sample_config["domain_config"],
+            "isa_config_path": sample_config["isa_config_path"],
+            "test_mode": True
+        }
+        config = AgentConfig(**config_dict)
         agent = Agent(config)
         await agent.initialize()
         
@@ -74,7 +101,34 @@ class TestAgentISAIntegration:
     @pytest.mark.asyncio
     async def test_instruction_selection(self, sample_config):
         """Test instruction selection based on input."""
-        config = AgentConfig.from_dict(sample_config)
+        # Extract agent config from nested structure
+        config_dict = {
+            "name": sample_config["AGENT"]["name"],
+            "type": sample_config["AGENT"]["type"],
+            "system_prompt": sample_config["AGENT"]["system_prompt"],
+            "model": sample_config["MODEL"],
+            "workflow": {
+                "id": "test-workflow",
+                "name": "Test Workflow",
+                "max_iterations": sample_config["WORKFLOW"]["max_iterations"],
+                "steps": [
+                    {
+                        "id": "test-step-1",
+                        "name": "test_step",
+                        "type": "agent",
+                        "description": "Test step for ISA integration",
+                        "config": {
+                            "strategy": "standard",
+                            "params": {}
+                        }
+                    }
+                ]
+            },
+            "domain_config": sample_config["domain_config"],
+            "isa_config_path": sample_config["isa_config_path"],
+            "test_mode": True
+        }
+        config = AgentConfig(**config_dict)
         agent = Agent(config)
         await agent.initialize()
         
@@ -88,7 +142,34 @@ class TestAgentISAIntegration:
     @pytest.mark.asyncio
     async def test_instruction_execution(self, sample_config):
         """Test executing selected instructions."""
-        config = AgentConfig.from_dict(sample_config)
+        # Extract agent config from nested structure
+        config_dict = {
+            "name": sample_config["AGENT"]["name"],
+            "type": sample_config["AGENT"]["type"],
+            "system_prompt": sample_config["AGENT"]["system_prompt"],
+            "model": sample_config["MODEL"],
+            "workflow": {
+                "id": "test-workflow",
+                "name": "Test Workflow",
+                "max_iterations": sample_config["WORKFLOW"]["max_iterations"],
+                "steps": [
+                    {
+                        "id": "test-step-1",
+                        "name": "test_step",
+                        "type": "agent",
+                        "description": "Test step for ISA integration",
+                        "config": {
+                            "strategy": "standard",
+                            "params": {}
+                        }
+                    }
+                ]
+            },
+            "domain_config": sample_config["domain_config"],
+            "isa_config_path": sample_config["isa_config_path"],
+            "test_mode": True
+        }
+        config = AgentConfig(**config_dict)
         agent = Agent(config)
         await agent.initialize()
 
@@ -99,7 +180,7 @@ class TestAgentISAIntegration:
         # Prepare context for instruction execution
         context = {
             "input_data": input_data,
-            "agent_config": config.to_dict(),
+            "agent_config": config.model_dump(),  # Use model_dump instead of to_dict
             "timestamp": datetime.now().isoformat()
         }
 
@@ -117,7 +198,34 @@ class TestAgentISAIntegration:
     @pytest.mark.asyncio
     async def test_error_handling(self, sample_config):
         """Test error handling in ISA integration."""
-        config = AgentConfig.from_dict(sample_config)
+        # Extract agent config from nested structure
+        config_dict = {
+            "name": sample_config["AGENT"]["name"],
+            "type": sample_config["AGENT"]["type"],
+            "system_prompt": sample_config["AGENT"]["system_prompt"],
+            "model": sample_config["MODEL"],
+            "workflow": {
+                "id": "test-workflow",
+                "name": "Test Workflow",
+                "max_iterations": sample_config["WORKFLOW"]["max_iterations"],
+                "steps": [
+                    {
+                        "id": "test-step-1",
+                        "name": "test_step",
+                        "type": "agent",
+                        "description": "Test step for ISA integration",
+                        "config": {
+                            "strategy": "standard",
+                            "params": {}
+                        }
+                    }
+                ]
+            },
+            "domain_config": sample_config["domain_config"],
+            "isa_config_path": sample_config["isa_config_path"],
+            "test_mode": True
+        }
+        config = AgentConfig(**config_dict)
         agent = Agent(config)
         await agent.initialize()
         
@@ -126,15 +234,54 @@ class TestAgentISAIntegration:
             agent.isa_manager.get_instruction("nonexistent")
             
         # Test instruction execution error handling
-        instruction = agent.isa_manager.get_instruction("init")
-        instruction.params = {"invalid": "params"}
+        # Create an invalid instruction that should fail validation
+        invalid_instruction = Instruction(
+            id="test_invalid",
+            name="test_invalid",
+            type=InstructionType.CONTROL,
+            params={"required_param": None},  # Invalid parameter value
+            description="Invalid instruction for testing"
+        )
+        
+        # Execute with minimal context to trigger validation error
         with pytest.raises(Exception):
-            agent.isa_manager.execute_instruction(instruction)
+            await agent.isa_manager.execute_instruction(invalid_instruction, {
+                "input_data": {},
+                "agent_config": config.model_dump(),
+                "timestamp": datetime.now().isoformat()
+            })
             
     @pytest.mark.asyncio
     async def test_instruction_optimization(self, sample_config):
         """Test RL-based instruction optimization."""
-        config = AgentConfig.from_dict(sample_config)
+        # Extract agent config from nested structure
+        config_dict = {
+            "name": sample_config["AGENT"]["name"],
+            "type": sample_config["AGENT"]["type"],
+            "system_prompt": sample_config["AGENT"]["system_prompt"],
+            "model": sample_config["MODEL"],
+            "workflow": {
+                "id": "test-workflow",
+                "name": "Test Workflow",
+                "max_iterations": sample_config["WORKFLOW"]["max_iterations"],
+                "steps": [
+                    {
+                        "id": "test-step-1",
+                        "name": "test_step",
+                        "type": "agent",
+                        "description": "Test step for ISA integration",
+                        "config": {
+                            "strategy": "standard",
+                            "params": {}
+                        }
+                    }
+                ]
+            },
+            "domain_config": sample_config["domain_config"],
+            "isa_config_path": sample_config["isa_config_path"],
+            "test_mode": True
+        }
+        config = AgentConfig(**config_dict)
         agent = Agent(config)
         await agent.initialize()
 
@@ -145,7 +292,7 @@ class TestAgentISAIntegration:
         # Prepare context for instruction execution
         context = {
             "input_data": input_data,
-            "agent_config": config.to_dict(),
+            "agent_config": config.model_dump(),  # Use model_dump instead of to_dict
             "timestamp": datetime.now().isoformat()
         }
 

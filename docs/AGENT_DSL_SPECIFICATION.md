@@ -20,11 +20,11 @@ Agent 配置由以下主要部分组成：
 
 ```json
 {
-    "AGENT": {
-        "NAME": "string",
-        "VERSION": "semver",
-        "TYPE": "string"
-    }
+  "AGENT": {
+    "NAME": "string",
+    "VERSION": "semver",
+    "TYPE": "string"
+  }
 }
 ```
 
@@ -38,26 +38,35 @@ Agent 配置由以下主要部分组成：
 
 ```json
 {
-    "INPUT_SPECIFICATION": {
-        "MODES": ["DIRECT_INPUT", "CONTEXT_INJECTION", "STREAM_INPUT", "REFERENCE_INPUT"],
-        "TYPES": {
-            "DIRECT": {},
-            "CONTEXT": {
-                "sources": ["PREVIOUS_AGENT_OUTPUT", "GLOBAL_MEMORY", "EXTERNAL_CONTEXT"]
-            },
-            "STREAM": {
-                "modes": ["REAL_TIME", "BATCH", "INCREMENTAL"]
-            },
-            "REFERENCE": {
-                "types": ["FILE_PATH", "DATABASE_QUERY", "MEMORY_POINTER"]
-            }
-        },
-        "VALIDATION": {
-            "STRICT_MODE": "boolean",
-            "SCHEMA_VALIDATION": "boolean",
-            "TRANSFORM_STRATEGIES": ["TYPE_COERCION", "DEFAULT_VALUE", "NULLABLE"]
-        }
+  "INPUT_SPECIFICATION": {
+    "MODES": [
+      "DIRECT_INPUT",
+      "CONTEXT_INJECTION",
+      "STREAM_INPUT",
+      "REFERENCE_INPUT"
+    ],
+    "TYPES": {
+      "DIRECT": {},
+      "CONTEXT": {
+        "sources": [
+          "PREVIOUS_AGENT_OUTPUT",
+          "GLOBAL_MEMORY",
+          "EXTERNAL_CONTEXT"
+        ]
+      },
+      "STREAM": {
+        "modes": ["REAL_TIME", "BATCH", "INCREMENTAL"]
+      },
+      "REFERENCE": {
+        "types": ["FILE_PATH", "DATABASE_QUERY", "MEMORY_POINTER"]
+      }
+    },
+    "VALIDATION": {
+      "STRICT_MODE": "boolean",
+      "SCHEMA_VALIDATION": "boolean",
+      "TRANSFORM_STRATEGIES": ["TYPE_COERCION", "DEFAULT_VALUE", "NULLABLE"]
     }
+  }
 }
 ```
 
@@ -71,27 +80,35 @@ Agent 配置由以下主要部分组成：
 
 ```json
 {
-    "OUTPUT_SPECIFICATION": {
-        "MODES": ["RETURN", "FORWARD", "STORE", "TRIGGER"],
-        "STRATEGIES": {
-            "RETURN": {
-                "options": ["FULL_RESULT", "PARTIAL_RESULT", "SUMMARY"]
-            },
-            "FORWARD": {
-                "routing_options": ["DIRECT_PASS", "TRANSFORM", "SELECTIVE_FORWARD"]
-            },
-            "STORE": {
-                "storage_types": ["GLOBAL_MEMORY", "TEMPORARY_CACHE", "PERSISTENT_STORAGE"]
-            },
-            "TRIGGER": {
-                "trigger_types": ["WORKFLOW_CONTINUATION", "PARALLEL_EXECUTION", "CONDITIONAL_BRANCH"]
-            }
-        },
-        "TRANSFORMATION": {
-            "ENABLED": "boolean",
-            "METHODS": ["FILTER", "MAP", "REDUCE", "AGGREGATE"]
-        }
+  "OUTPUT_SPECIFICATION": {
+    "MODES": ["RETURN", "FORWARD", "STORE", "TRIGGER"],
+    "STRATEGIES": {
+      "RETURN": {
+        "options": ["FULL_RESULT", "PARTIAL_RESULT", "SUMMARY"]
+      },
+      "FORWARD": {
+        "routing_options": ["DIRECT_PASS", "TRANSFORM", "SELECTIVE_FORWARD"]
+      },
+      "STORE": {
+        "storage_types": [
+          "GLOBAL_MEMORY",
+          "TEMPORARY_CACHE",
+          "PERSISTENT_STORAGE"
+        ]
+      },
+      "TRIGGER": {
+        "trigger_types": [
+          "WORKFLOW_CONTINUATION",
+          "PARALLEL_EXECUTION",
+          "CONDITIONAL_BRANCH"
+        ]
+      }
+    },
+    "TRANSFORMATION": {
+      "ENABLED": "boolean",
+      "METHODS": ["FILTER", "MAP", "REDUCE", "AGGREGATE"]
     }
+  }
 }
 ```
 
@@ -105,23 +122,23 @@ Agent 配置由以下主要部分组成：
 
 ```json
 {
-    "DATA_FLOW_CONTROL": {
-        "ROUTING_RULES": {
-            "DEFAULT_BEHAVIOR": "FORWARD_ALL",
-            "CONDITIONAL_ROUTING": {
-                "CONDITIONS": [
-                    {
-                        "WHEN": "条件表达式",
-                        "ACTION": "处理动作"
-                    }
-                ]
-            }
-        },
-        "ERROR_HANDLING": {
-            "STRATEGIES": ["SKIP", "RETRY", "FALLBACK", "COMPENSATE"],
-            "MAX_RETRIES": "integer"
-        }
+  "DATA_FLOW_CONTROL": {
+    "ROUTING_RULES": {
+      "DEFAULT_BEHAVIOR": "FORWARD_ALL",
+      "CONDITIONAL_ROUTING": {
+        "CONDITIONS": [
+          {
+            "WHEN": "条件表达式",
+            "ACTION": "处理动作"
+          }
+        ]
+      }
+    },
+    "ERROR_HANDLING": {
+      "STRATEGIES": ["SKIP", "RETRY", "FALLBACK", "COMPENSATE"],
+      "MAX_RETRIES": "integer"
     }
+  }
 }
 ```
 
@@ -135,16 +152,16 @@ Agent 配置由以下主要部分组成：
 
 ```json
 {
-    "INTERFACE_CONTRACTS": {
-        "INPUT_CONTRACT": {
-            "REQUIRED_FIELDS": ["string"],
-            "OPTIONAL_FIELDS": ["string"]
-        },
-        "OUTPUT_CONTRACT": {
-            "MANDATORY_FIELDS": ["string"],
-            "OPTIONAL_FIELDS": ["string"]
-        }
+  "INTERFACE_CONTRACTS": {
+    "INPUT_CONTRACT": {
+      "REQUIRED_FIELDS": ["string"],
+      "OPTIONAL_FIELDS": ["string"]
+    },
+    "OUTPUT_CONTRACT": {
+      "MANDATORY_FIELDS": ["string"],
+      "OPTIONAL_FIELDS": ["string"]
     }
+  }
 }
 ```
 
@@ -160,27 +177,27 @@ Agent 配置由以下主要部分组成：
 
 ```json
 {
-    "AGENT": {
-        "NAME": "Research Assistant",
-        "VERSION": "1.0.0",
-        "TYPE": "research"
-    },
-    "INPUT_SPECIFICATION": {
-        "MODES": ["CONTEXT_INJECTION"],
-        "TYPES": {
-            "CONTEXT": {
-                "sources": ["PREVIOUS_AGENT_OUTPUT"]
-            }
-        }
-    },
-    "OUTPUT_SPECIFICATION": {
-        "MODES": ["FORWARD"],
-        "STRATEGIES": {
-            "FORWARD": {
-                "routing_options": ["TRANSFORM"]
-            }
-        }
+  "AGENT": {
+    "NAME": "Research Assistant",
+    "VERSION": "1.0.0",
+    "TYPE": "research"
+  },
+  "INPUT_SPECIFICATION": {
+    "MODES": ["CONTEXT_INJECTION"],
+    "TYPES": {
+      "CONTEXT": {
+        "sources": ["PREVIOUS_AGENT_OUTPUT"]
+      }
     }
+  },
+  "OUTPUT_SPECIFICATION": {
+    "MODES": ["FORWARD"],
+    "STRATEGIES": {
+      "FORWARD": {
+        "routing_options": ["TRANSFORM"]
+      }
+    }
+  }
 }
 ```
 

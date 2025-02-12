@@ -12,11 +12,9 @@ from datetime import datetime
 import uuid
 
 from agentflow.agents.agent import Agent
-from agentflow.core.config import (
-    AgentConfig, 
-    ModelConfig, 
-    WorkflowStepType
-)
+from agentflow.core.agent_config import AgentConfig
+from agentflow.core.model_config import ModelConfig
+from agentflow.core.config import WorkflowStepType
 from agentflow.core.workflow_types import (
     Message,
     RetryPolicy,
@@ -44,6 +42,18 @@ logger = logging.getLogger(__name__)
 
 # Configure pytest-asyncio
 pytestmark = pytest.mark.asyncio
+
+async def mock_transform_function(step: WorkflowStep, context: Dict[str, Any]) -> Dict[str, Any]:
+    """Mock transform function for testing.
+    
+    Args:
+        step: The workflow step being executed
+        context: The execution context
+        
+    Returns:
+        Transformed data
+    """
+    return {"transformed": context}
 
 @pytest.fixture(scope="function")
 def event_loop():
@@ -135,7 +145,10 @@ async def agent(mock_ell2a, mock_isa_manager, mock_instruction_selector):
                 dependencies=[],
                 config=StepConfig(
                     strategy="standard",
-                    params={"substrategy": "standard"},
+                    params={
+                        "substrategy": "standard",
+                        "execute": mock_transform_function
+                    },
                     retry_delay=1.0,
                     retry_backoff=2.0,
                     max_retries=3
@@ -187,7 +200,8 @@ class TestAgentFramework:
                         params={
                             "method": "standard",
                             "with_mean": True,
-                            "with_std": True
+                            "with_std": True,
+                            "execute": mock_transform_function
                         }
                     )
                 )
@@ -255,7 +269,8 @@ class TestAgentFramework:
                         params={
                             "method": "standard",
                             "with_mean": True,
-                            "with_std": True
+                            "with_std": True,
+                            "execute": mock_transform_function
                         }
                     )
                 )

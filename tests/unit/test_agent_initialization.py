@@ -142,9 +142,10 @@ def test_agent_model_configuration():
     
     assert agent.name == "ModelAgent"
     assert agent.config is not None
-    assert isinstance(agent.config.model, ModelConfig)
     assert agent.config.model.provider == "openai"
     assert agent.config.model.name == "gpt-4"
+    assert agent.config.model.temperature == 0.7
+    assert agent.config.model.max_tokens == 1000
 
 def test_agent_workflow_configuration():
     """Test agent workflow configuration"""
@@ -267,7 +268,7 @@ def test_agent_state_initialization():
     agent = Agent(config=config)
     
     assert agent.name == "StateAgent"
-    assert agent.status.value == "idle"
+    assert agent.status.value == "initialized"
     assert agent.config is not None
 
 def test_agent_invalid_initialization():

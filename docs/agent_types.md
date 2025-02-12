@@ -380,7 +380,7 @@ except TransformationError as e:
 - Validate and sanitize inputs
 - Use secure configuration management
 - Implement access controls
-- Follow principle of least privilege
+- Follow principle of the least privilege
 
 ## Conclusion
 

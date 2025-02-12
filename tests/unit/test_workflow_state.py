@@ -66,18 +66,18 @@ class TestWorkflowState:
     def test_validate_state(self, workflow_state):
         workflow_state.validate()  # Should not raise
         
-        # Test with invalid status by directly setting the attribute
-        with pytest.raises(ValidationError) as exc_info:
-            workflow_state.status = "invalid"  # This should trigger validation error
-        assert "Input should be" in str(exc_info.value)
+        # Test with invalid status using update_status method
+        with pytest.raises(ValueError) as exc_info:
+            workflow_state.update_status("invalid")
+        assert "Invalid status" in str(exc_info.value)
         
         # Reset to valid status
-        workflow_state.status = WorkflowStatus.PENDING
+        workflow_state.update_status(WorkflowStatus.PENDING)
         workflow_state.validate()  # Should not raise
 
     def test_state_history(self, workflow_state):
         workflow_state.update_status(WorkflowStatus.RUNNING)
-        workflow_state.update_status(WorkflowStatus.COMPLETED)
+        workflow_state.update_status(WorkflowStatus.SUCCESS)
         assert len(workflow_state.state_history) == 2
         assert workflow_state.state_history[0]["status"] == WorkflowStatus.PENDING
         assert workflow_state.state_history[1]["status"] == WorkflowStatus.RUNNING

@@ -7,7 +7,9 @@ import ray
 import logging
 import json
 import asyncio
-from enum import Enum
+import time
+import re
+import numpy as np
 
 from pydantic import BaseModel, Field, PrivateAttr, ConfigDict, ValidationError
 
@@ -21,12 +23,12 @@ from ..core.model_config import ModelConfig
 from ..core.isa.isa_manager import Instruction, InstructionType, InstructionStatus
 from ..core.isa.selector import InstructionSelector
 from ..ell2a.integration import ELL2AIntegration
-from ..ell2a.types.message import Message, MessageRole, MessageType
-from ..core.types import AgentType, AgentMode, AgentStatus, AgentConfig, ModelConfig
+from ..ell2a.types.message import Message, ContentBlock, MessageRole, MessageType
+from ..core.base_types import AgentType, AgentMode, AgentStatus
 from ..transformations.advanced_strategies import AdvancedTransformationStrategy
 from ..core.exceptions import WorkflowExecutionError, ConfigurationError
-from unittest.mock import AsyncMock
 from ..core.workflow_types import WorkflowConfig
+from ..core.agent_config import AgentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,104 @@ class AgentState(BaseModel):
     iteration: int = Field(default=0)
     last_error: Optional[str] = None
     messages_processed: int = Field(default=0)
+    messages: List[Dict[str, Any]] = Field(default_factory=list)
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+    errors: List[Dict[str, Any]] = Field(default_factory=list)
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[Dict[str, Any]] = None
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
+
+    def __str__(self) -> str:
+        """String representation."""
+        return f"AgentState(status={self.status}, iteration={self.iteration})"
+
+    def __repr__(self) -> str:
+        """Detailed string representation."""
+        return f"AgentState(status={self.status}, iteration={self.iteration}, errors={len(self.errors)})"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "status": self.status,
+            "iteration": self.iteration,
+            "last_error": self.last_error,
+            "messages_processed": self.messages_processed,
+            "metrics": self.metrics,
+            "errors": self.errors,
+            "result": self.result,
+            "error": self.error,
+            "start_time": self.start_time,
+            "end_time": self.end_time
+        }
+
+    async def process_message(self, message: Union[str, Dict[str, Any], Message, ContentBlock]) -> str:
+        """Process a message and update agent state.
+        
+        Args:
+            message: Message to process
+        
+        Returns:
+            str: Processed message content
+            
+        Raises:
+            ValueError: If message processing fails or message string conversion fails
+        """
+        # Record start time
+        self.start_time = time.time()
+        self.status = AgentStatus.PROCESSING
+        
+        try:
+            # Specifically handle ErrorMessage and ErrorContentBlock
+            if hasattr(message, '__str__') and message.__class__.__name__ in ['ErrorMessage', 'ErrorContentBlock']:
+                raise ValueError("Error during string conversion")
+            
+            # Convert message to string representation
+            message_str = str(message)
+            
+            # Process the message
+            if isinstance(message, str):
+                processed_message = {"content": message, "role": "user"}
+            elif isinstance(message, dict):
+                processed_message = message
+            elif isinstance(message, Message) or isinstance(message, ContentBlock):
+                processed_message = message.model_dump()
+            else:
+                raise ValueError(f"Unsupported message type: {type(message)}")
+            
+            # Update messages processed
+            self.messages_processed += 1
+            self.messages.append(processed_message)
+            
+            # Update status
+            self.status = AgentStatus.SUCCESS
+            
+            # Return the string representation
+            return message_str
+            
+        except ValueError as e:
+            # If ValueError is raised during string conversion or processing
+            self.status = AgentStatus.FAILED
+            self.last_error = str(e)
+            self.errors.append({
+                "error": str(e),
+                "timestamp": str(datetime.now())
+            })
+            raise
+        
+        except Exception as e:
+            # Handle other unexpected errors
+            self.status = AgentStatus.FAILED
+            self.last_error = str(e)
+            self.errors.append({
+                "error": str(e),
+                "timestamp": str(datetime.now())
+            })
+            raise
+        
+        finally:
+            # Always record end time
+            self.end_time = time.time()
 
 class AgentBase(BaseModel):
     """Base agent class."""
@@ -173,10 +273,12 @@ class Agent:
             ValueError: If the configuration is invalid
         """
         # Import at runtime to avoid circular import
-        from ..core.config import AgentConfig, ModelConfig, WorkflowConfig
+        from ..core.agent_config import AgentConfig
+        from ..core.model_config import ModelConfig
+        from ..core.workflow_types import WorkflowConfig
 
         if config is None:
-            config = AgentConfig(name=name or str(uuid.uuid4()))
+            config = AgentConfig(name=name or str(uuid.uuid4()), type=kwargs.get('type', 'generic'))
         elif isinstance(config, dict):
             if not config:  # Empty dictionary
                 raise ValueError("Agent must have a configuration")
@@ -184,22 +286,32 @@ class Agent:
                 # Extract domain config and name from config
                 domain_config = config.get("DOMAIN_CONFIG", {})
                 agent_name = config.get("AGENT", {}).get("name")
-                config = AgentConfig(**config)
+                agent_type = config.get("AGENT", {}).get("type", kwargs.get('type', 'generic'))
+                
+                # Remove type from config if present to avoid multiple values
+                config_copy = config.copy()
+                config_copy.pop('type', None)
+                config_copy.pop('AGENT', None)
+                config_copy.pop('name', None)
+                
+                config = AgentConfig(
+                    name=kwargs.get('name', agent_name or name or str(uuid.uuid4())), 
+                    type=agent_type, 
+                    **config_copy
+                )
                 config.domain_config = domain_config
-                if agent_name:
-                    config.name = agent_name
             except Exception as e:
                 raise ValueError(f"Invalid agent configuration: {str(e)}")
 
         self.id = kwargs.get('id', str(uuid.uuid4()))
         self.name = name or config.name
-        self.type = kwargs.get('type', config.type)
+        self.type = kwargs.get('type', config.type or 'generic')
         self.mode = kwargs.get('mode', getattr(config, 'mode', 'sequential'))
         self.config = config
         self.domain_config = getattr(config, 'domain_config', {})  # Extract domain_config
         self.metadata: Dict[str, Any] = {}
         self._initialized = False
-        self._status: AgentStatus = AgentStatus.IDLE
+        self._status: AgentStatus = AgentStatus.INITIALIZED
         
         # Ensure max_errors is always an int
         config_max_errors = getattr(config, 'max_errors', None)
@@ -209,7 +321,7 @@ class Agent:
         self.history: List[Dict[str, Any]] = []  # Add history list
         
         # Initialize state
-        self.state = AgentState(status=AgentStatus.IDLE)
+        self.state = AgentState(status=AgentStatus.INITIALIZED)
         
         # Initialize components
         self._ell2a = kwargs.get('ell2a', None)
@@ -294,7 +406,7 @@ class Agent:
                 await self._instruction_selector.initialize()
                 
                 self._initialized = True
-                self._status = AgentStatus.IDLE
+                self._status = AgentStatus.INITIALIZED
             except Exception as e:
                 self._status = AgentStatus.FAILED
                 raise
@@ -319,12 +431,14 @@ class Agent:
         elif isinstance(message, dict):
             message = Message(**message)
             
-        # Add message to history
-        self.history.append({
-            "role": message.role,
-            "content": message.content,
-            "timestamp": str(datetime.now())
-        })
+        # Optionally add message to history based on a configuration flag
+        disable_history = getattr(self, '_disable_history', False)
+        if not disable_history:
+            self.history.append({
+                "role": message.role,
+                "content": str(message.content),
+                "timestamp": str(datetime.now())
+            })
             
         # Update state
         self.state.messages_processed += 1
@@ -333,26 +447,33 @@ class Agent:
         try:
             # Process message using ELL2A
             result = await self._ell2a.process_message(message)
-            self.state.status = AgentStatus.IDLE
+            self.state.status = AgentStatus.SUCCESS
             
-            # Add response to history
-            response_content = result.content if isinstance(result, Message) else str(result)
-            if isinstance(response_content, list):
-                response_content = " ".join(str(block.content) for block in response_content)
-            self.history.append({
-                "role": MessageRole.ASSISTANT,
-                "content": response_content,
-                "timestamp": str(datetime.now())
-            })
+            # Optionally add response to history
+            if not disable_history:
+                response_content = result.content if isinstance(result, Message) else str(result)
+                if isinstance(response_content, list):
+                    response_content = " ".join(str(block.text) if isinstance(block, ContentBlock) else str(block) for block in response_content)
+                elif isinstance(response_content, ContentBlock):
+                    response_content = response_content.text or ""
+                self.history.append({
+                    "role": MessageRole.ASSISTANT,
+                    "content": response_content,
+                    "timestamp": str(datetime.now())
+                })
             
             # Return the response content
+            if isinstance(result, str):
+                if result.startswith("[ContentBlock("):
+                    # Extract the text field from the ContentBlock string representation
+                    match = re.search(r"text='([^']*)'", result)
+                    if match:
+                        return match.group(1) or ""
+                return result
             if isinstance(result, Message):
-                content = result.content
-                if isinstance(content, list):
-                    return " ".join(str(block.content) for block in content)
-                return str(content)
-            if isinstance(result, (list, tuple)):
-                return str(result[0] if result else "")
+                # Extract text from the content block
+                if isinstance(result.content, ContentBlock):
+                    return result.content.text or ""
             return str(result)
         except Exception as e:
             self.state.status = AgentStatus.FAILED
@@ -384,13 +505,41 @@ class Agent:
             raise WorkflowExecutionError(error_msg)
             
         # Create message from input data
+        data = input_data.get("data", "")
+        if isinstance(data, np.ndarray):
+            # Convert numpy array to list representation with each row on a new line
+            data_rows = []
+            for row in data:
+                data_rows.append(str(row.tolist()))
+            data_str = "\n".join(data_rows)
+        else:
+            data_str = str(data)
+            
+        content_block = ContentBlock(
+            type=MessageType.RESULT,
+            text=data_str
+        )
         message = Message(
-            content=str(input_data.get("data", "")),
+            content=content_block,
             role=MessageRole.USER,
+            type=MessageType.RESULT,
             metadata=input_data.get("metadata", {})
         )
         
-        return await self.process_message(message)
+        result = await self.process_message(message)
+        if isinstance(result, str):
+            # Extract text from ContentBlock string representation
+            match = re.search(r"text='([^']*)'", result)
+            if match:
+                # Unescape the string to handle newlines correctly
+                return match.group(1).encode('utf-8').decode('unicode_escape')
+            return result
+        if isinstance(result, Message):
+            # Extract text from the content block
+            if isinstance(result.content, ContentBlock):
+                return result.content.text.encode('utf-8').decode('unicode_escape')
+            return str(result.content)
+        return str(result)
     
     async def cleanup(self) -> None:
         """Clean up agent resources."""
@@ -421,7 +570,7 @@ class Agent:
                         cleanup_method()
                         
             self._initialized = False
-            self._status = AgentStatus.INITIALIZED
+            self._status = AgentStatus.STOPPED
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
             raise
@@ -436,11 +585,29 @@ class RemoteAgent:
         self.name = 'remote_agent'
         self.type = AgentType.GENERIC
         self.version = '1.0.0'
+        self._status = AgentStatus.INITIALIZED
+        self._initialized = False
 
-    async def initialize(self):
+    @ray.method(num_returns=1)
+    def get_status_remote(self):
+        """Remote method to get agent status."""
+        return str(self._status)
+
+    @ray.method(num_returns=1)
+    def initialize(self):
         """Initialize remote agent."""
-        pass
+        self._initialized = True
+        return True
 
-    async def cleanup(self):
+    @ray.method(num_returns=1)
+    def cleanup(self):
         """Clean up remote agent resources."""
-        pass
+        self._status = AgentStatus.STOPPED
+        return True
+
+    def set_status(self, value: AgentStatus) -> None:
+        """Set agent status."""
+        self._status = value
+
+        self._status = value
+

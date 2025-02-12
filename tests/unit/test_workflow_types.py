@@ -73,7 +73,7 @@ def test_agent_config_basic(test_agent_config):
 
 def test_agent_config_with_workflow(test_workflow_def):
     """Test AgentConfig with workflow configuration."""
-    config = AgentConfig(name="test_agent", workflow=test_workflow_def)
+    config = AgentConfig(name="test_agent", type="generic", workflow=test_workflow_def)
     assert isinstance(config.workflow, WorkflowConfig)
     assert config.workflow.id == "test_workflow"
     assert config.workflow.name == "test"
@@ -81,7 +81,7 @@ def test_agent_config_with_workflow(test_workflow_def):
 def test_agent_config_with_workflow_config(test_workflow_def):
     """Test AgentConfig with WorkflowConfig instance."""
     workflow = WorkflowConfig(**test_workflow_def)
-    config = AgentConfig(name="test_agent", workflow=workflow.model_dump())
+    config = AgentConfig(name="test_agent", type="generic", workflow=workflow.model_dump())
     assert isinstance(config.workflow, WorkflowConfig)
     assert config.workflow.id == test_workflow_def["id"]
     assert config.workflow.name == test_workflow_def["name"]
@@ -94,13 +94,13 @@ def test_agent_config_invalid_type():
 def test_agent_config_model():
     """Test AgentConfig with model configuration."""
     model = ModelConfig(name="gpt-4", provider="openai", temperature=0.5)
-    config = AgentConfig(name="test_agent", model=model)
+    config = AgentConfig(name="test_agent", type="generic", model=model)
     assert isinstance(config.model, ModelConfig)
     assert config.model.name == "gpt-4"
 
 def test_agent_config_default_model():
     """Test AgentConfig default model configuration."""
-    config = AgentConfig(name="test_agent")
+    config = AgentConfig(name="test_agent", type="generic")
     assert config.model is not None
     assert isinstance(config.model, ModelConfig)
     assert config.model.name == "gpt-4"
@@ -108,14 +108,14 @@ def test_agent_config_default_model():
 
 def test_agent_config_dict_access():
     """Test AgentConfig dict-like access."""
-    config = AgentConfig(name="test_agent")
+    config = AgentConfig(name="test_agent", type="generic")
     assert config.name == "test_agent"
     assert config.model.name == "gpt-4"
     assert config.type == AgentType.GENERIC
 
 def test_agent_config_is_distributed():
     """Test AgentConfig is_distributed property."""
-    config = AgentConfig(name="test_agent", is_distributed=True)
+    config = AgentConfig(name="test_agent", type="generic", is_distributed=True)
     assert config.is_distributed is True
 
     workflow_config = {
@@ -135,11 +135,11 @@ def test_agent_config_is_distributed():
             }
         ]
     }
-    config = AgentConfig(name="test_agent", workflow=workflow_config)
+    config = AgentConfig(name="test_agent", type="generic", workflow=workflow_config)
     assert config.is_distributed is False
 
     workflow_config["distributed"] = False
-    config = AgentConfig(name="test_agent", is_distributed=False, workflow=workflow_config)
+    config = AgentConfig(name="test_agent", type="generic", is_distributed=False, workflow=workflow_config)
     assert config.is_distributed is False
 
 def test_workflow_step_validation():

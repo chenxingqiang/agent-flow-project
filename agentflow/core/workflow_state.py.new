@@ -283,25 +283,4 @@ class WorkflowStateManager:
         self.agent_states[workflow_id][agent_id] = AgentState(
             agent_id=agent_id,
             name=name
-        )
-
-    def update_workflow_status(self, workflow_id: str, status: WorkflowStatus) -> None:
-        """Update workflow status.
-        
-        Args:
-            workflow_id: Workflow ID
-            status: New workflow status
-        """
-        if workflow_id in self.workflow_states:
-            self.workflow_states[workflow_id].update_status(status)
-    
-    def update_step_status(self, workflow_id: str, step_id: str, status: WorkflowStepStatus) -> None:
-        """Update step status.
-        
-        Args:
-            workflow_id: Workflow ID
-            step_id: Step ID
-            status: New step status
-        """
-        if workflow_id in self.step_states and step_id in self.step_states[workflow_id]:
-            self.step_states[workflow_id][step_id].update_status(status) 
+        ) 

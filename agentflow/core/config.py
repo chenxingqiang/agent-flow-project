@@ -18,12 +18,13 @@ import hashlib
 import secrets
 import hydra
 from omegaconf import OmegaConf, DictConfig, ListConfig
+import json
 
 from .retry_policy import RetryPolicy
 from .exceptions import ConfigurationError as BaseConfigurationError, WorkflowExecutionError
 from .base_types import AgentType, AgentMode, AgentStatus, DictKeyType, MessageType
 from .workflow_types import WorkflowConfig, WorkflowStepType
-from .agent_config import AgentConfig, ModelConfig
+from .agent_config import AgentConfig
 
 # Re-export the ConfigurationError from exceptions
 ConfigurationError = BaseConfigurationError
@@ -32,57 +33,45 @@ if TYPE_CHECKING:
     from ..core.isa.selector import InstructionSelector
 
 class ConfigSecurityManager:
-    """Enhanced security management for configurations."""
+    """Manages configuration security and sensitive data masking."""
     
-    @classmethod
-    def mask_sensitive_fields(cls, config: Union[Dict[str, Any], dict, DictConfig, ListConfig]) -> Union[Dict[str, Any], dict, DictConfig, ListConfig]:
+    @staticmethod
+    def mask_sensitive_fields(config: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Mask sensitive fields in a configuration.
+        Mask sensitive fields in the configuration.
+        
+        Masks entire dictionaries if they contain sensitive data.
+        Masks specific fields like passwords, api_keys, etc.
         
         Args:
-            config: Configuration to mask
-            sensitive_keywords: Optional list of additional sensitive keywords
+            config (Dict[str, Any]): Configuration dictionary to mask
         
         Returns:
-            Configuration with sensitive fields masked
+            Dict[str, Any]: Configuration with sensitive fields masked
         """
-        # Default sensitive keywords
-        sensitive_keywords = [
-            'password', 'secret', 'key', 'token', 
-            'credentials', 'api_key', 'access_token', 
-            'private_key', 'client_secret', 'email', 'phone', 'username',
-            'auth', 'authorization', 'bearer', 'jwt', 'session', 'cookie',
-            'database', 'host', 'port', 'url', 'endpoint', 'bucket', 'storage'
-        ]
-        
-        # Create a mutable copy of the config
-        config_copy = OmegaConf.create(config)
-        
-        def is_sensitive_key(key: str) -> bool:
-            """Check if a key is sensitive."""
-            key_str = str(key)
-            return any(sensitive in key_str.lower() for sensitive in sensitive_keywords)
-        
-        def mask_recursive(item: Any) -> Any:
-            """Recursively mask sensitive fields."""
-            if isinstance(item, (dict, DictConfig)):
-                # Convert all keys to strings
-                item = {str(k): v for k, v in item.items()}
-                
-                # Check if any key is sensitive
-                if any(is_sensitive_key(k) for k in item.keys()):
-                    return {str(k): '***MASKED***' for k in item.keys()}
-                
-                # Recursively process nested dicts
-                return {str(k): mask_recursive(v) for k, v in item.items()}
-            
-            # For non-dict items, mask if sensitive
-            if isinstance(item, str) and any(sensitive in item.lower() for sensitive in sensitive_keywords):
-                return '***MASKED***'
-            
-            return item
-        
-        return cast(Union[Dict[str, Any], dict, DictConfig, ListConfig], mask_recursive(config_copy))
+        if not isinstance(config, dict):
+            return config
+
+        masked_config = {}
+        sensitive_keywords = ['password', 'secret', 'key', 'token', 'credential']
+
+        for key, value in config.items():
+            # Check if the key itself suggests sensitive data
+            if any(keyword in key.lower() for keyword in sensitive_keywords):
+                masked_config[key] = '***MASKED***'
+                continue
+
+            # Recursively mask nested dictionaries
+            if isinstance(value, dict):
+                # Check if the dictionary contains any sensitive keys
+                if any(any(keyword in k.lower() for keyword in sensitive_keywords) for k in value.keys()):
+                    masked_config[key] = '***MASKED***'
+                else:
+                    masked_config[key] = ConfigSecurityManager.mask_sensitive_fields(value)
+            else:
+                masked_config[key] = value
+
+        return masked_config
 
     @classmethod
     def hash_sensitive_data(cls, data, salt=None):
@@ -232,22 +221,9 @@ class ConfigTypeConverter:
         except (TypeError, ValueError) as e:
             if strict:
                 raise ValueError(f"Cannot convert {value} to {target_type.__name__}: {e}")
-            # Return a default value based on the target type
-            if target_type == int:
-                return 0
-            elif target_type == float:
-                return 0.0
-            elif target_type == bool:
-                return False
-            elif target_type == str:
-                return str(value)
-            elif target_type == list:
-                return []
-            elif target_type == dict:
-                return {}
-            elif target_type == date:
-                return None
-            return value
+            
+            # If conversion fails and strict is False, return empty dict for dict type or original value
+            return {} if target_type is dict else value
 
 class ConfigurationInheritanceResolver:
     """
@@ -321,7 +297,7 @@ class ConfigurationInheritanceResolver:
         """
         if not os.path.exists(config_path):
             raise ConfigurationError(f"Configuration path {config_path} does not exist")
-            
+
         base_file = os.path.join(config_path, f"{base_config}.yaml")
         env_file = os.path.join(config_path, f"{base_config}.{environment}.yaml")
         
@@ -497,7 +473,7 @@ def convert_type(value: Any, target_type: type, schema: Optional[Dict[str, Any]]
         if target_type is dict and isinstance(value, dict):
             if schema:
                 # Validate and convert nested dictionary according to schema
-                return {str(k): convert_type(v, schema.get(str(k), type(v)), strict=strict) 
+                return {str(k): convert_type(v, schema.get(str(k), type(v)), strict=strict)
                        for k, v in value.items()}
             return value
         
@@ -798,57 +774,59 @@ class ConfigTypeConverterHydra:
             # If conversion fails and strict is False, return empty dict for dict type or original value
             return {} if target_type is dict else value
 
-class ResearchAgentConfig(AgentConfig):
+class ResearchAgentConfig(BaseModel):
     """Research agent configuration."""
     research_context: Dict[str, Any] = Field(default_factory=dict)
     publication_goals: Dict[str, Any] = Field(default_factory=dict)
     domain_knowledge: Dict[str, Any] = Field(default_factory=dict)
     research_methods: List[str] = Field(default_factory=list)
     analysis_tools: List[str] = Field(default_factory=list)
-    
-    @field_validator('research_context')
+    name: str = Field(default="Research_Agent", description="Name of the research agent", min_length=3, pattern=r'^[a-zA-Z0-9_\- ]+$')
+    type: str = Field(default="research", description="Type of the agent")
+
+    model_config = ConfigDict(
+        validate_assignment=True,
+        extra='allow'
+    )
+
     @classmethod
     def validate_research_context(cls, v: Dict[str, Any]) -> Dict[str, Any]:
         """Validate research context."""
-        required_fields = {'topic', 'current_status'}
-        if not all(field in v for field in required_fields):
-            raise ValueError(f"Research context must contain fields: {required_fields}")
+        if not isinstance(v, dict):
+            raise ValueError("Research context must be a dictionary")
         return v
-    
-    @field_validator('publication_goals')
+
     @classmethod
     def validate_publication_goals(cls, v: Dict[str, Any]) -> Dict[str, Any]:
         """Validate publication goals."""
+        if not isinstance(v, dict):
+            raise ValueError("Publication goals must be a dictionary")
+        
+        # Parse acceptance deadline to date if it's a string
         if 'acceptance_deadline' in v and isinstance(v['acceptance_deadline'], str):
             try:
                 v['acceptance_deadline'] = datetime.strptime(v['acceptance_deadline'], '%Y-%m-%d').date()
             except ValueError:
                 raise ValueError("Invalid date format for acceptance_deadline. Use YYYY-MM-DD")
+        
         return v
-    
-    @field_validator('name')
-    def validate_name(cls, v: str) -> str:
-        """Validate agent name."""
-        if not v:
-            raise ValueError("Name cannot be empty")
-        if len(v) < 3:
-            raise ValueError("Name must be at least 3 characters long")
-        if not v.replace(' ', '').replace('-', '').replace('_', '').isalnum():
-            raise ValueError("Name can only contain letters, numbers, spaces, hyphens and underscores")
-        return v
-    
+
+    def __init__(self, **data):
+        """Initialize research agent configuration."""
+        # Validate and transform publication goals
+        if 'publication_goals' in data:
+            data['publication_goals'] = self.validate_publication_goals(data['publication_goals'])
+        
+        # If no name is provided, use the default
+        if 'name' not in data:
+            data['name'] = 'Research_Agent'
+        
+        super().__init__(**data)
+
     @classmethod
     def from_yaml(cls, config_path: str, config_name: str, environment: str = 'default') -> 'ResearchAgentConfig':
         """Load configuration from YAML using Hydra's configuration management."""
         try:
-            # Validate config path
-            if not config_path or not os.path.exists(config_path):
-                raise ConfigurationError(f"Configuration path {config_path} does not exist.")
-
-            # Validate config name
-            if not config_name:
-                raise ConfigurationError("Configuration name cannot be empty.")
-
             # Use Hydra's composition to merge configurations
             with hydra.initialize(version_base=None, config_path=os.path.relpath(config_path)):
                 try:
@@ -888,18 +866,24 @@ class ResearchAgentConfig(AgentConfig):
             # Log the error and raise a ConfigurationError
             logging.error(f"Configuration loading error: {e}")
             raise ConfigurationError(f"Failed to load configuration: {e}")
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
-        data = super().to_dict()
-        data.update({
+        data = {
             "research_context": self.research_context,
             "publication_goals": self.publication_goals,
             "domain_knowledge": self.domain_knowledge,
             "research_methods": self.research_methods,
-            "analysis_tools": self.analysis_tools
-        })
+            "analysis_tools": self.analysis_tools,
+            "name": self.name,
+            "type": self.type
+        }
         return data
+
+    @classmethod
+    def from_dict(cls, config_dict: Dict[str, Any]) -> 'ResearchAgentConfig':
+        """Create configuration from a dictionary."""
+        return cls(**config_dict)
 
 @staticmethod
 def convert_value(value: Any, target_type: type, schema: Optional[Dict[str, type]] = None) -> Any:
@@ -977,3 +961,57 @@ class DistributedConfig(BaseModel):
         """Pydantic configuration."""
         extra = "allow"
         arbitrary_types_allowed = True
+
+class ModelConfig(BaseModel):
+    """Model configuration."""
+    provider: str = Field(default="openai")
+    name: str = Field(default="gpt-4")
+    temperature: float = Field(default=0.7)
+    max_tokens: int = Field(default=4096)
+    top_p: float = Field(default=1.0)
+    frequency_penalty: float = Field(default=0.0)
+    presence_penalty: float = Field(default=0.0)
+    stop: Optional[Union[str, List[str]]] = Field(default=None)
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a configuration value.
+        
+        Args:
+            key: Configuration key
+            default: Default value if key not found
+            
+        Returns:
+            Configuration value
+        """
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            return default
+            
+    def __getitem__(self, key: str) -> Any:
+        """Get a configuration value.
+        
+        Args:
+            key: Configuration key
+            
+        Returns:
+            Configuration value
+            
+        Raises:
+            KeyError: If key not found
+        """
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+            
+    def __contains__(self, key: str) -> bool:
+        """Check if key exists.
+        
+        Args:
+            key: Configuration key
+            
+        Returns:
+            bool: True if key exists
+        """
+        return hasattr(self, key)

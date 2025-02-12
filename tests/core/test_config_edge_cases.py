@@ -28,13 +28,26 @@ from agentflow.core.workflow_executor import WorkflowExecutor
 
 def test_empty_agent_config():
     """Test empty agent configuration."""
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValueError, match="Name cannot be empty"):
         AgentConfig(name="", type="")
 
 def test_invalid_model_provider():
     """Test invalid model provider."""
-    with pytest.raises(ValueError, match="Invalid provider"):
-        ModelConfig(name="test-model", provider="invalid_provider")
+    with pytest.raises(ValueError, match="Invalid provider: unsupported_provider"):
+        AgentConfig(
+            name="test_agent", 
+            type="test", 
+            model_provider="unsupported_provider"
+        )
+
+def test_invalid_model_provider():
+    """Test invalid model provider."""
+    with pytest.raises(ValidationError, match="model_provider\n  String should match pattern"):
+        AgentConfig(
+            name="test_agent",
+            type="generic",
+            model_provider="unsupported_provider"
+        )
 
 def test_invalid_workflow_step_type():
     """Test invalid workflow step type."""
@@ -203,28 +216,44 @@ def test_duplicate_step_ids():
 
 def test_missing_required_fields():
     """Test configurations with missing required fields."""
-    with pytest.raises(ValidationError):
-        AgentConfig(name="", type="")  # Empty name and type
+    # Test empty name and type
+    with pytest.raises(ValueError, match="Name cannot be empty"):
+        AgentConfig(name="", type="")
     
-    with pytest.raises(ValidationError):
-        ModelConfig(provider="", name="")  # Empty provider and name
+    # Test missing name
+    with pytest.raises(ValueError, match="Name cannot be empty"):
+        AgentConfig(type="generic")
+    
+    # Test missing type
+    with pytest.raises(ValidationError, match="Field required"):
+        AgentConfig(name="test_agent")
 
 def test_invalid_timeout_values():
     """Test invalid timeout values in workflow configuration."""
-    with pytest.raises(ValidationError):
-        WorkflowConfig(
-            name="test_workflow",
-            timeout=-1.0,  # Invalid negative timeout
-            steps=[]
+    # Test negative timeout
+    with pytest.raises(ValidationError, match="timeout\n  Input should be greater than or equal to 0"):
+        AgentConfig(
+            name="test_agent", 
+            type="generic", 
+            timeout=-1
         )
 
 def test_invalid_max_iterations():
     """Test invalid max iterations in workflow configuration."""
-    with pytest.raises(ValidationError):
-        WorkflowConfig(
-            name="test_workflow",
-            max_iterations=0,  # Invalid zero iterations
-            steps=[]
+    # Test negative max iterations
+    with pytest.raises(ValidationError, match="max_iterations\n  Input should be greater than or equal to 1"):
+        AgentConfig(
+            name="test_agent",
+            type="generic",
+            max_iterations=0
+        )
+    
+    # Test extremely large max iterations
+    with pytest.raises(ValidationError, match="max_iterations\n  Input should be less than or equal to 100"):
+        AgentConfig(
+            name="test_agent",
+            type="generic",
+            max_iterations=101
         )
 
 def test_empty_step_dependencies():

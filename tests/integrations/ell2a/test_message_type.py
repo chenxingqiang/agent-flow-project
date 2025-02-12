@@ -11,19 +11,21 @@ def test_message_creation():
     assert msg.role == MessageRole.USER
     assert msg.content == "Hello"
     assert msg.timestamp is not None
-    assert msg.metadata == {}
+    assert msg.metadata is None
 
 def test_system_message():
     """Test system message creation."""
     msg = system("System message")
     assert msg.role == MessageRole.SYSTEM
     assert msg.content == "System message"
+    assert msg.metadata is None
 
 def test_user_message():
     """Test user message creation."""
     msg = user("User message")
     assert msg.role == MessageRole.USER
     assert msg.content == "User message"
+    assert msg.metadata is None
 
 def test_ell_message_management():
     """Test ELL message management."""

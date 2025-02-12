@@ -38,6 +38,7 @@ def test_agent_config_validation():
 def test_agent_config_defaults():
     """Test default configuration values"""
     minimal_config = {
+        "name": "Test Agent",
         "type": "research",
         "model": {
             "provider": "openai",
@@ -64,6 +65,8 @@ def test_agent_config_defaults():
     agent_config = AgentConfig(**minimal_config)
     
     # Check default values
+    assert agent_config.name == "Test Agent"
+    assert agent_config.type == "research"
     assert agent_config.workflow is not None
     assert agent_config.workflow.max_iterations == 10  # Default value from WorkflowConfig
     assert agent_config.workflow.timeout is None  # Default value from WorkflowConfig
@@ -71,6 +74,7 @@ def test_agent_config_defaults():
 def test_agent_config_serialization():
     """Test configuration serialization and deserialization"""
     config_data = {
+        "name": "Test Agent",
         "type": "research",
         "model": {
             "provider": "openai",
@@ -101,6 +105,7 @@ def test_agent_config_serialization():
     # Convert to dictionary
     config_dict = agent_config.model_dump()
     
+    assert config_dict['name'] == "Test Agent"
     assert config_dict['type'] == "research"
     assert config_dict['model']['provider'] == "openai"
     assert config_dict['workflow']['max_iterations'] == 5
@@ -108,6 +113,7 @@ def test_agent_config_serialization():
 def test_agent_config_complex_workflow():
     """Test complex workflow configuration"""
     config_data = {
+        "name": "Test Agent",
         "type": "research",
         "model": {
             "provider": "openai",
@@ -133,6 +139,8 @@ def test_agent_config_complex_workflow():
     }
 
     agent_config = AgentConfig(**config_data)
+    assert agent_config.name == "Test Agent"
+    assert agent_config.type == "research"
     assert agent_config.workflow.max_iterations == 10
     assert len(agent_config.workflow.steps) == 1
 

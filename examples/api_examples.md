@@ -1,6 +1,6 @@
 # Workflow API Examples
 
-## Synchronous Workflow Execution (cURL)
+## Synchronous Workflow Execution (curl)
 
 ```bash
 curl -X POST http://localhost:8000/workflow/execute \
@@ -28,7 +28,7 @@ curl -X POST http://localhost:8000/workflow/execute \
      }'
 ```
 
-## Asynchronous Workflow Execution (cURL)
+## Asynchronous Workflow Execution (curl)
 
 ```bash
 # Initiate Async Workflow

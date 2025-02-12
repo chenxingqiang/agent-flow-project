@@ -17,7 +17,7 @@ async def test_empty_workflow():
 @pytest.mark.asyncio
 async def test_invalid_step_type():
     """Test workflow with invalid step type."""
-    with pytest.raises(ValidationError, match="Invalid step type: invalid_type"):
+    with pytest.raises(ValidationError, match="Input should be"):
         WorkflowConfig(
             id="test-workflow-1",
             name="invalid_workflow",

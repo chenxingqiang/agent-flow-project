@@ -7,9 +7,9 @@ from agentflow.core.workflow_types import (
     WorkflowStepType, WorkflowStepStatus, Message, StepConfig,
     WorkflowStep, ErrorPolicy, RetryPolicy, WorkflowConfig, WorkflowStatus
 )
-from agentflow.core.config import (
-    AgentConfig, ModelConfig, WorkflowConfig as ConfigWorkflowConfig
-)
+from agentflow.core.agent_config import AgentConfig
+from agentflow.core.model_config import ModelConfig
+from agentflow.core.config import WorkflowConfig as ConfigWorkflowConfig
 from agentflow.agents.agent_types import AgentType, AgentMode
 from agentflow.agents.agent import Agent
 from agentflow.ell2a.integration import ELL2AIntegration
@@ -51,8 +51,12 @@ def valid_workflow_def():
     }
 
 @pytest.fixture
-def workflow_config():
+def workflow_config(mock_ell2a):
     """Create a workflow configuration."""
+    async def mock_transform_execute(step: WorkflowStep, context: Dict[str, Any]):
+        """Mock transform execution function."""
+        return {"data": "transformed_" + str(context.get("data", ""))}
+    
     return WorkflowConfig(
         id="test-workflow",
         name="test_workflow",
@@ -76,7 +80,10 @@ def workflow_config():
                 description="Test workflow step",
                 config=StepConfig(
                     strategy="standard",
-                    params={"protocol": "federated"}
+                    params={
+                        "protocol": "federated", 
+                        "execute": mock_transform_execute
+                    }
                 )
             )
         ]
@@ -134,7 +141,7 @@ async def workflow_engine(valid_workflow_def, workflow_config, mock_ell2a, mock_
         name="default_agent",
         type="research",
         model=ModelConfig(name="gpt-4", provider="openai"),
-        workflow=ConfigWorkflowConfig(**workflow_config.model_dump())
+        workflow=workflow_config
     )
     agent = Agent(config=agent_config)
     await agent.initialize()
@@ -168,8 +175,8 @@ async def test_workflow_execution(workflow_engine, mock_ell2a, mock_isa_manager,
     assert result is not None
     assert "steps" in result
     assert "step1" in result["steps"]
-    assert result["status"] == "completed"
-    assert result["steps"]["step1"]["status"] == "completed"
+    assert result["status"] == "success"
+    assert result["steps"]["step1"]["status"] == "success"
 
 @pytest.mark.asyncio
 async def test_workflow_cleanup(workflow_engine):
@@ -244,4 +251,4 @@ async def test_workflow_with_retry_mechanism():
     
     result = await engine.execute_workflow(agent.id, {"data": "test_input"})
     assert result is not None
-    assert result["status"] == "completed"
+    assert result["status"] == "success"

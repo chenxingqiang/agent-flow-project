@@ -8,7 +8,7 @@ from agentflow.core.workflow_types import WorkflowConfig, WorkflowStep, Workflow
 from agentflow.core.exceptions import WorkflowExecutionError
 from agentflow.agents.agent_types import AgentMode
 from agentflow.agents.agent import Agent
-from agentflow.ell2a.types.message import Message, MessageRole, MessageType
+from agentflow.ell2a.types.message import Message, MessageRole, MessageType, ContentBlock, ContentWrapper
 import json
 
 @pytest.fixture
@@ -30,13 +30,25 @@ def mock_ell2a():
         if not isinstance(content, dict):
             content = {"data": None}
         data = content.get("data")
-        if isinstance(data, np.ndarray):
-            data = data.tolist()
+        if not isinstance(data, np.ndarray):
+            return Message(
+                role=MessageRole.ASSISTANT,
+                type=MessageType.ERROR,
+                text="Invalid data format. Expected numpy array."
+            )
+        
+        # Convert numpy array to string with each row on a new line
+        data_rows = []
+        for row in data:
+            # Preserve brackets and convert to string
+            row_str = f"[{', '.join(map(str, row.tolist()))}]"
+            data_rows.append(row_str)
+        data_str = "\n".join(data_rows)
         
         return Message(
             role=MessageRole.ASSISTANT,
-            content=str(data),  # Return the data as a string
-            type=MessageType.RESULT
+            type=MessageType.RESULT,
+            text=data_str
         )
     
     mock.process_message = AsyncMock(side_effect=mock_process)

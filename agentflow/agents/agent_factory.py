@@ -11,7 +11,7 @@ from .base import Agent
 from .default_agent import DefaultAgent
 from .test_agent import TestAgent
 from ..core.config import AgentConfig
-from ..core.types import AgentType
+from ..core.base_types import AgentType, AgentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -86,14 +86,35 @@ class AgentFactory:
             agent_type = config.get("AGENT", {}).get("type")
             if not agent_type:
                 raise ValueError("Agent type not specified in configuration")
+            
+            agent_mode = config.get("AGENT", {}).get("mode")
+            if isinstance(agent_mode, str):
+                # Convert mode to lowercase to match enum values
+                agent_mode = AgentMode(agent_mode.lower())
+            
+            # Convert config to AgentConfig
+            agent_config = AgentConfig(
+                type=AgentType(agent_type),
+                name=config.get("AGENT", {}).get("name", "Default Agent"),
+                mode=agent_mode or AgentMode.SYNC,
+                version=config.get("AGENT", {}).get("version", "1.0.0"),
+                model=config.get("MODEL", {}),
+                workflow=config.get("WORKFLOW", {}),
+                domain_config=config.get("DOMAIN_CONFIG", {})  # Include domain_config
+            )
         else:
-            agent_type = config.type
+            agent_config = config
+            agent_type = config.type.value if isinstance(config.type, AgentType) else config.type
             
         if agent_type not in cls._agent_types:
-            raise ValueError(f"Agent type {agent_type} not registered")
+            logger.warning(f"Agent type {agent_type} not registered, using default agent")
+            agent_class = DefaultAgent
+        else:
+            agent_class = cls._agent_types[agent_type]
             
-        agent_class = cls._agent_types[agent_type]
-        return agent_class(config=config)
+        # Create agent with the converted agent_config
+        agent = agent_class(config=agent_config)
+        return agent
     
     @classmethod
     def get_registered_types(cls) -> Dict[str, Type[Agent]]:

@@ -1,8 +1,6 @@
 """Core module."""
 
 from .config import (
-    AgentConfig,
-    ModelConfig,
     WorkflowConfig,
     ConfigurationType,
     AgentMode
@@ -10,6 +8,8 @@ from .config import (
 
 from .types import AgentStatus
 from .workflow import WorkflowEngine, WorkflowInstance
+from .agent_config import AgentConfig
+from .model_config import ModelConfig
 
 __all__ = [
     'AgentConfig',

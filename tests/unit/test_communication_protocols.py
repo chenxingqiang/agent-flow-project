@@ -143,6 +143,7 @@ async def test_federated_learning_protocol(workflow_engine):
     assert "steps" in result
     assert "step1" in result["steps"]
     assert result["steps"]["step1"]["result"] is not None
+    assert result["steps"]["step1"]["status"] == "success"
 
 @pytest.mark.asyncio
 async def test_gossip_protocol(workflow_engine):
@@ -216,6 +217,7 @@ async def test_gossip_protocol(workflow_engine):
     assert "steps" in result
     assert "step1" in result["steps"]
     assert result["steps"]["step1"]["result"] is not None
+    assert result["steps"]["step1"]["status"] == "success"
 
 @pytest.mark.asyncio
 async def test_hierarchical_merge_protocol(workflow_engine):
@@ -297,6 +299,7 @@ async def test_hierarchical_merge_protocol(workflow_engine):
     assert "steps" in result
     assert "step1" in result["steps"]
     assert result["steps"]["step1"]["result"] is not None
+    assert result["steps"]["step1"]["status"] == "success"
 
 @pytest.mark.asyncio
 async def test_invalid_communication_protocol(workflow_engine):
@@ -476,6 +479,7 @@ async def test_hierarchical_merge_protocol_with_test_agent(workflow_engine):
     assert "steps" in result
     assert "step1" in result["steps"]
     assert result["steps"]["step1"]["result"] is not None
+    assert result["steps"]["step1"]["status"] == "success"
 
 @pytest.mark.asyncio
 async def test_invalid_communication_protocol_with_test_agent(workflow_engine):
@@ -541,3 +545,12 @@ async def test_invalid_communication_protocol_with_test_agent(workflow_engine):
     
     # Verify that the protocol was converted to None
     assert engine.workflows[engine.default_agent_id].steps[0].config.params["protocol"] is None
+    # Execute workflow
+    result = await engine.execute_workflow(engine.default_agent_id, {"data": {}})
+    
+    # Verify results
+    assert result is not None
+    assert "steps" in result
+    assert "step1" in result["steps"]
+    assert result["steps"]["step1"]["result"] is not None
+    assert result["steps"]["step1"]["status"] == "success"

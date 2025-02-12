@@ -4,6 +4,7 @@ import pytest
 import asyncio
 import numpy as np
 import uuid
+from typing import Dict, Any
 from agentflow.core.workflow_types import WorkflowConfig, WorkflowStep, WorkflowStepType, StepConfig, ErrorPolicy, RetryPolicy
 from agentflow.core.exceptions import WorkflowExecutionError
 from agentflow.core.workflow_executor import WorkflowExecutor
@@ -11,9 +12,18 @@ from agentflow.core.workflow_executor import WorkflowExecutor
 @pytest.mark.asyncio
 async def test_workflow_execution():
     """Test basic workflow execution."""
-    async def custom_transform(data):
+    async def custom_transform(step: WorkflowStep, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Custom transform function.
+        
+        Args:
+            step: The workflow step being executed
+            context: The execution context
+            
+        Returns:
+            Dict containing the transformed data
+        """
         await asyncio.sleep(0.1)
-        return data
+        return {"data": context["data"]}
 
     config = WorkflowConfig(
         id=str(uuid.uuid4()),
@@ -49,18 +59,38 @@ async def test_workflow_execution():
     data = np.random.randn(10, 2)
     result = await executor.execute({"data": data})
     assert "step-1" in result["steps"]
-    assert result["status"] == "completed"
+    assert result["status"] == "success"
 
 @pytest.mark.asyncio
 async def test_workflow_with_dependencies():
     """Test workflow execution with dependencies."""
-    async def transform1(data):
+    async def transform1(step: WorkflowStep, context: Dict[str, Any]) -> Dict[str, Any]:
+        """First transform function.
+        
+        Args:
+            step: The workflow step being executed
+            context: The execution context
+            
+        Returns:
+            Dict containing the transformed data
+        """
         await asyncio.sleep(0.1)
-        return data * 2
+        data = context["data"]
+        return {"data": data * 2}
 
-    async def transform2(data):
+    async def transform2(step: WorkflowStep, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Second transform function.
+        
+        Args:
+            step: The workflow step being executed
+            context: The execution context
+            
+        Returns:
+            Dict containing the transformed data
+        """
         await asyncio.sleep(0.1)
-        return data + 1
+        data = context["data"]
+        return {"data": data + 1}
 
     config = WorkflowConfig(
         id=str(uuid.uuid4()),
@@ -108,12 +138,21 @@ async def test_workflow_with_dependencies():
     result = await executor.execute({"data": data})
     assert "step-1" in result["steps"]
     assert "step-2" in result["steps"]
-    assert result["status"] == "completed"
+    assert result["status"] == "success"
 
 @pytest.mark.asyncio
 async def test_workflow_error_handling():
     """Test workflow error handling."""
-    async def failing_transform(data):
+    async def failing_transform(step: WorkflowStep, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Transform function that raises an error.
+        
+        Args:
+            step: The workflow step being executed
+            context: The execution context
+            
+        Raises:
+            ValueError: Always raises this error for testing
+        """
         raise ValueError("Test error")
 
     config = WorkflowConfig(
@@ -148,6 +187,8 @@ async def test_workflow_error_handling():
     executor = WorkflowExecutor(config)
     await executor.initialize()
     data = np.random.randn(10, 2)
+    
+    # Explicitly raise WorkflowExecutionError
     with pytest.raises(WorkflowExecutionError) as exc_info:
         await executor.execute({"data": data})
     assert "Test error" in str(exc_info.value)
@@ -155,9 +196,18 @@ async def test_workflow_error_handling():
 @pytest.mark.asyncio
 async def test_workflow_timeout():
     """Test workflow timeout handling."""
-    async def slow_transform(data):
+    async def slow_transform(step: WorkflowStep, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Transform function that takes a long time.
+        
+        Args:
+            step: The workflow step being executed
+            context: The execution context
+            
+        Returns:
+            Dict containing the transformed data
+        """
         await asyncio.sleep(2)  # Longer than timeout
-        return data
+        return {"data": context["data"]}
 
     config = WorkflowConfig(
         id=str(uuid.uuid4()),
@@ -191,5 +241,8 @@ async def test_workflow_timeout():
     executor = WorkflowExecutor(config)
     await executor.initialize()
     data = np.random.randn(10, 2)
-    with pytest.raises(TimeoutError):
+    
+    # Explicitly raise TimeoutError
+    with pytest.raises(TimeoutError) as exc_info:
         await executor.execute({"data": data})
+    assert "Workflow execution timed out" in str(exc_info.value)

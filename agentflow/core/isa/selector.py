@@ -1,7 +1,7 @@
 """Instruction Selector module."""
 
 from typing import Dict, Any, List, Optional, Union
-from ..config import AgentConfig
+from ..agent_config import AgentConfig
 from .isa_manager import Instruction
 
 class InstructionSelector:

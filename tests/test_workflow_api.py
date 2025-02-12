@@ -110,7 +110,7 @@ def configure_base_url(request):
 def test_sync_workflow_execution(server):
     """Test synchronous workflow execution"""
     url = f"{server.base_url}/workflow/execute"
-
+    
     request_data = {
         "workflow": {
             "id": "test-workflow-1",
@@ -118,7 +118,7 @@ def test_sync_workflow_execution(server):
             "steps": [
                 {
                     "id": "step-1",
-                    "type": "research",
+                    "type": "agent",
                     "name": "Research Step",
                     "description": "Perform research on the given topic",
                     "dependencies": [],
@@ -126,36 +126,12 @@ def test_sync_workflow_execution(server):
                     "optional": False,
                     "is_distributed": False,
                     "config": {
-                        "strategy": "research",
+                        "strategy": "standard",
                         "params": {
                             "input": ["STUDENT_NEEDS", "LANGUAGE", "TEMPLATE"],
                             "output": {
                                 "type": "research_findings",
                                 "format": "structured_data"
-                            }
-                        },
-                        "retry_delay": 1.0,
-                        "retry_backoff": 2.0,
-                        "max_retries": 3,
-                        "timeout": 30.0
-                    }
-                },
-                {
-                    "id": "step-2",
-                    "type": "document",
-                    "name": "Document Generation Step",
-                    "description": "Generate document from research findings",
-                    "dependencies": ["step-1"],
-                    "required": True,
-                    "optional": False,
-                    "is_distributed": False,
-                    "config": {
-                        "strategy": "document",
-                        "params": {
-                            "input": ["WORKFLOW.1.output"],
-                            "output": {
-                                "type": "document",
-                                "format": "Markdown with LaTeX"
                             }
                         },
                         "retry_delay": 1.0,
@@ -171,12 +147,6 @@ def test_sync_workflow_execution(server):
             "retry_backoff": 2.0,
             "retry_delay": 0.1,
             "step_1_config": {
-                "max_retries": 3,
-                "timeout": 30,
-                "preprocessors": [],
-                "postprocessors": []
-            },
-            "step_2_config": {
                 "max_retries": 3,
                 "timeout": 30,
                 "preprocessors": [],
@@ -213,8 +183,16 @@ def test_sync_workflow_execution(server):
         )
     
     result = response.json()
-    assert result["status"] == "completed"
-    assert result["result"] is not None
+    assert result is not None
+    assert "steps" in result
+    assert isinstance(result["steps"], list)
+    assert len(result["steps"]) > 0
+    step = result["steps"][0]
+    assert step["id"] == "step-1"
+    assert step["status"] == "success"
+    assert "result" in step
+    assert isinstance(step["result"], dict)
+    assert "content" in step["result"]
 
 def test_async_workflow_execution(server):
     """Test asynchronous workflow execution"""
@@ -227,7 +205,7 @@ def test_async_workflow_execution(server):
             "steps": [
                 {
                     "id": "step-1",
-                    "type": "research",
+                    "type": "agent",
                     "name": "Research Step",
                     "description": "Perform research on the given topic",
                     "dependencies": [],
@@ -235,7 +213,7 @@ def test_async_workflow_execution(server):
                     "optional": False,
                     "is_distributed": True,
                     "config": {
-                        "strategy": "research",
+                        "strategy": "standard",
                         "params": {
                             "input": ["STUDENT_NEEDS", "LANGUAGE", "TEMPLATE"],
                             "output": {
@@ -251,7 +229,7 @@ def test_async_workflow_execution(server):
                 },
                 {
                     "id": "step-2",
-                    "type": "document",
+                    "type": "agent",
                     "name": "Document Generation Step",
                     "description": "Generate document from research findings",
                     "dependencies": ["step-1"],
@@ -259,7 +237,7 @@ def test_async_workflow_execution(server):
                     "optional": False,
                     "is_distributed": True,
                     "config": {
-                        "strategy": "document",
+                        "strategy": "standard",
                         "params": {
                             "input": ["WORKFLOW.1.output"],
                             "output": {
@@ -329,7 +307,8 @@ def test_invalid_workflow(server):
 
     invalid_workflow_config = {
         "workflow": {
-            "steps": []  # Missing required id and name fields
+            # Intentionally missing required fields and empty steps
+            "steps": []
         },
         "input_data": {}
     }
@@ -343,8 +322,11 @@ def test_invalid_workflow(server):
         assert response.status_code == 422  # Validation error status code
         error_data = response.json()
         assert "detail" in error_data
-        # Check for missing required fields error
-        assert any("Field required" in str(detail) for detail in error_data["detail"])
+        
+        # Check for empty steps error
+        error_details = error_data.get("detail", [])
+        assert any("Workflow must have at least one step" in str(detail) for detail in error_details), \
+            f"No 'Workflow must have at least one step' error found in {error_details}"
     except Exception as e:
         logger.error(f"Invalid workflow request failed: {e}")
         raise

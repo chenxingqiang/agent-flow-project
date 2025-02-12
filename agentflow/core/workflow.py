@@ -14,11 +14,12 @@ from .workflow_types import (
     StepConfig,
     WorkflowStep,
     WorkflowStatus,
-    WorkflowInstance
+    WorkflowInstance,
+    WorkflowStepStatus
 )
 from .exceptions import WorkflowExecutionError
 from ..agents.agent_types import AgentType, AgentStatus
-from .config import AgentConfig
+from .agent_config import AgentConfig
 from ..ell2a.types.message import Message, MessageRole, MessageType
 from .workflow_state import WorkflowStateManager
 from .metrics import MetricsManager, MetricType
@@ -27,6 +28,7 @@ from .enums import StepStatus
 import time
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
+from ..agents.agent import AgentState
 
 if TYPE_CHECKING:
     from ..agents.agent import Agent
@@ -85,6 +87,53 @@ class WorkflowEngine:
             await self.state.initialize()
             
             self._initialized = True
+            
+    async def _execute_step(self, step: WorkflowStep, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a workflow step.
+        
+        Args:
+            step: Step to execute
+            context: Execution context
+            
+        Returns:
+            Dict[str, Any]: Step execution result
+            
+        Raises:
+            WorkflowExecutionError: If step execution fails
+        """
+        try:
+            # Check for explicit failure trigger
+            if step.config.params.get("should_fail") or context.get("should_fail"):
+                raise WorkflowExecutionError("Step failed due to should_fail flag")
+            
+            # In test mode, return test response
+            if context.get("test_mode"):
+                return {
+                    "id": step.id,
+                    "type": str(step.type),
+                    "status": WorkflowStatus.SUCCESS.value,
+                    "result": {"content": "Test response"},
+                    "error": None
+                }
+            
+            # Execute step
+            result = await step.execute(context)
+            if not result:
+                raise ValueError(f"Step {step.id} returned no result")
+                
+            return {
+                "id": step.id,
+                "type": str(step.type),
+                "status": WorkflowStatus.SUCCESS.value,
+                "result": result if isinstance(result, dict) else {"content": str(result)},
+                "error": None
+            }
+                
+        except Exception as e:
+            error_msg = str(e)
+            if isinstance(e, WorkflowExecutionError):
+                error_msg = f"Error executing step {step.id}: {error_msg}"
+            raise WorkflowExecutionError(error_msg)
             
     async def register_workflow(self, agent: 'Agent', workflow_config: Optional[WorkflowConfig] = None) -> str:
         """Register workflow for an agent.
@@ -209,8 +258,8 @@ class WorkflowEngine:
             
         except Exception as e:
             # Update agent status on failure
-            agent.state.status = AgentStatus.FAILED
-            
+            agent.state.status = AgentStatus.FAILED.value
+
             # Ensure error is properly propagated
             if isinstance(e, WorkflowExecutionError):
                 raise
@@ -234,7 +283,7 @@ class WorkflowEngine:
         instance.status = WorkflowStatus.RUNNING
         instance.updated_at = datetime.now()
         
-        step_results = []  # Change to list to maintain order
+        step_results = []
         try:
             for step in instance.steps:
                 try:
@@ -242,8 +291,9 @@ class WorkflowEngine:
                     if step.config.params.get("should_fail") or instance.context.get("should_fail"):
                         raise WorkflowExecutionError("Step failed due to should_fail flag")
                     
-                    # For test mode or agent steps, use mock response
-                    if instance.context.get("test_mode") or step.type == WorkflowStepType.AGENT:
+                    # Execute step
+                    if instance.context.get("test_mode"):
+                        # Get agent from workflow config
                         if not instance.config or not instance.config.agent:
                             raise ValueError("No agent configured for workflow")
                         agent = self.agents.get(instance.config.agent.id)
@@ -257,104 +307,65 @@ class WorkflowEngine:
                             metadata={"test_mode": True}
                         )
                         
-                        try:
-                            # Process message through agent's ELL2A
-                            if not agent._ell2a:
-                                raise ValueError("No ELL2A integration available for test mode")
+                        # Process message through agent's ELL2A
+                        if not agent._ell2a:
+                            raise ValueError("No ELL2A integration available for test mode")
+                        result = await agent._ell2a.process_message(message)
+                        
+                        # Handle different result types
+                        if isinstance(result, Message):
+                            content = result.content
+                        elif isinstance(result, dict):
+                            content = result.get("content", "Test response")
+                        else:
+                            content = str(result) if result is not None else "Test response"
                             
-                            # Use agent's ELL2A integration
-                            result = await agent._ell2a.process_message(message)
-                            logger.debug(f"Using agent's ELL2A integration for step {step.id}")
-                            
-                            # Handle different result types
-                            if isinstance(result, Message):
-                                content = result.content
-                            elif isinstance(result, dict):
-                                content = result.get("content", "Test response")
-                            else:
-                                content = str(result) if result is not None else "Test response"
-                                
-                            step_result = {
-                                "id": step.id,
-                                "type": str(step.type),
-                                "status": "success",
-                                "result": {"content": content},
-                                "error": None
-                            }
-                            step_results.append(step_result)  # Append to list
-                            
-                            # Update instance result with step result
-                            instance.result = {
-                                "status": "success",
-                                "steps": step_results,  # Now a list of step results
-                                "error": None,
-                                "content": content
-                            }
-                        except Exception as e:
-                            # Re-raise WorkflowExecutionError or wrap other exceptions
-                            if isinstance(e, WorkflowExecutionError):
-                                raise
-                            raise WorkflowExecutionError(f"Step {step.id} failed: {str(e)}") from e
+                        result = {"content": content}
                     else:
-                        try:
-                            result = await step.execute(instance.context)
-                            if not result:
-                                raise ValueError(f"Step {step.id} returned no result")
-                            step_result = {
-                                "id": step.id,
-                                "type": str(step.type),
-                                "status": "success",
-                                "result": result,
-                                "error": None
-                            }
-                            step_results.append(step_result)  # Append to list
-                        except Exception as e:
-                            # Re-raise WorkflowExecutionError or wrap other exceptions
-                            if isinstance(e, WorkflowExecutionError):
-                                raise
-                            raise WorkflowExecutionError(f"Step {step.id} failed: {str(e)}") from e
-                except Exception as e:
-                    step_result = {
+                        result = await step.execute(instance.context)
+                        
+                    step_results.append({
                         "id": step.id,
                         "type": str(step.type),
-                        "status": "failed",
-                        "result": None,
-                        "error": str(e)
-                    }
-                    step_results.append(step_result)  # Append to list
-                    instance.status = WorkflowStatus.FAILED
-                    instance.error = str(e)
-                    raise WorkflowExecutionError(f"Step {step.id} failed: {str(e)}")  # Raise with proper error
-                    
-            if instance.status != WorkflowStatus.FAILED:
-                instance.status = WorkflowStatus.COMPLETED
-                
-            # Get the result from the last step
-            last_step_result = step_results[-1]["result"]
-            if isinstance(last_step_result, dict):
-                content = last_step_result.get("content", "Test response")
-            elif isinstance(last_step_result, Message):
-                content = last_step_result.content
-            else:
-                content = str(last_step_result) if last_step_result is not None else "Test response"
-                
+                        "status": "completed",
+                        "result": result,
+                        "error": None
+                    })
+                except Exception as e:
+                    logger.error(f"Step execution failed: {str(e)}")
+                    step.execution_state["status"] = StepStatus.FAILED
+                    step.execution_state["error"] = str(e)
+                    raise WorkflowExecutionError(f"Step execution failed: {str(e)}")
+            
+            # Update workflow status
+            instance.status = WorkflowStatus.SUCCESS
             instance.result = {
-                "status": "success",  # Always use "success" for successful execution
-                "steps": step_results,  # Now a list of step results
-                "error": instance.error,
-                "content": content
+                "status": WorkflowStatus.SUCCESS.value,
+                "steps": step_results,
+                "content": instance.context.get("message", "")
             }
-                
+            
+            return instance.result
+            
         except Exception as e:
             instance.status = WorkflowStatus.FAILED
             instance.error = str(e)
             instance.result = {
-                "status": "failed",
-                "steps": step_results,  # Now a list of step results
+                "status": WorkflowStatus.FAILED.value,
+                "steps": step_results,
                 "error": str(e),
                 "content": ""
             }
-            raise  # Re-raise the exception
+            
+            # Update agent status on failure if agent is available
+            if instance.config and instance.config.agent:
+                agent = self.agents.get(instance.config.agent.id)
+                if agent:
+                    agent.state.status = AgentStatus.FAILED.value
+                    
+            if isinstance(e, WorkflowExecutionError):
+                raise
+            raise WorkflowExecutionError(f"Workflow execution failed: {str(e)}")
             
         instance.updated_at = datetime.now()
         return instance.result

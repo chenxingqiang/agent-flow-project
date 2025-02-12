@@ -1,7 +1,7 @@
 """Transform processor module."""
 
 import numpy as np
-from typing import Dict, Any, Union, Callable, List
+from typing import Dict, Any, Union, Callable, List, Optional
 from dataclasses import dataclass
 from ..workflow_types import StepConfig
 from sklearn.preprocessing import StandardScaler
@@ -14,9 +14,22 @@ logger = logging.getLogger(__name__)
 class ProcessorResult:
     """Processor result."""
     data: Dict[str, Any]
-    metadata: Dict[str, str] = None
-    error: str = None
-    output: Dict[str, Any] = None
+    metadata: Optional[Dict[str, str]] = None
+    error: Optional[str] = None
+    output: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary.
+        
+        Returns:
+            Dict[str, Any]: Dictionary representation of the result
+        """
+        return {
+            "data": self.data,
+            "metadata": self.metadata or {},
+            "error": self.error,
+            "output": self.output or {}
+        }
 
 class BaseProcessor:
     """Base processor class."""
@@ -163,21 +176,73 @@ class TransformProcessor(BaseProcessor):
         
         return output
 
-    async def process(self, data: Dict[str, Any]) -> ProcessorResult:
+    async def process(self, data: Union[Dict[str, Any], List[Dict[str, Any]]]) -> ProcessorResult:
         """Process data using the configured transformations."""
         try:
             # Ensure input data is correctly processed
             input_data = data if not isinstance(data, dict) or 'data' not in data else data['data']
             
+            # Special handling for feature engineering strategy with numpy arrays
+            if self.strategy == "feature_engineering" and isinstance(input_data, np.ndarray):
+                # Use StandardScaler for feature engineering
+                with_mean = self.params.get("with_mean", True)
+                with_std = self.params.get("with_std", True)
+                
+                # Perform scaling
+                scaler = StandardScaler(with_mean=with_mean, with_std=with_std)
+                output = scaler.fit_transform(input_data)
+                
+                return ProcessorResult(
+                    data=output,
+                    output={"data": output},
+                    metadata={
+                        "transformations": "feature_engineering",
+                        "transformed_fields": {"all"}
+                    }
+                )
+            
+            # Special handling for outlier removal strategy with numpy arrays
+            if self.strategy == "outlier_removal" and isinstance(input_data, np.ndarray):
+                # Use Isolation Forest for outlier removal
+                method = self.params.get("method", "isolation_forest")
+                threshold = self.params.get("threshold", 0.1)
+                
+                if method == "isolation_forest":
+                    # Perform outlier detection
+                    clf = IsolationForest(contamination=threshold, random_state=42)
+                    y_pred = clf.fit_predict(input_data)
+                    
+                    # Filter out outliers
+                    output = input_data[y_pred != -1]
+                    
+                    return ProcessorResult(
+                        data=output,
+                        output={"data": output},
+                        metadata={
+                            "transformations": "outlier_removal",
+                            "method": method,
+                            "threshold": threshold
+                        }
+                    )
+            
             # Perform transformations
             output = await self.process_data(input_data)
             
+            # Convert output to dictionary if it's a list
+            output_dict = output if isinstance(output, dict) else {"items": output}
+            
+            # Track transformed fields
+            transformed_fields = set()
+            for key, value in self.transformations.items():
+                if key in output_dict:
+                    transformed_fields.add(key)
+            
             return ProcessorResult(
-                data=output,  # Maintain backward compatibility
-                output=output,  # Add output for new tests
+                data=output_dict,
+                output=output_dict,
                 metadata={
                     "transformations": list(self.transformations.keys()),
-                    "transformed_fields": list(output.keys())
+                    "transformed_fields": transformed_fields
                 }
             )
         except Exception as e:
