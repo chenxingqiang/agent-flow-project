@@ -1,6 +1,6 @@
 from typing import List
 import ell
-from ell2a.types.message import Message
+from agentflow.ell2a.types.message import Message
 
 
 

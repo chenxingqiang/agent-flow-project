@@ -9,9 +9,9 @@ import instructor
 from openai import OpenAI
 from pydantic import BaseModel
 
-from ell2a.provider import EllCallParams, Metadata, Provider
-from ell2a.providers.openai import OpenAIProvider
-from ell2a.types.message import ContentBlock, Message
+from agentflow.ell2a.provider import EllCallParams, Metadata, Provider
+from agentflow.ell2a.providers.openai import OpenAIProvider
+from agentflow.ell2a.types.message import ContentBlock, Message
 
 import ell
 

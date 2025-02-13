@@ -1,7 +1,7 @@
 import ell
 import numpy as np
 
-from ell2a.stores.sql import PostgresStore
+from agentflow.ell2a.stores.sql import PostgresStore
 
 class MyPrompt:
     x : int

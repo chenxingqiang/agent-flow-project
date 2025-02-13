@@ -1,8 +1,8 @@
 from typing import List
 from pydantic import BaseModel, Field
 import ell
-from ell2a.types import Message
-from ell2a.stores.sql import SQLiteStore
+from agentflow.ell2a.types import Message
+from agentflow.ell2a.stores.sql import SQLiteStore
 
 
 

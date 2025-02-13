@@ -3,10 +3,10 @@
 # """
 
 # import ell
-# from ell2a.decorators.lm import lm
+# from agentflow.ell2a.decorators.lm import lm
 # import pytest
 # from unittest.mock import patch
-# from ell2a.types import Message, LMPParams
+# from agentflow.ell2a.types import Message, LMPParams
 
 
 

@@ -3,7 +3,7 @@ import ell
 from ell2a import ContentBlock
 from PIL import Image
 import numpy as np
-from ell2a.types.message import to_content_blocks
+from agentflow.ell2a.types.message import to_content_blocks
 
 @ell2a.tool()
 def get_user_name():

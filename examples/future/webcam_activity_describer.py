@@ -3,8 +3,8 @@ import cv2
 import time
 from PIL import Image
 import ell
-from ell2a.types.message import ImageContent
-from ell2a.util.plot_ascii import plot_ascii
+from agentflow.ell2a.types.message import ImageContent
+from agentflow.ell2a.util.plot_ascii import plot_ascii
 
 ell2a.init(verbose=True, store='./logdir', autocommit=True)
 

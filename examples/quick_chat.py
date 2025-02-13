@@ -48,7 +48,7 @@ def chat(message_history : List[Tuple[str, str]], *, personality : str):
 
 
 if __name__ == "__main__":
-    from ell2a.stores.sql import SQLiteStore
+    from agentflow.ell2a.stores.sql import SQLiteStore
     ell2a.init(store='./logdir', autocommit=True, verbose=True)
 
     messages : List[Tuple[str, str]]= []

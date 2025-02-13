@@ -1,9 +1,9 @@
 """Ell Studio integration for AgentFlow monitoring and visualization."""
 import os
 from typing import Dict, Any, Optional, List
-import ell
-from ell2a.tracers import SQLiteTracer
-from ell2a.callbacks import PromptCallback, CompletionCallback
+
+from agentflow.ell2a.tracers import SQLiteTracer
+from agentflow.ell2a.callbacks import PromptCallback, CompletionCallback
 from datetime import datetime
 
 class EllMonitor:

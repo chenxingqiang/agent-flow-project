@@ -54,7 +54,7 @@ def play_midi_file(file_path):
         time.sleep(1)
 
 
-from ell2a.stores.sql import SQLiteStore
+from agentflow.ell2a.stores.sql import SQLiteStore
 
 if __name__ == "__main__":
     ell2a.init(store='./logdir', autocommit=True, verbose=True)

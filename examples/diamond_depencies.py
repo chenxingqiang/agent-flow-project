@@ -30,7 +30,7 @@ Choose the better piece of literature"""
 
 
 if __name__ == "__main__":
-    from ell2a.stores.sql import SQLiteStore
+    from agentflow.ell2a.stores.sql import SQLiteStore
     ell2a.init(store='./logdir', autocommit=True, verbose=True)
 
 

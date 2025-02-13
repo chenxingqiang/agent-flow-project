@@ -1,7 +1,7 @@
 import ell
 import os
 
-from ell2a.stores.sql import SQLiteStore
+from agentflow.ell2a.stores.sql import SQLiteStore
 
 
 

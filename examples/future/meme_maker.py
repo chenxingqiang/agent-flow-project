@@ -4,7 +4,7 @@ import cv2
 import os
 
 import ell
-from ell2a.util.plot_ascii import plot_ascii
+from agentflow.ell2a.util.plot_ascii import plot_ascii
 
 
 # Load the cat meme image using PIL

@@ -1,6 +1,6 @@
 from functools import lru_cache
 import ell
-from ell2a.stores.sql import SQLiteStore
+from agentflow.ell2a.stores.sql import SQLiteStore
 
 CODE_INSTURCTIONS = """
 

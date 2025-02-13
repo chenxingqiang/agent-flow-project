@@ -4,7 +4,7 @@ import ell
 import random
 import numpy as np
 
-from ell2a.stores.sql import SQLiteStore
+from agentflow.ell2a.stores.sql import SQLiteStore
 
 @ell2a.simple(model="gpt-4o-mini")
 def come_up_with_a_premise_for_a_joke_about(topic : str):

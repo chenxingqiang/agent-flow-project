@@ -43,7 +43,6 @@ setup(
         "aiohttp>=3.7.0",
         "fastapi>=0.65.0",
         "uvicorn>=0.13.0",
-        "deepseek-ai>=0.1.0",
     ],
     extras_require={
         "dev": [

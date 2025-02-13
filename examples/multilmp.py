@@ -1,7 +1,7 @@
 from typing import List
 import ell
 
-from ell2a.stores.sql import SQLiteStore
+from agentflow.ell2a.stores.sql import SQLiteStore
 
 
 
@@ -32,7 +32,7 @@ def write_a_really_good_story(about : str):
     return f"Make a final revision of this story in your voice: {best_draft}."
 
 if __name__ == "__main__":
-    from ell2a.stores.sql import SQLiteStore
+    from agentflow.ell2a.stores.sql import SQLiteStore
     ell2a.init(store='./logdir', autocommit=True, verbose=True)
 
     # with ell2a.cache(write_a_really_good_story):
