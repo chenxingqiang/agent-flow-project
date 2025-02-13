@@ -148,6 +148,7 @@ async def main():
     dataset = generate_arithmetic_dataset()
     
     # Create a wrapper class that takes input from dataset
+    @simple(model="deepseek-coder-33b-instruct", temperature=0.7)
     class SolveProblem:
         async def __call__(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
             problem = input_data["input"]
@@ -155,9 +156,7 @@ async def main():
             return {"output": response}
 
         def __await__(self):
-            async def _awaitable():
-                return self
-            return _awaitable().__await__()
+            return self.__call__.__await__()
     
     # Pass the SolveProblem class
     run = await arithmetic_eval.run(SolveProblem, data=dataset, n_workers=10, verbose=True)
