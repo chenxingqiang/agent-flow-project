@@ -1,30 +1,68 @@
 """
 Groq example: pip install ell-ai[groq]
+This example demonstrates using Groq to generate stories.
 """
-import ell
 import groq
+import os
+import asyncio
+from typing import Optional
 
+def get_env_var(name: str) -> str:
+    """Get an environment variable or raise an error if it's not set."""
+    value = os.getenv(name)
+    if not value:
+        raise ValueError(f"Environment variable {name} is not set")
+    return value
 
-ell2a.init(verbose=True, store='./logdir')
+try:
+    # Get Groq API key
+    api_key = get_env_var("GROQ_API_KEY")
+    
+    # Create Groq client
+    groq_client = groq.Groq(api_key=api_key)
 
-# (Recomended) Option 1: Register all groq models.
-ell2a.models.groq.register() # use GROQ_API_KEY env var
-# ell2a.models.groq.register(api_key="gsk-") # 
+except ValueError as e:
+    print(f"Error: {e}")
+    print("Please set the required environment variable:")
+    print("- GROQ_API_KEY")
+    exit(1)
 
-@ell2a.simple(model="llama3-8b-8192", temperature=0.1)
-def write_a_story(about : str):
-    """You are a helpful assistant."""
-    return f"write me a story about {about}"
+async def write_a_story(about: str) -> Optional[str]:
+    """Write a story about the given topic."""
+    try:
+        # Create chat completion
+        completion = groq_client.chat.completions.create(
+            model="llama2-70b-4096",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a creative writer. Your task is to write engaging and imaginative stories."
+                },
+                {
+                    "role": "user",
+                    "content": f"""Write a short, engaging story about {about}. 
+The story should be imaginative and entertaining, with a clear beginning, middle, and end.
+Keep the story between 150-200 words."""
+                }
+            ],
+            temperature=0.7,
+            max_tokens=500
+        )
+        
+        # Return the story
+        return completion.choices[0].message.content if completion.choices else None
+    except Exception as e:
+        print(f"Error generating story: {e}")
+        return None
 
-write_a_story("cats")
+async def main():
+    # Example: Write a story about cats
+    print("\n=== Story Generation Example ===")
+    story_topic = "cats"
+    print(f"Writing a story about: {story_topic}")
+    story = await write_a_story(story_topic)
+    print(f"\nStory:\n{story if story else 'No story generated.'}")
 
-# Option 2: Use a client directly
-client = groq.Groq()
-
-@ell2a.simple(model="llama3-8b-8192", temperature=0.1, client=client)
-def write_a_story_with_client(about : str):
-    """You are a helpful assistant."""
-    return f"write me a story about {about}"
-
-write_a_story_with_client("cats")
+if __name__ == "__main__":
+    asyncio.run(main())
 

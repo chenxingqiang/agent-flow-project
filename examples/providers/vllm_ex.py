@@ -1,25 +1,68 @@
 """
-vLLM example.
+vLLM example: This example demonstrates using vLLM to run local language models.
+Make sure you have vLLM installed and a model running locally:
+pip install vllm
+vllm serve --model meta-llama/Llama-2-7b-chat-hf --port 8000
 """
-from openai import OpenAI
-import ell
-# vllm serve NousResearch/Meta-Llama-3-8B-Instruct --dtype auto --api-key token-abc123
+from agentflow.ell2a.integration import ELL2AIntegration
+import openai
+import os
 
-client = OpenAI(
-    base_url="http://localhost:8000/v1",
-    api_key="token-abc123",
+# Create vLLM client using OpenAI client
+client = openai.OpenAI(
+    base_url="http://localhost:8000/v1",  # vLLM server URL
+    api_key="not-needed"  # vLLM doesn't need an API key
 )
 
-@ell2a.simple(model="NousResearch/Meta-Llama-3-8B-Instruct", client=client, temperature=0.1)
-def write_a_story(about : str):
-    return f"write me a story about {about}"
+async def generate_story(topic: str) -> str:
+    """Generate a story using a local model through vLLM."""
+    try:
+        response = client.chat.completions.create(
+            model="meta-llama/Llama-2-7b-chat-hf",  # The model you're serving with vLLM
+            messages=[{
+                "role": "user",
+                "content": f"""Write a short, creative story about {topic}. 
+The story should be imaginative and entertaining, with a clear beginning, middle, and end.
+Keep the story between 150-200 words."""
+            }],
+            temperature=0.7,
+            max_tokens=300
+        )
+        return response.choices[0].message.content or "No story generated."
+    except Exception as e:
+        return f"Error generating story: {str(e)}"
 
-# or register models
-ell2a.config.register_model("NousResearch/Meta-Llama-3-8B-Instruct", client)
+async def chat_with_model(prompt: str) -> str:
+    """Chat with the local model through vLLM."""
+    try:
+        response = client.chat.completions.create(
+            model="meta-llama/Llama-2-7b-chat-hf",  # The model you're serving with vLLM
+            messages=[{
+                "role": "user",
+                "content": prompt
+            }],
+            temperature=0.7,
+            max_tokens=300
+        )
+        return response.choices[0].message.content or "No response generated."
+    except Exception as e:
+        return f"Error in conversation: {str(e)}"
 
-# no need to specify client!
-@ell2a.simple(model="NousResearch/Meta-Llama-3-8B-Instruct", temperature=0.1)
-def write_a_story_no_client(about : str):
-    return f"write me a story about {about}"
+async def main():
+    # Example 1: Story Generation
+    print("\n=== Story Generation Example ===")
+    story_topic = "a scientist who invents a device that can talk to plants"
+    print(f"Writing a story about: {story_topic}")
+    story = await generate_story(story_topic)
+    print(f"\nStory:\n{story}")
+    
+    # Example 2: Chat Conversation
+    print("\n=== Chat Example ===")
+    chat_prompt = "What are three interesting facts about plant communication?"
+    print(f"Question: {chat_prompt}")
+    response = await chat_with_model(chat_prompt)
+    print(f"\nResponse:\n{response}")
 
-write_a_story()
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())

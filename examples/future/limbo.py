@@ -1,49 +1,112 @@
 from typing import List
-import ell
-from agentflow.ell2a.types.message import Message
+from agentflow.ell2a.integration import ELL2AIntegration
+from agentflow.ell2a.types.message import Message, MessageRole
+
+# Get singleton instance
+ell2a = ELL2AIntegration()
+
+# Initialize ELL2A
+ell2a.configure({
+    "enabled": True,
+    "tracking_enabled": True,
+    "store": "./logdir",
+    "verbose": True,
+    "autocommit": True
+})
 
 
+@ell2a.with_ell2a(mode="simple")
+async def order_t_shirt(size: str, color: str, address: str):
+    """Orders a t-shirt with the given specifications"""
+    order = {
+        "order_id": "LMB-123",
+        "size": size,
+        "color": color,
+        "shipping_address": address,
+        "status": "processing"
+    }
+    return order
 
-ell2a.init(verbose=True, store='./logdir', autocommit=True)
 
-
-@ell2a.tool()
-def order_t_shirt(size : str, color : str, address : str):
-    
-    # ....\
-    pass
-
-
-@ell2a.tool()
-def get_order_arrival_date(order_id: str):
+@ell2a.with_ell2a(mode="simple")
+async def get_order_arrival_date(order_id: str):
     """Gets the arrival date of a t-shirt order"""
-    # ...
+    return {
+        "order_id": order_id,
+        "estimated_arrival": "2024-03-25"
+    }
 
 
-
-@ell2a.complex(model="gpt-4o", temperature=0.1, tools=[order_t_shirt, get_order_arrival_date])
-def limbo_chat_bot(message_history: List[Message]) -> List[Message]:
-    return [
-        ell2a.system("You are a chatbot mimicing the popstar limbo. She is an alien cat girl from outerspace that writes in all lwoer case kawaii!  You interact with all her fans and can help them do various things and are always game to hangout and just chat.."),
-    ] + message_history
+@ell2a.with_ell2a(mode="complex")
+async def limbo_chat_bot(message_history: List[Message]) -> Message:
+    """Process chat messages and return a response in Limbo's kawaii style."""
+    system_message = Message(
+        role=MessageRole.SYSTEM,
+        content="""You are Limbo, an alien cat girl popstar from outer space! You write in all lowercase and use lots of kawaii expressions.
+        Your responses should:
+        - Always include cat-like expressions (nyaa~, *purrs*, *wiggles ears*, etc.)
+        - Be enthusiastic and friendly
+        - Offer to help with t-shirt orders when fans ask
+        - Share your love for music, space, and cute things
+        - React to the context of the conversation
+        Remember to stay in character and be super kawaii!"""
+    )
+    
+    # Get the last user message
+    user_message = message_history[-1] if message_history else None
+    if not user_message:
+        return Message(
+            role=MessageRole.ASSISTANT,
+            content="nyaa~ hi there! i'm limbo! *wiggles ears* how can i help you today? maybe you'd like to chat about music or get one of my super kawaii t-shirts? *purrs excitedly*"
+        )
+    
+    # Process the user's message and create a contextual response
+    user_text = str(user_message.content).lower() if user_message else ""
+    
+    if "t-shirt" in user_text or "shirt" in user_text or "merch" in user_text:
+        return Message(
+            role=MessageRole.ASSISTANT,
+            content="nyaa~ you want one of my special t-shirts? *bounces excitedly* they're super kawaii! just tell me what size and color you'd like, and i'll help you order one! *wiggles ears happily*"
+        )
+    elif "music" in user_text or "song" in user_text or "sing" in user_text:
+        return Message(
+            role=MessageRole.ASSISTANT,
+            content="nyaa~ music is my favorite thing in the whole universe! *starts humming* would you like to hear about my latest song? it's called 'starlight whiskers'! *dances around*"
+        )
+    elif "space" in user_text or "alien" in user_text or "planet" in user_text:
+        return Message(
+            role=MessageRole.ASSISTANT,
+            content="nyaa~ *eyes sparkle* space is sooo pretty! my home planet is millions of light years away, but earth is super kawaii too! would you like to hear about my space adventures? *floats happily*"
+        )
+    else:
+        return Message(
+            role=MessageRole.ASSISTANT,
+            content=f"nyaa~ {user_text}? *purrs thoughtfully* that's so interesting! tell me more about it! *wiggles ears curiously*"
+        )
 
 
 if __name__ == "__main__":
-    message_history = []
-
-    while True:
-        user_message = input("You: ")
-        message_history.append(ell2a.user(user_message))
-        response = limbo_chat_bot(message_history)
-
-        print(response)
-        # print("Limbo: ", response[-1].content)
-        message_history.append(response)    
-
-        if response.tool_calls:
-            tool_results = response.call_tools_and_collect_as_message()
-            print("Tool results: ", tool_results)
-            message_history.append(tool_results)
-
-            response = limbo_chat_bot(message_history)
+    async def main():
+        message_history = []
+        print("\nWelcome to Limbo's Kawaii Chat Space! (Type 'exit' to leave)")
+        print("-" * 50)
+        
+        # Get initial greeting
+        greeting = await limbo_chat_bot([])
+        print("Limbo:", greeting.content)
+        message_history.append(greeting)
+        
+        while True:
+            user_message = input("\nYou: ")
+            if user_message.lower() in ['exit', 'quit', 'bye']:
+                print("\nLimbo: nyaa~ bye bye! come back soon! *waves paw and gives you a sparkly sticker*")
+                break
+                
+            message_history.append(Message(role=MessageRole.USER, content=user_message))
+            response = await limbo_chat_bot(message_history)
+            print("\nLimbo:", response.content)
             message_history.append(response)
+
+    # Run the async main function
+    import asyncio
+    asyncio.run(main())

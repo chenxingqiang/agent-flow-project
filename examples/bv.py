@@ -1,6 +1,10 @@
 from functools import lru_cache
-import ell
-from agentflow.ell2a.stores.sql import SQLiteStore
+from agentflow.ell2a.integration import ELL2AIntegration
+from agentflow.ell2a.types.message import Message, MessageRole
+from agentflow.ell2a.stores import SQLStore
+
+# Get singleton instance
+ell2a = ELL2AIntegration()
 
 CODE_INSTURCTIONS = """
 
@@ -23,22 +27,87 @@ def get_lmp(z=10):
     y = 13
     y = z
 
-    @ell2a.simple("gpt-4o-mini", temperature=0.1, max_tokens=6)
-    def write_a_complete_python_class(user_spec: str):
-        return [
-            ell2a.system(
-                f"""You are an mid-tier python programmer capable of interpreting a user's spec and writing a python class to accomidate their request. You should document all your code, and you best practices.
-        {CODE_INSTURCTIONS} {z} {y} {test} {another_serializeable_global}
-        """
-            ),
-            ell2a.user(user_spec),
-        ]
+    @ell2a.with_ell2a(mode="complex")
+    async def write_a_complete_python_class(user_spec: str) -> str:
+        """Write a complete Python class based on user specification."""
+        # Create system message
+        system_message = Message(
+            role=MessageRole.SYSTEM,
+            content="""You are a Python programmer who writes clean, well-documented code. You should:
+1. Write code with proper docstrings and type hints
+2. Include appropriate methods and attributes
+3. Follow PEP 8 style guidelines
+4. Only output the code, no additional text or markdown""",
+            metadata={
+                "type": "text",
+                "format": "code"
+            }
+        )
+        
+        # Create user message
+        user_message = Message(
+            role=MessageRole.USER,
+            content=f"""Create a Python class that represents {user_spec}. The class should include:
+1. Appropriate instance variables with type hints
+2. A constructor with proper parameter validation
+3. Methods for common operations
+4. Property decorators where appropriate
+5. Comprehensive docstrings for the class and all methods""",
+            metadata={
+                "type": "text",
+                "format": "code"
+            }
+        )
+        
+        # Process system message
+        await ell2a.process_message(system_message)
+        
+        # Process user message and get response
+        response = await ell2a.process_message(user_message)
+        
+        # Return the response
+        if isinstance(response, Message):
+            content = response.content
+            if isinstance(content, list):
+                content = content[0] if content else ""
+            return str(content)
+        elif isinstance(response, dict):
+            content = response.get("content", "")
+            if isinstance(content, list):
+                content = content[0] if content else ""
+            return str(content)
+        else:
+            return str(response)
 
     return write_a_complete_python_class
 
 
 if __name__ == "__main__":
-    ell2a.init(verbose=True, store=("./logdir"), autocommit=True)
-    # test[0] = "modified at execution :O"
+    # Initialize ELL2A
+    ell2a.configure({
+        "enabled": True,
+        "tracking_enabled": True,
+        "store": "./logdir",
+        "verbose": True,
+        "autocommit": True,
+        "model": "gpt-4",
+        "default_model": "gpt-4",
+        "temperature": 0.1,
+        "max_tokens": 1000
+    })
+    
+    # Run the example
+    import asyncio
     w = get_lmp(z=20)
-    cls_Def = w("A class that represents a bank")
+    bank_spec = """a bank with the following features:
+- Account management (create, close, get balance)
+- Transaction handling (deposit, withdraw, transfer)
+- Interest calculation for savings accounts
+- Account types (checking, savings)
+- Transaction history tracking"""
+    
+    cls_def = asyncio.run(w(bank_spec))
+    print("\nGenerated Bank Class:")
+    print("-" * 50)
+    print(cls_def)
+    print("-" * 50)

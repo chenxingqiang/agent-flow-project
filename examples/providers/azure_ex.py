@@ -1,37 +1,74 @@
-import ell
+"""
+Azure OpenAI example: pip install ell-ai[azure]
+This example demonstrates using Azure OpenAI to generate stories.
+"""
+from agentflow.ell2a.integration import ELL2AIntegration
 import openai
 import os
-ell2a.init(verbose=True, store='./logdir')
+from typing import Optional
 
-# your subscription key
-subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
-# Your Azure OpenAI resource https://<your resource name>.openai.azure.com/
-azure_endpoint = "https://<your resource name>.openai.azure.com/"
-# Option 2: Use a client directly
-azureClient = openai.AzureOpenAI(
-    azure_endpoint = azure_endpoint,
-    api_key = subscription_key,
-    api_version = "2024-05-01-preview",
-)
-# (Recommended) Option 1: Register all the models on your Azure resource & use your models automatically
-ell2a.config.register_model("<your-azure-model-deployment-name>", azureClient)
+# Get singleton instance
+ell2a = ELL2AIntegration()
 
-@ell2a.simple(model="<your-azure-model-deployment-name>")
-def write_a_story(about : str):
-    return f"write me a story about {about}!"
+# Initialize ELL2A
+ell2a.configure({
+    "enabled": True,
+    "tracking_enabled": True,
+    "store": "./logdir",
+    "verbose": True,
+    "autocommit": True,
+    "model": "gpt-4",  # Default model
+    "default_model": "gpt-4"
+})
 
-write_a_story("cats")
+def get_env_var(name: str) -> str:
+    """Get an environment variable or raise an error if it's not set."""
+    value = os.getenv(name)
+    if not value:
+        raise ValueError(f"Environment variable {name} is not set")
+    return value
 
+# Your Azure OpenAI credentials
+try:
+    subscription_key = get_env_var("AZURE_OPENAI_API_KEY")
+    azure_endpoint = get_env_var("AZURE_OPENAI_ENDPOINT")
+    deployment_name = get_env_var("AZURE_OPENAI_DEPLOYMENT")
 
-# Option 2: Use a client directly
-azureClient = openai.AzureOpenAI(
-    azure_endpoint = azure_endpoint,
-    api_key = subscription_key,
-    api_version = "2024-05-01-preview",
-)
+    # Create Azure OpenAI client
+    azure_client = openai.AzureOpenAI(
+        azure_endpoint=azure_endpoint,
+        api_key=subscription_key,
+        api_version="2024-02-15-preview"
+    )
 
-@ell2a.simple(model="<your-azure-model-deployment-name>", client=azureClient)
-def write_a_story(about : str):
-    return f"write me a story about {about}"
+    # Configure ELL2A to use the Azure model
+    ell2a.configure({
+        "model": deployment_name,
+        "default_model": deployment_name,
+        "client": azure_client
+    })
 
-write_a_story("cats")
+except ValueError as e:
+    print(f"Error: {e}")
+    print("Please set the required environment variables:")
+    print("- AZURE_OPENAI_API_KEY")
+    print("- AZURE_OPENAI_ENDPOINT")
+    print("- AZURE_OPENAI_DEPLOYMENT")
+    exit(1)
+
+@ell2a.with_ell2a(mode="simple")
+async def write_a_story(about: str) -> str:
+    """Write a story about the given topic."""
+    return f"Write me a creative and engaging story about {about}!"
+
+async def main():
+    # Example: Write a story about cats
+    print("\n=== Story Generation Example ===")
+    story_topic = "cats"
+    print(f"Writing a story about: {story_topic}")
+    story = await write_a_story(story_topic)
+    print(f"\nStory:\n{story}")
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())

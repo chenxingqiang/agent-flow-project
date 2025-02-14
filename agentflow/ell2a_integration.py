@@ -8,6 +8,18 @@ class ELL2AIntegration:
     """Singleton class for ELL2A integration."""
     
     _instance = None
+    _initialized = False
+    _messages = []
+    _mode_configs = {
+        "simple": {"model": "test-model"},
+        "complex": {
+            "model": "test-model-complex",
+            "track_performance": True,
+            "track_memory": True
+        }
+    }
+    _workflows = {}
+    _metrics = {}
     
     def __new__(cls):
         """Create or return singleton instance."""
@@ -18,18 +30,7 @@ class ELL2AIntegration:
     
     def __init__(self):
         """Initialize instance attributes."""
-        self._messages = []
-        self._mode_configs = {
-            "simple": {"model": "test-model"},
-            "complex": {
-                "model": "test-model-complex",
-                "track_performance": True,
-                "track_memory": True
-            }
-        }
-        self._workflows = {}
-        self._metrics = {}
-        self._initialized = False
+        pass
     
     def _initialize(self):
         """Initialize ELL2A integration."""

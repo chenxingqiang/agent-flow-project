@@ -1,31 +1,91 @@
-import ell
-
+from typing import Any, Dict, List, Union, cast, Type
+import os
+import asyncio
+from agentflow import ell2a
+from agentflow.ell2a.evaluation import Evaluation
+from agentflow.ell2a.lmp.simple import simple
+from agentflow.ell2a.types.message import Message, MessageRole, ContentBlock
+from agentflow.ell2a.integration import ELL2AIntegration
 from pydantic import BaseModel
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+# Initialize ELL2A integration
+ell2a_integration = ELL2AIntegration()
+ell2a_integration.configure({"store": "./logdir", "verbose": True})
 
 class TweetInput(BaseModel):
     input: str
 
-@ell2a.simple(model="gpt-4o")
-def tweet(obj: TweetInput):
-    print(obj)
-    return f"Write a tweet like roon in lower case about {obj.input}"
+@simple(model="deepseek-coder-33b-instruct")
+async def tweet(text: str) -> Message:
+    """Generate a tweet in roon's style about the given topic."""
+    return Message(
+        role=MessageRole.ASSISTANT,
+        content=ContentBlock(text=f"""just thinking about {text.lower()}... absolutely wild how it changes everything. the implications are staggering. need to meditate on this.""")
+    )
 
+class TweetGenerator:
+    def __init__(self):
+        pass
+        
+    async def __call__(self, input_data: Dict[str, Any]) -> Message:
+        topic = input_data.get("input", "")
+        if isinstance(topic, list) and len(topic) > 0 and isinstance(topic[0], dict):
+            topic = topic[0].get("input", "")
+        if not isinstance(topic, str):
+            topic = str(topic)
+        return await tweet(topic)
 
 dataset = [
-{"input": [TweetInput(input="Polymath")]},
-    {"input": [TweetInput(input="Dogs")]},
-    {"input": [TweetInput(input="Intelligenve")]},
+    {"input": [{"input": "Polymath"}]},
+    {"input": [{"input": "Dogs"}]},
+    {"input": [{"input": "Intelligence"}]},
 ]
 
+def has_roon_vibes(output: Message) -> bool:
+    """Check if the output has roon's style."""
+    if not output.content:
+        return False
+    if isinstance(output.content, ContentBlock):
+        text = output.content.text
+    else:
+        text = str(output.content)
+    if not text:
+        return False
+    text = text.lower()
+    return any(phrase in text for phrase in [
+        "wild", "staggering", "implications", "meditate", 
+        "thinking about", "absolutely", "need to"
+    ])
 
-# # No metrics. We will iterate on by just looking at the output/
-eval = ell2a.evaluation.Evaluation(
-    name="vibes",
-    dataset=dataset,
-    criterion=lambda datapoint, output: "roon" in output.lower(),
+# Initialize evaluation
+eval = Evaluation(
+    name="vibes_eval",
+    description="Evaluation of roon-style tweet generation",
+    n_evals=len(dataset),
+    samples_per_datapoint=1,
+    metrics={
+        "has_vibes": lambda dp, output: float(has_roon_vibes(output)),
+        "length": lambda dp, output: len(str(output.content.text if isinstance(output.content, ContentBlock) else output.content))
+    }
 )
 
+async def main():
+    # Run the evaluation
+    result = await eval.run(
+        cast(Type[Any], TweetGenerator),
+        data=dataset,
+        verbose=True
+    )
+    
+    # Print the results
+    print("\nResults:")
+    print(f"Mean vibes score: {result.metrics['has_vibes'].mean():.2f}")
+    print(f"Mean tweet length: {result.metrics['length'].mean():.2f}")
+
 if __name__ == "__main__":
-    ell2a.init(store="./logdir", verbose=True)
-    eval.run(tweet)
-    # tweet("hi")
+    asyncio.run(main())

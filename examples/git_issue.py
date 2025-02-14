@@ -1,62 +1,102 @@
-import ell
+from agentflow.ell2a.integration import ELL2AIntegration
+from agentflow.ell2a.types.message import Message, MessageRole, MessageType
 import os
+import platform
 
-from agentflow.ell2a.stores.sql import SQLiteStore
+# Get singleton instance
+ell2a = ELL2AIntegration()
 
+# Configure ELL2A
+ell2a.configure({
+    "simple": {
+        "model": "gpt-4",
+        "max_retries": 3,
+        "retry_delay": 1.0,
+        "timeout": 30.0
+    },
+    "complex": {
+        "model": "gpt-4",
+        "max_retries": 3,
+        "retry_delay": 1.0,
+        "timeout": 60.0,
+        "stream": True,
+        "track_performance": True,
+        "track_memory": True
+    }
+})
 
-
-@ell2a.simple(model="gpt-4o-mini", temperature=0.1)
-def generate_description(about : str):
-    return [
-        ell2a.system(f"""Provide a clear and concise description of what the issue is. Include any relevant information that helps to explain the problem. 
-                   This section should help the reader understand the context and the impact of the issue. 
-                   Output only the description as a string and nothing else"""),
-        ell2a.user(f"Generate a issue description about {about}."),
-    ]
-
-@ell2a.simple(model="gpt-4o-mini", temperature=0.1)
-def generate_python_code_for_A_output_B(A: str, B: str = 'nothing'):
-    return [
-        ell2a.system(f"""You are a world-class python developer. Do not include code that can leak important privacy information that maybe of concern.
-                   Check the code carefully in terms of correctness, style and efficiency. 
-                   Do not format in markdown. You are directly outputting python code. 
-                   Do not include use code to get system information that is not important to github issue.
-                   You can also do multiline code if you need ot import any dependency. Do not write wrap any code in functions.
-                    """),
-        ell2a.user(f"Write the python code for {A} and the code should have a local 'OUTPUT' as {B}. Only output the code and nothing else."),
-    ]
-
-@ell2a.simple(model="gpt-4o", temperature=0.1)
-def generate_issue(
-                    error: str,
-                   ):
-        #generate description
-    description = generate_description(error)
-
-    # Define topics for system information
-    info_topics = ['operating system info', 
-                'Hardware',
-                ]
-                
-    # Generate Python code for each info topic
-    ls_code = [generate_python_code_for_A_output_B(i, 'string') for i in info_topics]
-    system_info = []
-    # Execute each generated code snippet
-    for code in ls_code:
-        local_vars = {}
-        exec(code, globals(), local_vars)
-        # Record the output 
-        system_info.append(local_vars.get("OUTPUT"))
+@ell2a.with_ell2a(mode="simple")
+async def generate_description(about: str) -> str:
+    """Generate a description for a git issue."""
+    message = Message(
+        role=MessageRole.SYSTEM,
+        content="""Provide a clear and concise description of what the issue is. Include any relevant information that helps to explain the problem. 
+               This section should help the reader understand the context and the impact of the issue. 
+               Output only the description as a string and nothing else""",
+        type=MessageType.TEXT,
+        metadata={"type": "text", "format": "plain"}
+    )
     
-    return [
-        ell2a.system("You are an expert at Markdown and at writing git issues. Output Markdown and nothing else"),
-        ell2a.user(f"Write a git issue with the following description: {description}. Here is the system information: {system_info}"),
-    ]
+    user_message = Message(
+        role=MessageRole.USER,
+        content=f"Generate a issue description about {about}.",
+        type=MessageType.TEXT,
+        metadata={"type": "text", "format": "plain"}
+    )
+    
+    # Process messages
+    await ell2a.process_message(message)
+    response = await ell2a.process_message(user_message)
+    
+    return str(response.content) if response and response.content else ""
 
-if __name__ == "__main__":
+def get_system_info() -> dict:
+    """Get system information."""
+    return {
+        "operating system info": f"{platform.system()} {platform.release()}",
+        "Hardware": f"Machine: {platform.machine()}, Processor: {platform.processor()}"
+    }
 
-    ell2a.init(store='./logdir', autocommit=True, verbose=True)
+@ell2a.with_ell2a(mode="complex")
+async def generate_issue(error: str) -> str:
+    """Generate a complete git issue."""
+    # Generate description
+    description = await generate_description(error)
 
+    # Get system information
+    system_info = get_system_info()
+                
+    # Create messages for issue generation
+    message = Message(
+        role=MessageRole.SYSTEM,
+        content="You are an expert at Markdown and at writing git issues. Output Markdown and nothing else",
+        type=MessageType.TEXT,
+        metadata={"type": "text", "format": "markdown"}
+    )
+    
+    user_message = Message(
+        role=MessageRole.USER,
+        content=f"""Write a git issue with the following:
+
+Description:
+{description}
+
+System Information:
+- OS: {system_info['operating system info']}
+- Hardware: {system_info['Hardware']}
+
+Please format this as a proper GitHub issue with appropriate markdown formatting.""",
+        type=MessageType.TEXT,
+        metadata={"type": "text", "format": "markdown"}
+    )
+    
+    # Process messages
+    await ell2a.process_message(message)
+    response = await ell2a.process_message(user_message)
+    
+    return str(response.content) if response and response.content else ""
+
+async def main():
     # This is an example from ell's early day error
     error_console_output = """
     (ell2a_lab) D:\\dev\\ell>D:/anaconda/envs/ell2a_lab/python.exe d:/dev/ell/examples/multilmp.py
@@ -122,14 +162,19 @@ if __name__ == "__main__":
     if error_console_output is None or error_console_output == "":
         raise ValueError("Error console output is required. Please provide the console output of the error.")
 
-
     desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
     output_file = os.path.join(desktop_path, "git_issue.md")
 
-    # generate a conda yaml file. Add print for success and filepath.
-    # env_info =  'generate a .yaml on desktop for the current conda environment. Add print for success and filepath.'
-    # exec(generate_python_code_for_A_output_B(env_info))
+    # Generate the issue
+    issue_content = await generate_issue(error_console_output)
 
+    # Write to file
     with open(output_file, "w") as f:
-        f.write(generate_issue(error_console_output))
+        f.write(issue_content)
+    
+    print(f"\nGit issue has been generated and saved to: {output_file}")
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
 

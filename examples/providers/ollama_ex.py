@@ -1,23 +1,65 @@
 """
-Ollama example.
+Ollama example: This example demonstrates using Ollama to generate stories.
+Make sure you have Ollama running locally (http://localhost:11434).
 """
-import ell
-
-ell2a.init(verbose=True, store='./logdir')
-# Use models automatically registered by asking ollama 
-ell2a.models.ollama.register(base_url="http://localhost:11434/v1")
-
-# in terminal run ollama list to see available models
-@ell2a.simple(model="llama3.1:latest", temperature=0.1)
-def write_a_story():
-    return "write me a story"
-
-# Or use the client directly
+from agentflow.ell2a.integration import ELL2AIntegration
 import openai
-client = openai.Client(
-    base_url="http://localhost:11434/v1", api_key="ollama"  # required but not used
+import os
+from typing import Optional
+
+# Get singleton instance
+ell2a = ELL2AIntegration()
+
+# Initialize ELL2A
+ell2a.configure({
+    "enabled": True,
+    "tracking_enabled": True,
+    "store": "./logdir",
+    "verbose": True,
+    "autocommit": True
+})
+
+# Create Ollama client
+client = openai.OpenAI(
+    base_url="http://localhost:11434/v1",
+    api_key="ollama"  # required but not used
 )
-@ell2a.simple(model="llama3.1:latest", temperature=0.1, max_tokens=100, client=client)
-def write_a_story_with_client():
-    return "write me a short story"
+
+def write_a_story(topic: str) -> str:
+    """Write a story about the given topic."""
+    try:
+        response = client.chat.completions.create(
+            model="llama2",  # or any other model you have pulled
+            messages=[{
+                "role": "user",
+                "content": f"""Write a short, creative story about {topic}. 
+The story should be imaginative and entertaining, with a clear beginning, middle, and end.
+Keep the story between 150-200 words."""
+            }],
+            temperature=0.7,
+            max_tokens=300
+        )
+        return response.choices[0].message.content or "No story was generated."
+    except Exception as e:
+        return f"Error generating story: {str(e)}"
+
+async def main():
+    # Example topics
+    topics = [
+        "a magical forest",
+        "a time-traveling scientist",
+        "a friendly robot"
+    ]
+    
+    print("\n=== Story Generation Example ===")
+    for i, topic in enumerate(topics, 1):
+        print(f"\nStory {i}:")
+        print(f"Topic: {topic}")
+        story = write_a_story(topic)
+        print(f"\nStory:\n{story}")
+        print("\n" + "="*50)
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
 

@@ -10,16 +10,32 @@ def execute_async_workflow():
     # Workflow configuration
     workflow_config = {
         "workflow": {
-            "WORKFLOW": [
+            "name": "academic_research",
+            "steps": [
                 {
-                    "input": ["research_topic", "deadline", "academic_level"],
-                    "output": {"type": "research"},
-                    "step": 1
+                    "id": "research_step",
+                    "name": "Research Phase",
+                    "type": "transform",
+                    "config": {
+                        "strategy": "custom",
+                        "params": {
+                            "input": ["research_topic", "deadline", "academic_level"],
+                            "output": {"type": "research"}
+                        }
+                    }
                 },
                 {
-                    "input": ["WORKFLOW.1"],
-                    "output": {"type": "document"},
-                    "step": 2
+                    "id": "document_step",
+                    "name": "Documentation Phase",
+                    "type": "transform",
+                    "dependencies": ["research_step"],
+                    "config": {
+                        "strategy": "custom",
+                        "params": {
+                            "input": ["research_step"],
+                            "output": {"type": "document"}
+                        }
+                    }
                 }
             ]
         },
@@ -43,7 +59,7 @@ def execute_async_workflow():
             print(f"Async Workflow Initiated. Result Reference: {result_ref}")
 
             # Poll for result
-            max_attempts = 10
+            max_attempts = 30  # Increased max attempts
             attempt = 0
             while attempt < max_attempts:
                 result_response = requests.get(result_url.format(result_ref))
@@ -57,7 +73,7 @@ def execute_async_workflow():
                     break
                 elif result_response.status_code == 404:
                     print(f"Waiting for result... (Attempt {attempt + 1}/{max_attempts})")
-                    time.sleep(2)  # Wait before next attempt
+                    time.sleep(5)  # Increased wait time
                     attempt += 1
                 else:
                     print(f"Error: {result_response.status_code}")

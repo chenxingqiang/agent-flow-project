@@ -3,11 +3,17 @@ Example usage of ELL (Extensible Language Layer)
 """
 
 import os
-import ell
-from typing import List
+from typing import List, Dict, Any
 import asyncio
 from PIL import Image
+from pydantic import BaseModel, Field
+from duckduckgo_search import DDGS
 
+from agentflow.ell2a_integration import ELL2AIntegration
+from agentflow.ell2a.types.message import Message, MessageRole
+
+# Get ELL2A integration instance
+ell2a = ELL2AIntegration()
 # Initialize ELL with API key and versioning
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
@@ -16,38 +22,110 @@ if not api_key:
 # Set OpenAI API key
 os.environ["OPENAI_API_KEY"] = api_key
 
-# Initialize ELL with versioning
-ell2a.init(store='./ell2a_logs')
+# Initialize ELL with configuration
+ell2a.configure({
+    "enabled": True,
+    "tracking_enabled": True,
+    "store": "./ell2a_logs",
+    "verbose": True,
+    "autocommit": True,
+    "model": "gpt-4",
+    "default_model": "gpt-4",
+    "temperature": 0.1,
+    "mode": "simple",
+    "metadata": {
+        "type": "text",
+        "format": "plain"
+    }
+})
+
+class SearchResult(BaseModel):
+    """Model for search results"""
+    query: str
+    results: List[Dict[str, str]]
+
+@ell2a.with_ell2a(mode="simple")
+async def web_search(query: str) -> SearchResult:
+    """Real web search using DuckDuckGo"""
+    try:
+        ddgs = DDGS()
+        # Use text search with minimal parameters
+        results = []
+        for r in ddgs.text(query, max_results=5):
+            results.append(r)
+            
+        # Format results as list of dicts with title and snippet
+        formatted_results = [
+            {
+                "title": result.get("title", "No title"),
+                "snippet": result.get("body", "No content available"),
+                "link": result.get("link", "")
+            }
+            for result in results
+        ]
+        
+        return SearchResult(
+            query=query,
+            results=formatted_results if formatted_results else [
+                {
+                    "title": "No Results",
+                    "snippet": "No search results found. Please try a different query.",
+                    "link": ""
+                }
+            ]
+        )
+    except Exception as e:
+        # Return empty results on error with more detailed error message
+        error_msg = f"Search failed: {str(e)}. This might be due to rate limiting or network issues. Please try again in a few moments."
+        return SearchResult(
+            query=query,
+            results=[{"title": "Error", "snippet": error_msg, "link": ""}]
+        )
 
 # Simple prompt example
-@ell2a.simple(model="gpt-4")
+@ell2a.with_ell2a(mode="simple")
 async def summarize(text: str) -> str:
     """You are a helpful assistant that summarizes text concisely."""
     return f"Please summarize this text in one sentence: {text}"
 
-# Complex prompt with tools example
-@ell2a.tool()
-async def search_web(query: str) -> str:
-    """Search the web for information."""
-    # Simulate web search
-    return f"Search results for: {query}"
-
-@ell2a.complex(model="gpt-4", tools=[search_web])
-async def research_topic(topic: str) -> List[ell2a.Message]:
+# Complex prompt example with tool usage
+@ell2a.with_ell2a(mode="complex")
+async def research_topic(topic: str) -> List[Message]:
     """Research a given topic using web search."""
+    # First, search for information
+    search_results = await web_search(topic)
+    
+    # Format search results for better readability
+    formatted_results = "\n\n".join([
+        f"Title: {result['title']}\nSummary: {result['snippet']}\nSource: {result['link']}"
+        for result in search_results.results
+    ])
+    
     messages = [
-        ell2a.system("You are a research assistant that uses web search to find information."),
-        ell2a.user(f"Research this topic and provide key findings: {topic}")
+        Message(
+            role=MessageRole.SYSTEM, 
+            content="You are a research assistant that provides comprehensive analysis by combining search results with your knowledge. Format your response with clear sections and cite sources when using search results."
+        ),
+        Message(
+            role=MessageRole.USER, 
+            content=f"Research this topic: {topic}\n\nSearch Results:\n{formatted_results}\n\nProvide a comprehensive analysis combining these search results with your knowledge. Include citations when referencing search results."
+        )
     ]
     return messages
 
 # Multimodal example
-@ell2a.complex(model="gpt-4-vision-preview")
-async def analyze_image(image: Image.Image) -> List[ell2a.Message]:
+@ell2a.with_ell2a(mode="complex")
+async def analyze_image(image: Image.Image) -> List[Message]:
     """Analyze the given image."""
     messages = [
-        ell2a.system("You are a computer vision expert. Analyze the image and describe what you see."),
-        ell2a.user(["Describe this image in detail:", image])
+        Message(
+            role=MessageRole.SYSTEM, 
+            content="You are a computer vision expert. Analyze the image and describe what you see."
+        ),
+        Message(
+            role=MessageRole.USER, 
+            content=["Describe this image in detail:", image]
+        )
     ]
     return messages
 
@@ -61,18 +139,16 @@ async def main():
         )
         print("Summary:", summary)
         
-        # Test complex prompt with tools
-        print("\nTesting complex prompt with tools...")
+        # Test complex prompt with tool
+        print("\nTesting complex prompt with tool...")
         research = await research_topic("artificial intelligence trends 2024")
-        print("Research Results:", research.text)
-        if research.tool_calls:
-            print("Tool Calls:", research.tool_calls)
+        print("Research Results:", research)
         
         # Test multimodal (commented out as it requires an image)
         # print("\nTesting multimodal...")
         # image = Image.open("example.jpg")
         # analysis = await analyze_image(image)
-        # print("Image Analysis:", analysis.text)
+        # print("Image Analysis:", analysis)
         
     except Exception as e:
         print(f"Error: {str(e)}")

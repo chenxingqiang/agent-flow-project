@@ -121,6 +121,27 @@ class WorkflowEngine:
             if not result:
                 raise ValueError(f"Step {step.id} returned no result")
                 
+            # Process result based on step type
+            if step.type == WorkflowStepType.TRANSFORM:
+                # For transform steps, process input and generate content
+                input_data = step.config.params.get("input", [])
+                output_type = step.config.params.get("output", {}).get("type")
+                
+                # Generate content based on input and output type
+                content = ""
+                if output_type == "research":
+                    content = await self._generate_research_content(context, input_data)
+                elif output_type == "document":
+                    content = await self._generate_document_content(context, input_data)
+                
+                result = {
+                    "agent_id": context.get("agent_id"),
+                    "research_topic": context.get("research_topic"),
+                    "deadline": context.get("deadline"),
+                    "academic_level": context.get("academic_level"),
+                    "content": content
+                }
+                
             return {
                 "id": step.id,
                 "type": str(step.type),
@@ -134,6 +155,66 @@ class WorkflowEngine:
             if isinstance(e, WorkflowExecutionError):
                 error_msg = f"Error executing step {step.id}: {error_msg}"
             raise WorkflowExecutionError(error_msg)
+            
+    async def _generate_research_content(self, context: Dict[str, Any], input_data: List[str]) -> str:
+        """Generate research content based on input data.
+        
+        Args:
+            context: Execution context
+            input_data: List of input fields
+            
+        Returns:
+            str: Generated research content
+        """
+        research_topic = context.get("research_topic", "")
+        academic_level = context.get("academic_level", "")
+        
+        # Use ELL2A to generate research content
+        if self._ell2a:
+            prompt = f"Conduct a thorough research analysis on {research_topic} at {academic_level} level. Include key findings, methodologies, and future directions."
+            message = Message(
+                role=MessageRole.USER,
+                content=prompt
+            )
+            response = await self._ell2a.process_message(message)
+            if isinstance(response, Message):
+                return str(response.content)
+            elif isinstance(response, dict):
+                return str(response.get("content", ""))
+            else:
+                return str(response)
+            
+        return "Research content placeholder"
+        
+    async def _generate_document_content(self, context: Dict[str, Any], input_data: List[str]) -> str:
+        """Generate document content based on input data.
+        
+        Args:
+            context: Execution context
+            input_data: List of input fields
+            
+        Returns:
+            str: Generated document content
+        """
+        research_topic = context.get("research_topic", "")
+        academic_level = context.get("academic_level", "")
+        
+        # Use ELL2A to generate document content
+        if self._ell2a:
+            prompt = f"Write a comprehensive academic paper on {research_topic} suitable for {academic_level} level. Include abstract, introduction, methodology, results, discussion, and conclusion sections."
+            message = Message(
+                role=MessageRole.USER,
+                content=prompt
+            )
+            response = await self._ell2a.process_message(message)
+            if isinstance(response, Message):
+                return str(response.content)
+            elif isinstance(response, dict):
+                return str(response.get("content", ""))
+            else:
+                return str(response)
+            
+        return "Document content placeholder"
             
     async def register_workflow(self, agent: 'Agent', workflow_config: Optional[WorkflowConfig] = None) -> str:
         """Register workflow for an agent.
@@ -258,7 +339,7 @@ class WorkflowEngine:
             
         except Exception as e:
             # Update agent status on failure
-            agent.state.status = AgentStatus.FAILED.value
+            agent.state = AgentState(status=AgentStatus.FAILED)
 
             # Ensure error is properly propagated
             if isinstance(e, WorkflowExecutionError):
@@ -361,7 +442,7 @@ class WorkflowEngine:
             if instance.config and instance.config.agent:
                 agent = self.agents.get(instance.config.agent.id)
                 if agent:
-                    agent.state.status = AgentStatus.FAILED.value
+                    agent.state = AgentState(status=AgentStatus.FAILED)
                     
             if isinstance(e, WorkflowExecutionError):
                 raise

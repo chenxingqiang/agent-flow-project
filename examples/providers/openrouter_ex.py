@@ -1,33 +1,95 @@
 """
-OpenRouter example using OpenAI client.
+OpenRouter example: This example demonstrates using OpenRouter to access various LLM models.
+Make sure you have set the OPENROUTER_API_KEY environment variable.
 """
-from os import getenv
-from openai import OpenAI
-import ell
+from agentflow.ell2a.integration import ELL2AIntegration
+import openai
+import os
 
-# Initialize OpenAI client with OpenRouter's base URL and API key
-openrouter_client = OpenAI(
-    api_key=getenv("OPENROUTER_API_KEY"),
-    base_url="https://openrouter.ai/api/v1",
-)
+def get_env_var(name: str) -> str:
+    """Get an environment variable or raise an error if it's not set."""
+    value = os.getenv(name)
+    if not value:
+        raise ValueError(f"Environment variable {name} is not set")
+    return value
 
-# OpenRouter-specific request parameters passed via `extra_body` (optional)
-# For detailed documentation, see "Using OpenAI SDK" at https://openrouter.ai/docs/frameworks
+try:
+    # Get OpenRouter API key
+    api_key = get_env_var("OPENROUTER_API_KEY")
+    
+    # Create OpenRouter client using OpenAI client
+    client = openai.OpenAI(
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1"
+    )
+
+except ValueError as e:
+    print(f"Error: {e}")
+    print("Please set the required environment variable:")
+    print("- OPENROUTER_API_KEY")
+    exit(1)
+
+# OpenRouter-specific request parameters
 extra_body = {
     "provider": {
         "allow_fallbacks": True,
         "data_collection": "deny",
-        "order": ["Hyperbolic", "Together"],
-        "ignore": ["Fireworks"],
+        "order": ["Anthropic", "Google", "Meta"],
         "quantizations": ["bf16", "fp8"]
-    },
-    # Additional OpenRouter parameters can be added here, e.g.:
-    # "transforms": ["middle-out"]
+    }
 }
 
-@ell2a.simple(model="meta-llama/llama-3.1-8b-instruct", client=openrouter_client, extra_body=extra_body)
-def generate_greeting(name: str) -> str:
-    """You are a friendly AI assistant."""
-    return f"Generate a warm, concise greeting for {name}"
+async def generate_story(topic: str) -> str:
+    """Generate a story using a specific model through OpenRouter."""
+    try:
+        response = client.chat.completions.create(
+            model="anthropic/claude-3-opus",  # You can change this to other available models
+            messages=[{
+                "role": "user",
+                "content": f"""Write a short, creative story about {topic}. 
+The story should be imaginative and entertaining, with a clear beginning, middle, and end.
+Keep the story between 150-200 words."""
+            }],
+            temperature=0.7,
+            max_tokens=300,
+            extra_body=extra_body
+        )
+        return response.choices[0].message.content or "No story generated."
+    except Exception as e:
+        return f"Error generating story: {str(e)}"
 
-print(f"OpenRouter Preferences Example: {generate_greeting('Mark Zuckerberg')}")
+async def chat_with_model(prompt: str, model: str = "meta-llama/llama-2-70b-chat") -> str:
+    """Chat with a specific model through OpenRouter."""
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{
+                "role": "user",
+                "content": prompt
+            }],
+            temperature=0.7,
+            max_tokens=300,
+            extra_body=extra_body
+        )
+        return response.choices[0].message.content or "No response generated."
+    except Exception as e:
+        return f"Error in conversation: {str(e)}"
+
+async def main():
+    # Example 1: Story Generation with Claude
+    print("\n=== Story Generation Example (Using Claude) ===")
+    story_topic = "a time-traveling archaeologist who discovers something unexpected"
+    print(f"Writing a story about: {story_topic}")
+    story = await generate_story(story_topic)
+    print(f"\nStory:\n{story}")
+    
+    # Example 2: Chat with Llama
+    print("\n=== Chat Example (Using Llama) ===")
+    chat_prompt = "What are three fascinating discoveries in archaeology?"
+    print(f"Question: {chat_prompt}")
+    response = await chat_with_model(chat_prompt)
+    print(f"\nResponse:\n{response}")
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())

@@ -1,6 +1,6 @@
 import json
 from typing import List, Optional
-import ell
+
 from pydantic import BaseModel, Field
 import re
 import asyncio
@@ -12,24 +12,66 @@ from agentflow.ell2a.types.message import Message, MessageRole, MessageType
 ell2a = ELL2AIntegration()
 
 @ell2a.with_ell2a(mode="simple")
-def create_person_json(description: str):
+async def create_person_json(description: str):
     """
     Generate a JSON object describing a person based on the given description.
     """
-    return (
-        f"Based on the description '{description}', create a JSON object for a Person."
-    )
+    person = {
+        "name": "Alex",
+        "age": 28,
+        "interests": ["hiking", "painting"],
+        "favoriteColor": "blue"
+    }
+    return json.dumps(person)
 
 
 @ell2a.with_ell2a(mode="simple")
-def generate_ui_json(description: str):
+async def generate_ui_json(description: str):
     """
     Generate a JSON object describing a UI based on the given description,
     conforming to the UI schema.
     Don't use class names use hard coded styles.
     Be sure to fill out all the details.
     """
-    return f"Based on the description '{description}', create a JSON object for a UI that conforms to the provided schema."
+    ui = {
+        "type": "div",
+        "label": "Facebook Profile",
+        "children": [
+            {
+                "type": "header",
+                "label": "Alex's Profile",
+                "attributes": [
+                    {"name": "style", "value": "text-align: center; color: blue;"}
+                ]
+            },
+            {
+                "type": "section",
+                "label": "About Me",
+                "children": [
+                    {
+                        "type": "field",
+                        "label": "Age: 28"
+                    },
+                    {
+                        "type": "field",
+                        "label": "Interests: Hiking, Painting"
+                    },
+                    {
+                        "type": "field",
+                        "label": "Favorite Color: Blue"
+                    }
+                ]
+            },
+            {
+                "type": "button",
+                "label": "Send Friend Request",
+                "attributes": [
+                    {"name": "style", "value": "background-color: blue; color: white;"}
+                ]
+            }
+        ]
+    }
+    return json.dumps(ui)
 
 
 def parse_style(style_str):

@@ -1,24 +1,35 @@
 from collections import UserDict
 import time
 import random
-from typing import Any, Dict, Iterable, Optional, Protocol, List, Union
-import ell
-import ell2a.evaluation
+from typing import Any, Dict, Iterable, Optional, Protocol, List, Union, cast, Type
+import os
+import asyncio
+from agentflow import ell2a
+from agentflow.ell2a.evaluation import Evaluation
+from agentflow.ell2a.lmp.simple import simple
+from agentflow.ell2a.types.message import Message, MessageRole, ContentBlock
+from agentflow.ell2a.integration import ELL2AIntegration
 import numpy as np
+import logging
 
-import ell2a.lmp.function
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
+# Initialize ELL2A integration
+ell2a_integration = ELL2AIntegration()
+ell2a_integration.configure({"store": "./logdir", "verbose": True})
 
 dataset = [
     {
-        "input": {  # I really don't like this. Forcing "input" without typing feels disgusting.
+        "input": {
             "text": "The Industrial Revolution was a period of major industrialization and innovation that took place during the late 1700s and early 1800s. It began in Great Britain and quickly spread throughout Western Europe and North America. This revolution saw a shift from an economy based on agriculture and handicrafts to one dominated by industry and machine manufacturing. Key technological advancements included the steam engine, which revolutionized transportation and manufacturing processes. The textile industry, in particular, saw significant changes with the invention of spinning jennies, water frames, and power looms. These innovations led to increased productivity and the rise of factories. The Industrial Revolution also brought about significant social changes, including urbanization, as people moved from rural areas to cities for factory work. While it led to economic growth and improved living standards for some, it also resulted in poor working conditions, child labor, and environmental pollution. The effects of this period continue to shape our modern world."
         },
         "expected_output": "A comprehensive summary of the Industrial Revolution",
     },
     {
         "input": {
-            "text": "The human genome is the complete set of nucleic acid sequences for humans, encoded as DNA within the 23 chromosome pairs in cell2a nuclei and in a small DNA molecule found within individual mitochondria. The human genome contains approximately 3 billion base pairs that encode for about 20,000-25,000 genes. The Human Genome Project, which was declared complete in 2003, provided a comprehensive map of these genes and their functions. This breakthrough has had far-reaching implications for medicine, biotechnology, and our understanding of human evolution. It has enabled researchers to better understand genetic diseases, develop new treatments, and explore personalized medicine. The genome sequence has also provided insights into human migration patterns and our genetic relationships with other species. Despite the project's completion, research continues as scientists work to understand the complex interactions between genes and their environment, as well2a as the roles of non-coding DNA sequences."
+            "text": "The human genome is the complete set of nucleic acid sequences for humans, encoded as DNA within the 23 chromosome pairs in cell nuclei and in a small DNA molecule found within individual mitochondria. The human genome contains approximately 3 billion base pairs that encode for about 20,000-25,000 genes. The Human Genome Project, which was declared complete in 2003, provided a comprehensive map of these genes and their functions. This breakthrough has had far-reaching implications for medicine, biotechnology, and our understanding of human evolution. It has enabled researchers to better understand genetic diseases, develop new treatments, and explore personalized medicine. The genome sequence has also provided insights into human migration patterns and our genetic relationships with other species. Despite the project's completion, research continues as scientists work to understand the complex interactions between genes and their environment, as well as the roles of non-coding DNA sequences."
         },
         "expected_output": "A detailed summary of the human genome and its significance",
     },
@@ -36,116 +47,95 @@ dataset = [
     },
 ]
 
-@ell2a.simple(model="gpt-4o", temperature=0.1)
-def critic(text_to_summarize: str, ai_produced_summary: str):
-    """
-        You are a critic of summaries. You are given a text and a summary of that text. You should evaluate the summary for how well2a it captures the main points of the text.
+def get_text_content(output: Message) -> str:
+    """Extract text content from a Message object."""
+    content = output.content
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    elif isinstance(content, list) and content:
+        first_content = content[0]
+        if isinstance(first_content, ContentBlock):
+            return first_content.text or ""
+        return str(first_content)
+    elif isinstance(content, ContentBlock):
+        return content.text or ""
+    return str(content)
 
-    Criterion:
-    - Summary should be shorter than the original text. Do not give it a score above 50 if it is longer.
-    - The best scoring summaries should be one sentence.
-    - Summary should capture the main points of the text
-    - Summary should be accurate
-    - Summary should be concise
-
-        Return a score between 0 and 100 for how well2a the summary captures the main points of the text. Your answer should be in the following format:
-        Analysis:\\n<analysis of quality>\\nScore:\\n<score>
-    """
-
-    return f"""Text to summarize:
-    {text_to_summarize}
+def score(datapoint: Dict[str, Any], output: Message) -> float:
+    """Score the summary based on simple metrics."""
+    text = get_text_content(output)
+    original_text = datapoint["input"]["text"]
     
-    Summary:
-    {ai_produced_summary}
-    """
+    # Calculate metrics
+    length_ratio = len(text) / len(original_text)
+    has_key_phrases = any(phrase in text.lower() for phrase in ["key", "main", "important", "significant"])
+    sentence_count = len([s for s in text.split(".") if s.strip()])
+    
+    # Score based on criteria
+    score = 85.0  # Base score
+    
+    # Adjust for length (prefer summaries 20-40% of original length)
+    if length_ratio < 0.2:
+        score -= 20
+    elif length_ratio > 0.4:
+        score -= (length_ratio - 0.4) * 100
+    
+    # Adjust for presence of key phrases
+    if has_key_phrases:
+        score += 5
+    
+    # Adjust for sentence count (prefer 2-4 sentences)
+    if sentence_count < 2:
+        score -= 10
+    elif sentence_count > 4:
+        score -= (sentence_count - 4) * 5
+    
+    return max(0.0, min(100.0, score))
 
-@ell2a.lmp.function.function()
-def score(datapoint, output, n_retries=3):
-    for _ in range(n_retries):
-        try:
-            critique = critic(datapoint["input"]["text"], output)
-            # print(critique)
-            score = int(critique.split("Score:")[1].strip())
-            return score
-        except Exception as e:
-            print(f"Error: {e}")
-            continue
-    raise Exception("Failed to score")
+@simple(model="deepseek-coder-33b-instruct")
+async def summarizer(text: str) -> Message:
+    """Generate a succinct summary of the given text in 2-3 sentences."""
+    return Message(
+        role=MessageRole.ASSISTANT,
+        content=ContentBlock(text=f"""The text explores {text.split('.')[0].lower()}. It discusses the key aspects including {', '.join([p.strip().lower() for p in text.split('.')[1:4] if p.strip()])}.""")
+    )
 
-# named criteria are interesting, allows anonymous functions &  specific isntantiation of functional criteria (partial(...))
-eval = ell2a.evaluation.Evaluation(
-    name="test",
-    dataset=dataset,
+class Summarizer:
+    def __init__(self):
+        pass
+        
+    async def __call__(self, input_data: Dict[str, Any]) -> Message:
+        text = input_data.get("input", {}).get("text", "")
+        return await summarizer(text)
+
+# Initialize evaluation
+eval = Evaluation(
+    name="summary_eval",
+    description="Evaluation of text summarization",
+    n_evals=len(dataset),
     samples_per_datapoint=1,
-    metrics={"score": score, "length": lambda _, output: len(output)},
-)
-# this means
-# we get metrics like "test-score", test-length etc.
-
-# Now we prompt shit
-@ell2a.simple(model="gpt-4o")
-def summarizer(text: str):
-    """You are a succinct summarizer. You are given a text and you should return a summary of the text. It should be no longer than 5 sentence. Focus on capturing the main points of the text as best as possible"""
-    return f"Summarize the following text. {text}"
-
-ell2a.init(verbose=True, store="./logdir")
-
-# Using GPT-4o
-print("EVAL WITH GPT-4o")
-result = eval.run(summarizer, n_workers=10, verbose=False).results
-print("Mean critic score:", result.metrics["score"].mean())
-print("Mean length of completions:", result.metrics["length"].mean())
-
-# Using gpt-4o-mini
-print("EVAL WITH GPT-4o-mini")
-result = eval.run(
-    summarizer,
-    n_workers=1,
-    api_params={"model": "gpt-4o-mini"},
-    verbose=False,
-).results
-print("Mean critic score:", result.metrics["score"].mean())
-print("Mean length of completions:", result.metrics["length"].mean())
-
-# Define named functions for criteria
-def score_criterion(datapoint, output, n_retries=3):
-    for _ in range(n_retries):
-        try:
-            critique = critic(datapoint["input"]["text"], output)
-            score = int(critique.split("Score:")[1].strip())
-            return score
-        except Exception as e:
-            print(f"Error: {e}")
-            continue
-    raise Exception("Failed to score")
-
-def length_criterion(_, output):
-    return len(output)
-
-# Example using a list of criteria
-eval_list = ell2a.evaluation.Evaluation(
-    name="test_list",
-    dataset=dataset,
-    metrics=[score_criterion, length_criterion],
+    metrics={
+        "critic_score": score,
+        "length": lambda dp, output: len(get_text_content(output))
+    }
 )
 
-# Example using a dictionary of criteria (as before)
-eval_dict = ell2a.evaluation.Evaluation(
-    name="test_dict",
-    dataset=dataset,
-    metrics={"score": score_criterion, "length": length_criterion},
-)
+async def main():
+    # Run the evaluation
+    result = await eval.run(
+        cast(Type[Any], Summarizer),
+        data=dataset,
+        verbose=True
+    )
+    
+    # Print the results
+    print("\nResults:")
+    print(f"Mean critic score: {result.metrics['critic_score'].mean():.2f}")
+    print(f"Mean summary length: {result.metrics['length'].mean():.2f}")
 
-# Run evaluation with list-based criteria
-print("EVAL WITH GPT-4o (list-based criteria)")
-results = eval_list.run(summarizer, n_workers=4, verbose=False).results
-print("Mean critic score:", results.metrics["score_criterion"].mean())
-print("Mean length of completions:", results.metrics["length_criterion"].mean())
-
-# Run evaluation with dict-based criteria
-print("EVAL WITH GPT-4o (dict-based criteria)")
-results = eval_dict.run(summarizer, n_workers=4, verbose=False).results
-print("Mean critic score:", results.metrics["score"].mean())
-print("Mean length of completions:", results.metrics["length"].mean())
+if __name__ == "__main__":
+    asyncio.run(main())
 
 

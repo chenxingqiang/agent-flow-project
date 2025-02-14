@@ -230,24 +230,68 @@ async def execute_workflow_async(request: WorkflowRequest) -> Dict[str, Any]:
         task_id = str(uuid.uuid4())
         
         # Store task info
-        workflow_engine._pending_tasks[task_id] = {
+        task_refs[task_id] = {
             "status": "pending",
             "result": None,
-            "error": None
+            "error": None,
+            "start_time": time.time()
         }
         
         # Start execution in background
-        asyncio.create_task(
-            workflow_engine.execute_workflow(agent.id, request.input_data)
-        )
+        async def execute_and_store():
+            try:
+                result = await workflow_engine.execute_workflow(agent.id, request.input_data)
+                task_refs[task_id].update({
+                    "status": "completed",
+                    "result": result,
+                    "end_time": time.time()
+                })
+            except Exception as e:
+                task_refs[task_id].update({
+                    "status": "error",
+                    "error": str(e),
+                    "end_time": time.time()
+                })
+                logger.error(f"Error in workflow execution: {e}")
+                
+        asyncio.create_task(execute_and_store())
         
         return {
-            "task_id": task_id,
+            "result_ref": task_id,
             "status": "pending"
         }
     except Exception as e:
         logger.error(f"Error executing workflow asynchronously: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/workflow/result/{result_ref}")
+async def get_workflow_result(result_ref: str) -> Dict[str, Any]:
+    """Get workflow result.
+    
+    Args:
+        result_ref: Result reference ID
+        
+    Returns:
+        Dict[str, Any]: Workflow result
+    """
+    if result_ref not in task_refs:
+        raise HTTPException(status_code=404, detail="Result not found")
+        
+    task_info = task_refs[result_ref]
+    
+    if task_info["status"] == "error":
+        raise HTTPException(status_code=500, detail=task_info["error"])
+        
+    if task_info["status"] == "pending":
+        raise HTTPException(status_code=404, detail="Result not ready")
+        
+    retrieval_time = time.time() - task_info["start_time"]
+    
+    return {
+        "status": task_info["status"],
+        "result": task_info["result"],
+        "retrieval_time": retrieval_time
+    }
 
 @app.get("/workflow/status/{task_id}")
 async def get_workflow_status(task_id: str) -> Dict[str, Any]:

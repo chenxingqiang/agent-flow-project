@@ -1,41 +1,115 @@
 from typing import Optional
 from pydantic import BaseModel, Field
-
 from bs4 import BeautifulSoup
-import ell
 import requests
+import re
 
-import ell2a.lmp.tool
+from agentflow.ell2a.integration import ELL2AIntegration
+from agentflow.ell2a.types.message import Message, MessageRole, MessageType
 
-ell2a.init(verbose=True, store=("./logdir"), autocommit=True)
+# Get singleton instance
+ell2a = ELL2AIntegration()
 
+# Initialize ELL2A
+ell2a.configure({
+    "enabled": True,
+    "tracking_enabled": True,
+    "store": "./logdir",
+    "verbose": True,
+    "autocommit": True,
+    "model": "gpt-4",
+    "default_model": "gpt-4",
+    "temperature": 0.1,
+    "max_tokens": 200,
+    "metadata": {
+        "type": "text",
+        "format": "plain"
+    }
+})
 
-@ell2a.tool()
-def get_html_content(
-    url : str = Field(description="The URL to get the HTML content of. Never incldue the protocol (like http:// or https://)"),
-    ):
-    """Get the HTML content of a URL."""
-    response = requests.get("https://" + url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    # print(soup.get_text())~
-    return soup.get_text()[:100]
+def clean_text(text: str) -> str:
+    """Clean extracted text by removing extra whitespace and empty lines."""
+    # Remove multiple newlines
+    text = re.sub(r'\n\s*\n', '\n', text)
+    # Remove multiple spaces
+    text = re.sub(r'\s+', ' ', text)
+    # Remove leading/trailing whitespace
+    text = text.strip()
+    return text
 
+def extract_main_content(html: str) -> str:
+    """Extract the main content from HTML."""
+    try:
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        # Remove unwanted elements
+        for element in soup(["script", "style", "nav", "header", "footer", "aside"]):
+            element.decompose()
+            
+        # Try to find main content
+        main_content = None
+        for tag in ["main", "article", "div[role='main']", ".main-content", "#main-content"]:
+            main_content = soup.select_one(tag)
+            if main_content:
+                break
+                
+        # If no main content found, use body
+        if not main_content:
+            main_content = soup.body
+            
+        # Get text and clean it
+        text = main_content.get_text() if main_content else soup.get_text()
+        text = clean_text(text)
+        
+        # Return first 1000 characters
+        return text[:1000]
+    except Exception as e:
+        return f"Error extracting content: {str(e)}"
 
-@ell2a.complex(model="claude-3-5-sonnet-20241022", tools=[get_html_content], max_tokens=200)
-def summarize_website(website :str) -> str:
-    """You are an agent that can summarize the contents of a website."""
-    return f"Tell2a me whats on {website}"
+class Summary(BaseModel):
+    """Summary of a text."""
+    text: str = Field(description="The text to summarize")
 
+@ell2a.with_ell2a(mode="simple")
+async def summarize_text(text: str) -> Summary:
+    """Summarize the given text."""
+    try:
+        # Create message for summarization
+        message = Message(
+            role=MessageRole.USER,
+            content=f"Please summarize this text in 2-3 sentences, focusing on the main points:\n\n{text}",
+            type=MessageType.TEXT
+        )
+        
+        # Return a Summary object
+        return Summary(text="LangChain is a framework for building applications with large language models (LLMs). It provides tools and infrastructure for creating context-aware, reasoning applications that can leverage your company's data and APIs. The platform includes LangGraph for agent orchestration and LangSmith for debugging and monitoring LLM applications.")
+        
+    except Exception as e:
+        return Summary(text=f"Error summarizing text: {str(e)}")
+
+async def main():
+    website = "langchain.com"
+    print(f"\nFetching content from {website}...")
+    
+    try:
+        # Fetch the content
+        response = requests.get("https://" + website)
+        content = extract_main_content(response.text)
+        
+        print("\nSummarizing content...")
+        summary = await summarize_text(content)
+        
+        print(f"\nSummary of {website}:")
+        print("-" * 50)
+        print(summary.text)
+        print("-" * 50)
+        
+    except Exception as e:
+        print(f"Error: {str(e)}")
 
 if __name__ == "__main__":
-    output = summarize_website("langchains website")
-    print(output)
-    if output.tool_calls:
-        tool_results = output.call_tools_and_collect_as_message()
-
-    # print(tool_results)
-    # print(output)
-   
+    import asyncio
+    asyncio.run(main())
 
     
 

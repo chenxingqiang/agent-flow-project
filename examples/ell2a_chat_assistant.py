@@ -1,52 +1,58 @@
 """
-Chat Assistant Example using ELL
+Chat Assistant Example using ELL2A
 Demonstrates multi-turn conversations and tool usage
 """
 
-import os
-import ell
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-# Initialize ELL with API key and versioning
-api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    raise ValueError("Please set OPENAI_API_KEY environment variable")
+from agentflow.ell2a_integration import ELL2AIntegration
+from agentflow.ell2a.types.message import Message, MessageRole, MessageType
 
-# Set OpenAI API key
-os.environ["OPENAI_API_KEY"] = api_key
+# Get ELL2A integration instance
+ell2a = ELL2AIntegration()
 
-# Initialize ELL with versioning
-ell2a.init(store='./ell2a_logs')
+# Configure ELL2A
+ell2a.configure({
+    "simple": {
+        "model": "gpt-4",
+        "max_retries": 3,
+        "retry_delay": 1.0,
+        "timeout": 30.0
+    },
+    "complex": {
+        "model": "gpt-4",
+        "max_retries": 3,
+        "retry_delay": 1.0,
+        "timeout": 60.0,
+        "stream": True,
+        "track_performance": True,
+        "track_memory": True
+    }
+})
 
 # Define tools
-@ell2a.tool()
 async def get_current_time() -> str:
     """Get the current time."""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-@ell2a.tool()
 async def search_knowledge_base(query: str) -> str:
     """Search the knowledge base for information."""
     # Simulate knowledge base search
     kb = {
         "python": "Python is a high-level programming language.",
-        "ell2a": "ELL is a Language Model Programming Library.",
+        "ell2a": "ELL2A is a Language Model Programming Library.",
         "llm": "LLM stands for Large Language Model."
     }
     return kb.get(query.lower(), "No information found.")
 
 # Define chat assistant
-@ell2a.complex(
-    model="gpt-4",
-    tools=[get_current_time, search_knowledge_base],
-    temperature=0.7
-)
+@ell2a.with_ell2a(mode="complex")
 async def chat_assistant(
     user_message: str,
-    conversation_history: List[Dict[str, str]] = None
-) -> List[ell2a.Message]:
+    conversation_history: Optional[List[Dict[str, str]]] = None
+) -> List[Message]:
     """An intelligent assistant that can engage in conversations and use tools."""
     # Initialize conversation history if None
     if conversation_history is None:
@@ -54,29 +60,31 @@ async def chat_assistant(
     
     # Build messages list
     messages = [
-        ell2a.system(
-            "You are a helpful assistant that can engage in natural conversations "
-            "and use tools to provide accurate information. "
-            "Always be concise and friendly."
+        Message(
+            role=MessageRole.SYSTEM,
+            content="You are a helpful assistant that can engage in natural conversations "
+                   "and use tools to provide accurate information. "
+                   "Always be concise and friendly.",
+            type=MessageType.TEXT
         )
     ]
     
     # Add conversation history
     for msg in conversation_history:
         if msg["role"] == "user":
-            messages.append(ell2a.user(msg["content"]))
+            messages.append(Message(role=MessageRole.USER, content=msg["content"], type=MessageType.TEXT))
         elif msg["role"] == "assistant":
-            messages.append(ell2a.assistant(msg["content"]))
+            messages.append(Message(role=MessageRole.ASSISTANT, content=msg["content"], type=MessageType.TEXT))
     
     # Add current user message
-    messages.append(ell2a.user(user_message))
+    messages.append(Message(role=MessageRole.USER, content=user_message, type=MessageType.TEXT))
     
     # Return messages list
     return messages
 
 async def interactive_chat():
     """Run an interactive chat session."""
-    conversation_history = []
+    conversation_history: List[Dict[str, str]] = []
     print("Chat Assistant: Hello! How can I help you today? (type 'exit' to end)")
     
     while True:
@@ -89,27 +97,24 @@ async def interactive_chat():
             
             # Get assistant response
             messages = await chat_assistant(user_input, conversation_history)
-            response = await ell2a.complete(messages)
+            response = await ell2a.process_message(messages[-1])
             
             # Update conversation history
             conversation_history.append({"role": "user", "content": user_input})
             
             # Process response
-            if response and response.text:
-                print(f"\nChat Assistant: {response.text}")
-                conversation_history.append({"role": "assistant", "content": response.text})
+            if response and response.content:
+                content = str(response.content)
+                print(f"\nChat Assistant: {content}")
+                conversation_history.append({"role": "assistant", "content": content})
                 
-                # Handle tool calls
-                if response.tool_calls:
-                    for tool_call in response.tool_calls:
-                        tool_name = tool_call.function.name
-                        if tool_name == "get_current_time":
-                            result = await get_current_time()
-                            print(f"[Tool] Current time: {result}")
-                        elif tool_name == "search_knowledge_base":
-                            query = tool_call.function.arguments.get("query", "")
-                            result = await search_knowledge_base(query)
-                            print(f"[Tool] Knowledge base: {result}")
+                # Add tool responses
+                current_time = await get_current_time()
+                print(f"[Tool] Current time: {current_time}")
+                
+                if "python" in user_input.lower() or "ell2a" in user_input.lower() or "llm" in user_input.lower():
+                    result = await search_knowledge_base(user_input.lower())
+                    print(f"[Tool] Knowledge base: {result}")
             else:
                 print("\nChat Assistant: I apologize, but I encountered an error processing your request.")
                 

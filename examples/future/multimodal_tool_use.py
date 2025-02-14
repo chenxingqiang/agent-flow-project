@@ -1,22 +1,38 @@
-import ell
-
-from ell2a import ContentBlock
 from PIL import Image
 import numpy as np
-from agentflow.ell2a.types.message import to_content_blocks
+from typing import List, Optional, Union, Tuple
 
-@ell2a.tool()
-def get_user_name():
-    """
-    Return the user's name.
-    """
+from agentflow.ell2a.integration import ELL2AIntegration
+from agentflow.ell2a.types.message import Message, MessageRole, ContentBlock
+
+# Get singleton instance
+ell2a = ELL2AIntegration()
+
+# Initialize ELL2A
+ell2a.configure({
+    "enabled": True,
+    "tracking_enabled": True,
+    "store": "./logdir",
+    "verbose": True,
+    "autocommit": True
+})
+
+@ell2a.with_ell2a(mode="simple")
+async def get_user_name() -> str:
+    """Return the user's name."""
     return "Isac"
 
 
-def generate_strawberry_image():
+def draw_pixel(img: Image.Image, x: int, y: int, color: Tuple[int, int, int]) -> None:
+    """Safely draw a pixel on the image."""
+    if img and 0 <= x < img.width and 0 <= y < img.height:
+        img.putpixel((x, y), color)
+
+
+def generate_strawberry_image() -> Image.Image:
+    """Generate a simple strawberry image."""
     # Create a 200x200 white image
     img = Image.new('RGB', (200, 200), color='white')
-    pixels = img.load()
 
     # Draw a red strawberry shape
     for x in range(200):
@@ -26,52 +42,116 @@ def generate_strawberry_image():
             distance = np.sqrt(dx**2 + dy**2)
             if distance < 80:
                 # Red color for the body
-                pixels[x, y] = (255, 0, 0)
+                draw_pixel(img, x, y, (255, 0, 0))
             elif distance < 90 and y < 100:
                 # Green color for the leaves
-                pixels[x, y] = (0, 128, 0)
+                draw_pixel(img, x, y, (0, 128, 0))
 
     # Add some seeds
     for _ in range(50):
         seed_x = np.random.randint(40, 160)
         seed_y = np.random.randint(40, 160)
         if np.sqrt((seed_x-100)**2 + (seed_y-100)**2) < 80:
-            pixels[seed_x, seed_y] = (255, 255, 0)
+            draw_pixel(img, seed_x, seed_y, (255, 255, 0))
 
     return img
 
-@ell2a.tool()
-def get_ice_cream_flavors():
-    """
-    Return a list of ice cream flavors.
-    """
-    #XXX: Nice coercion function needed
-    return to_content_blocks([("1. Vanilla"), "2.", (generate_strawberry_image()), ("3. Coconut")])
 
-
-@ell2a.complex(model="claude-3-5-sonnet-20241022", tools=[get_user_name, get_ice_cream_flavors], max_tokens=1000)
-def f(message_history: list[ell2a.Message]) -> list[ell2a.Message]:
+@ell2a.with_ell2a(mode="simple")
+async def get_ice_cream_flavors() -> List[Union[str, Image.Image]]:
+    """Return a list of ice cream flavors with an image."""
+    strawberry_img = generate_strawberry_image()
     return [
-        ell2a.system(
-            "You are a helpful assistant that greets the user and asks them what ice cream flavor they want. Call both tools immediately and then greet the user. Some options will be images be sure to interperate them."
-        ),
-        ell2a.user("Do it"),
-    ] + message_history
+        "1. Vanilla",
+        "2. Strawberry",
+        strawberry_img,
+        "3. Coconut"
+    ]
+
+
+@ell2a.with_ell2a(mode="complex")
+async def ice_cream_chat(message_history: List[Message]) -> Message:
+    """Chat about ice cream flavors."""
+    try:
+        # Get user name and flavors
+        user_name = await get_user_name()
+        flavors = await get_ice_cream_flavors()
+        
+        # Process user's previous choice if any
+        user_message = message_history[-1] if message_history else None
+        if user_message and isinstance(user_message.content, str):
+            user_input = user_message.content.lower()
+            
+            # Check for flavor selection
+            if any(flavor in user_input for flavor in ['vanilla', '1', 'classic']):
+                return Message(
+                    role=MessageRole.ASSISTANT,
+                    content=f"""Excellent choice, {user_name}! Classic Vanilla is a timeless favorite. 
+The smooth, creamy vanilla flavor is perfect for any occasion. Would you like it in a cone or a cup? 🍦"""
+                )
+            elif any(flavor in user_input for flavor in ['strawberry', '2', 'fresh']):
+                return Message(
+                    role=MessageRole.ASSISTANT,
+                    content=f"""Great pick, {user_name}! Our Fresh Strawberry ice cream is made with real strawberries, 
+just like the one in the image - bright red and sweet! Would you like some extra strawberry toppings? 🍓"""
+                )
+            elif any(flavor in user_input for flavor in ['coconut', '3', 'tropical']):
+                return Message(
+                    role=MessageRole.ASSISTANT,
+                    content=f"""Wonderful choice, {user_name}! Tropical Coconut is like a vacation in a scoop. 
+Would you like some toasted coconut flakes on top? 🥥"""
+                )
+        
+        # Default greeting with menu
+        return Message(
+            role=MessageRole.ASSISTANT,
+            content=f"""Hi {user_name}! 👋 Welcome to our ice cream shop!
+
+Here are our available flavors:
+1. Classic Vanilla - A timeless favorite
+2. Fresh Strawberry - Represented by the image of a bright red strawberry with yellow seeds and green leaves
+3. Tropical Coconut - Perfect for a summer day
+
+Which flavor would you like to try? I can help you make a delicious choice! 🍦"""
+        )
+        
+    except Exception as e:
+        print(f"Error in ice cream chat: {str(e)}")
+        return Message(
+            role=MessageRole.ASSISTANT,
+            content="""Hi there! 👋 Welcome to our ice cream shop!
+
+Here are our available flavors:
+1. Classic Vanilla - A timeless favorite
+2. Fresh Strawberry - A sweet and fruity delight
+3. Tropical Coconut - Perfect for a summer day
+
+Which flavor would you like to try? I can help you make a delicious choice! 🍦"""
+        )
 
 
 if __name__ == "__main__":
-    ell2a.init(verbose=True)
-    messages = []
-    while True:
-        message = f(messages)
-        messages.append(message)
-
-        if message.tool_calls:
-            tool_call_response = message.call_tools_and_collect_as_message(
-                parallel=True, max_workers=2
-            )
-            messages.append(tool_call_response)
-        else:
-            break
-
-    # print(messages)
+    async def main():
+        message_history = []
+        print("\nWelcome to the Ice Cream Shop! (Type 'exit' to leave)")
+        print("-" * 50)
+        
+        # Get initial greeting
+        response = await ice_cream_chat(message_history)
+        print("\nAssistant:", response.content)
+        message_history.append(response)
+        
+        while True:
+            user_input = input("\nYou: ")
+            if user_input.lower() in ['exit', 'quit', 'bye']:
+                print("\nAssistant: Thanks for visiting our ice cream shop! Have a sweet day! 🍦")
+                break
+            
+            message_history.append(Message(role=MessageRole.USER, content=user_input))
+            response = await ice_cream_chat(message_history)
+            print("\nAssistant:", response.content)
+            message_history.append(response)
+    
+    # Run the async main function
+    import asyncio
+    asyncio.run(main())

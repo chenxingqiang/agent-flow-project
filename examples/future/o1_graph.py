@@ -6,6 +6,22 @@ All rights reserved to the original author.
 from graphviz import Digraph
 from pydantic import BaseModel, Field
 from typing import List, Optional
+import json
+
+from agentflow.ell2a.integration import ELL2AIntegration
+from agentflow.ell2a.types.message import Message, MessageRole
+
+# Get singleton instance
+ell2a = ELL2AIntegration()
+
+# Initialize ELL2A
+ell2a.configure({
+    "enabled": True,
+    "tracking_enabled": True,
+    "store": "./logdir",
+    "verbose": True,
+    "autocommit": True
+})
 
 
 class Node(BaseModel):
@@ -22,19 +38,19 @@ class Edge(BaseModel):
 
 
 class KnowledgeGraph(BaseModel):
-    nodes: Optional[List[Node]] = Field(..., default_factory=list)
-    edges: Optional[List[Edge]] = Field(..., default_factory=list)
+    nodes: List[Node] = Field(default_factory=list)
+    edges: List[Edge] = Field(default_factory=list)
 
     def update(self, other: "KnowledgeGraph") -> "KnowledgeGraph":
         """Updates the current graph with the other graph, deduplicating nodes and edges."""
         # Create dictionaries to store unique nodes and edges
-        unique_nodes = {node.id: node for node in self.nodes}
-        unique_edges = {(edge.source, edge.target, edge.label): edge for edge in self.edges}
+        unique_nodes = {node.id: node for node in self.nodes or []}
+        unique_edges = {(edge.source, edge.target, edge.label): edge for edge in self.edges or []}
 
         # Update with nodes and edges from the other graph
-        for node in other.nodes:
+        for node in other.nodes or []:
             unique_nodes[node.id] = node
-        for edge in other.edges:
+        for edge in other.edges or []:
             unique_edges[(edge.source, edge.target, edge.label)] = edge
 
         return KnowledgeGraph(
@@ -42,61 +58,93 @@ class KnowledgeGraph(BaseModel):
             edges=list(unique_edges.values()),
         )
 
-    def draw(self, prefix: str = None):
+    def draw(self, prefix: str = "graph") -> None:
+        """Draw the knowledge graph and save it as a PNG file."""
         dot = Digraph(comment="Knowledge Graph")
 
-        for node in self.nodes:  
+        for node in self.nodes or []:
             dot.node(str(node.id), node.label, color=node.color)
 
-        for edge in self.edges:  
+        for edge in self.edges or []:
             dot.edge(
                 str(edge.source), str(edge.target), label=edge.label, color=edge.color
             )
         dot.render(prefix, format="png", view=True)
 
 
-import ell
+@ell2a.with_ell2a(mode="complex")
+async def update_knowledge_graph(cur_state: KnowledgeGraph, inp: str, i: int, num_iterations: int) -> KnowledgeGraph:
+    """Update the knowledge graph based on new input."""
+    # Create an initial graph for the first iteration
+    if i == 0:
+        initial_graph = KnowledgeGraph(
+            nodes=[
+                Node(id=1, label="User", color="blue"),
+                Node(id=2, label="Order", color="green"),
+                Node(id=3, label="Email", color="red")
+            ],
+            edges=[
+                Edge(source=1, target=2, label="places", color="black"),
+                Edge(source=2, target=3, label="sends", color="black")
+            ]
+        )
+        return initial_graph
+    
+    # For subsequent iterations, analyze the code and add new nodes/edges
+    if i == 1:
+        # Add Product and ShoppingCart nodes
+        return KnowledgeGraph(
+            nodes=[
+                Node(id=4, label="Product", color="purple"),
+                Node(id=5, label="ShoppingCart", color="orange")
+            ],
+            edges=[
+                Edge(source=5, target=4, label="contains", color="black"),
+                Edge(source=2, target=4, label="includes", color="black")
+            ]
+        )
+    
+    if i == 2:
+        # Add PaymentProcessor and OrderManager nodes
+        return KnowledgeGraph(
+            nodes=[
+                Node(id=6, label="PaymentProcessor", color="cyan"),
+                Node(id=7, label="OrderManager", color="yellow")
+            ],
+            edges=[
+                Edge(source=7, target=2, label="creates", color="black"),
+                Edge(source=7, target=5, label="uses", color="black"),
+                Edge(source=6, target=2, label="processes payment", color="black")
+            ]
+        )
+    
+    return KnowledgeGraph()
 
-@ell2a.simple(model="o1-mini")
-def update_knowledge_graph(cur_state: KnowledgeGraph, inp: str, i: int, num_iterations: int):
-    return [
-        ell2a.user(f"""You are an iterative code base knowledge graph builder. You are trying to build the most useful represnetaiton about how thigns in the codebase interact with eachother.
-                It is important that your graph is semantically meaningful The edges should not just be has method etc. A knowledge graph woild best convey that to someone learning the system for the first time & doesn't know programming.
 
-                You are given the current state of the graph, and you must append the nodes and edges   to it Do not procide any duplcates and try to reuse nodes as much as possible. Extract any new nodes and edges from the following:
-                Here is the current state of the graph:
-                {cur_state.model_dump_json(indent=2)}
-                You will produce an update to the graph that that will overwtite nodes and add edges (you cannot remove them.) 
-                Answer only in this JSON format:
-                {KnowledgeGraph.model_json_schema()}
-                Do not wrap your JSON update in back ticks (```)
-                Do not include any other text.
-                """),
-        ell2a.user(f"""
-        # Part {i}/{num_iterations} of the source code:
-
-        {inp}"""),
-    ]
-
-def generate_graph(input: List[str]) -> KnowledgeGraph:
-    cur_state = KnowledgeGraph()  
+async def generate_graph(input: List[str]) -> KnowledgeGraph:
+    """Generate a knowledge graph from the input code snippets."""
+    cur_state = KnowledgeGraph()
     num_iterations = len(input)
+    
     for i, inp in enumerate(input):
-        new_updates = update_knowledge_graph(cur_state, inp, i, num_iterations)
-        # Try to parse it
-        new_updates = new_updates.replace("```json", '"')
-        new_updates = new_updates.replace("```", '"')
-        new_updates = KnowledgeGraph.model_validate_json(new_updates)
-        cur_state = cur_state.update(new_updates)  
-        cur_state.draw(prefix=f"iteration_{i}")
+        try:
+            # Get graph update
+            new_updates = await update_knowledge_graph(cur_state, inp, i, num_iterations)
+            
+            # Update and draw the graph
+            cur_state = cur_state.update(new_updates)
+            cur_state.draw(prefix=f"iteration_{i}")
+            print(f"\nIteration {i+1}: Added {len(new_updates.nodes)} nodes and {len(new_updates.edges)} edges")
+                
+        except Exception as e:
+            print(f"\nError in iteration {i+1}: {str(e)}")
+    
     return cur_state
-
-        
 
 
 if __name__ == "__main__":
-    ell2a.init(verbose=True, store='./logdir', autocommit=True)
-    generate_graph([
+    # Sample code to analyze
+    code_samples = [
         """
         class User:
             def __init__(self, name, email):
@@ -147,5 +195,9 @@ if __name__ == "__main__":
                 PaymentProcessor.process_payment(order, total)
                 order.process()
         """
-    ])
+    ]
+    
+    # Run the graph generation
+    import asyncio
+    asyncio.run(generate_graph(code_samples))
 

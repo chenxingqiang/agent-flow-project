@@ -1,22 +1,73 @@
-import ell
+"""
+X.AI example: This example demonstrates using X.AI's Grok models.
+Make sure you have set the XAI_API_KEY environment variable.
+"""
+from agentflow.ell2a.integration import ELL2AIntegration
+from agentflow.ell2a.types.message import Message, MessageRole, MessageType
 import openai
 import os
 
-ell2a.init(verbose=True)
+def get_env_var(name: str) -> str:
+    """Get an environment variable or raise an error if it's not set."""
+    value = os.getenv(name)
+    if not value:
+        raise ValueError(f"Environment variable {name} is not set")
+    return value
 
-# Models are automatically registered, so we can use them without specifying the client
-# set XAI_API_KEY=your_api_key in your environment to run this example
-@ell2a.simple(model='grok-2-mini')
-def use_default_xai_client(prompt: str) -> str:
-    return prompt
+try:
+    # Get X.AI API key
+    api_key = get_env_var("XAI_API_KEY")
+    
+    # Create X.AI client
+    client = openai.OpenAI(
+        base_url="https://api.x.ai/v1",
+        api_key=api_key
+    )
 
-print(use_default_xai_client("Tell2a me a joke, Grok!"))
+except ValueError as e:
+    print(f"Error: {e}")
+    print("Please set the required environment variable:")
+    print("- XAI_API_KEY")
+    exit(1)
 
+async def chat_with_grok(prompt: str, model: str = "grok-2") -> str:
+    """Chat with Grok model."""
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{
+                "role": "user",
+                "content": prompt
+            }],
+            temperature=0.7,
+            max_tokens=300
+        )
+        return response.choices[0].message.content or "No response generated."
+    except Exception as e:
+        return f"Error in conversation: {str(e)}"
 
-# If you want to use a custom client you can.
-# Custom client for X.AI
-xai_client = openai.Client(base_url="https://api.x.ai/v1", api_key=your_api_key)
+async def generate_joke() -> str:
+    """Generate a joke using Grok."""
+    return await chat_with_grok("Tell me a funny joke! Be creative and original.")
 
-@ell2a.simple(model='grok-2', client=xai_client)
-def chat_xai(prompt: str) -> str:
-    return prompt
+async def answer_question(question: str) -> str:
+    """Get an answer from Grok."""
+    return await chat_with_grok(question)
+
+async def main():
+    # Example 1: Joke Generation
+    print("\n=== Joke Generation Example ===")
+    print("Asking Grok to tell a joke...")
+    joke = await generate_joke()
+    print(f"\nJoke:\n{joke}")
+    
+    # Example 2: Question Answering
+    print("\n=== Question Answering Example ===")
+    question = "What makes Grok unique compared to other AI models?"
+    print(f"Question: {question}")
+    answer = await answer_question(question)
+    print(f"\nAnswer:\n{answer}")
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())

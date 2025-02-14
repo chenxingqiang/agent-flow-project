@@ -1,111 +1,177 @@
 from typing import Dict, Any
+import asyncio
 from agentflow.core.workflow import WorkflowEngine
+from agentflow.core.workflow_types import WorkflowConfig, WorkflowStep, WorkflowStepType, StepConfig
 
-def federated_learning_example():
+async def federated_learning_example():
     """
     联邦学习通信协议示例
     模拟多个本地Agent训练模型并聚合
     """
-    workflow_config = {
-        "COLLABORATION": {
-            "MODE": "PARALLEL",
-            "COMMUNICATION_PROTOCOL": {
-                "TYPE": "FEDERATED"
-            },
-            "WORKFLOW": [
-                {
-                    "name": "local_model_1",
-                    "model_params": {"weight1": 0.1, "bias1": 0.2}
-                },
-                {
-                    "name": "local_model_2", 
-                    "model_params": {"weight1": 0.3, "bias1": 0.4}
-                },
-                {
-                    "name": "local_model_3",
-                    "model_params": {"weight1": 0.5, "bias1": 0.6}
-                }
-            ]
-        }
-    }
+    # Create workflow config
+    workflow = WorkflowConfig(
+        id="federated_learning",
+        name="Federated Learning Example",
+        steps=[
+            WorkflowStep(
+                id="local_model_1",
+                name="Local Model 1",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="custom",
+                    params={"weight1": 0.1, "bias1": 0.2}
+                )
+            ),
+            WorkflowStep(
+                id="local_model_2",
+                name="Local Model 2",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="custom",
+                    params={"weight1": 0.3, "bias1": 0.4}
+                )
+            ),
+            WorkflowStep(
+                id="local_model_3",
+                name="Local Model 3",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="custom",
+                    params={"weight1": 0.5, "bias1": 0.6}
+                )
+            )
+        ]
+    )
     
-    workflow = WorkflowEngine(workflow_config)
-    result = workflow.execute({"task": "federated_learning"})
+    # Create workflow engine
+    engine = WorkflowEngine()
+    await engine.initialize()
+    
+    # Create workflow instance
+    instance = await engine.create_workflow("federated_learning", workflow)
+    
+    # Execute workflow
+    result = await engine.execute_workflow_instance(instance)
     print("Federated Learning Result:", result)
 
-def gossip_protocol_example():
+async def gossip_protocol_example():
     """
     Gossip 通信协议示例
     模拟分布式系统中的信息随机交换
     """
-    workflow_config = {
-        "COLLABORATION": {
-            "MODE": "PARALLEL",
-            "COMMUNICATION_PROTOCOL": {
-                "TYPE": "GOSSIP"
-            },
-            "WORKFLOW": [
-                {
-                    "name": "node_1",
-                    "knowledge": {"topic_a": "info_1", "topic_b": "data_1"}
-                },
-                {
-                    "name": "node_2",
-                    "knowledge": {"topic_a": "info_2", "topic_c": "data_2"}
-                },
-                {
-                    "name": "node_3", 
-                    "knowledge": {"topic_b": "info_3", "topic_c": "data_3"}
-                }
-            ]
-        }
-    }
+    # Create workflow config
+    workflow = WorkflowConfig(
+        id="gossip_protocol",
+        name="Gossip Protocol Example",
+        steps=[
+            WorkflowStep(
+                id="node_1",
+                name="Node 1",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="custom",
+                    params={"topic_a": "info_1", "topic_b": "data_1"}
+                )
+            ),
+            WorkflowStep(
+                id="node_2",
+                name="Node 2",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="custom",
+                    params={"topic_a": "info_2", "topic_c": "data_2"}
+                )
+            ),
+            WorkflowStep(
+                id="node_3",
+                name="Node 3",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="custom",
+                    params={"topic_b": "info_3", "topic_c": "data_3"}
+                )
+            )
+        ]
+    )
     
-    workflow = WorkflowEngine(workflow_config)
-    result = workflow.execute({"task": "gossip_information_exchange"})
+    # Create workflow engine
+    engine = WorkflowEngine()
+    await engine.initialize()
+    
+    # Create workflow instance
+    instance = await engine.create_workflow("gossip_protocol", workflow)
+    
+    # Execute workflow
+    result = await engine.execute_workflow_instance(instance)
     print("Gossip Protocol Result:", result)
 
-def hierarchical_merge_example():
+async def hierarchical_merge_example():
     """
     分层合并通信协议示例
     模拟多层级Agent的协作和信息聚合
     """
-    workflow_config = {
-        "COLLABORATION": {
-            "MODE": "DYNAMIC_ROUTING",
-            "COMMUNICATION_PROTOCOL": {
-                "TYPE": "HIERARCHICAL"
-            },
-            "WORKFLOW": {
-                "low_level_agent_1": {
-                    "hierarchy_level": 0,
-                    "data": "raw_data_1"
-                },
-                "low_level_agent_2": {
-                    "hierarchy_level": 0, 
-                    "data": "raw_data_2"
-                },
-                "mid_level_agent": {
-                    "hierarchy_level": 1,
-                    "dependencies": ["low_level_agent_1_processed", "low_level_agent_2_processed"]
-                },
-                "high_level_agent": {
-                    "hierarchy_level": 2,
-                    "dependencies": ["mid_level_agent_processed"]
-                }
-            }
-        }
-    }
+    # Create workflow config
+    workflow = WorkflowConfig(
+        id="hierarchical_merge",
+        name="Hierarchical Merge Example",
+        steps=[
+            WorkflowStep(
+                id="low_level_agent_1",
+                name="Low Level Agent 1",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="custom",
+                    params={"data": "raw_data_1"}
+                )
+            ),
+            WorkflowStep(
+                id="low_level_agent_2",
+                name="Low Level Agent 2",
+                type=WorkflowStepType.TRANSFORM,
+                config=StepConfig(
+                    strategy="custom",
+                    params={"data": "raw_data_2"}
+                )
+            ),
+            WorkflowStep(
+                id="mid_level_agent",
+                name="Mid Level Agent",
+                type=WorkflowStepType.TRANSFORM,
+                dependencies=["low_level_agent_1", "low_level_agent_2"],
+                config=StepConfig(
+                    strategy="custom",
+                    params={}
+                )
+            ),
+            WorkflowStep(
+                id="high_level_agent",
+                name="High Level Agent",
+                type=WorkflowStepType.TRANSFORM,
+                dependencies=["mid_level_agent"],
+                config=StepConfig(
+                    strategy="custom",
+                    params={}
+                )
+            )
+        ]
+    )
     
-    workflow = WorkflowEngine(workflow_config)
-    result = workflow.execute({"task": "hierarchical_collaboration"})
+    # Create workflow engine
+    engine = WorkflowEngine()
+    await engine.initialize()
+    
+    # Create workflow instance
+    instance = await engine.create_workflow("hierarchical_merge", workflow)
+    
+    # Execute workflow
+    result = await engine.execute_workflow_instance(instance)
     print("Hierarchical Merge Result:", result)
 
-def main():
+async def main():
     print("通信协议使用示例:")
-    federated_learning_example()
-    gossip_protocol_example()
-    hierarchical_merge_example()
+    await federated_learning_example()
+    await gossip_protocol_example()
+    await hierarchical_merge_example()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

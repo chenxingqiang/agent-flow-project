@@ -16,7 +16,7 @@ ell2a_integration = ELL2AIntegration()
 ell2a_integration.configure({"store": "./logdir", "verbose": True})
 
 @simple(model="deepseek-coder-33b-instruct", temperature=0.7)
-async def math_problem_solver(problem: str) -> Message:
+async def solve_problem(problem: str) -> Message:
     """Solve a math problem and return the answer in a structured format.
     
     Example:
@@ -27,20 +27,35 @@ async def math_problem_solver(problem: str) -> Message:
     
     Answer: 4
     """
-    return Message(
-        role=MessageRole.ASSISTANT,
-        content=[
-            ContentBlock(
-                type=MessageType.TEXT,
-                text=f"""Let me solve this step by step:
+    try:
+        # Safely evaluate the problem
+        result = eval(problem.replace('What is ', '').replace('?', ''))
+        
+        return Message(
+            role=MessageRole.ASSISTANT,
+            content=[
+                ContentBlock(
+                    type=MessageType.TEXT,
+                    text=f"""Let me solve this step by step:
 1. First, let's identify the numbers and operation in the problem: {problem}
 2. Let me calculate the result carefully
 3. I will format the answer properly
 
-Answer: {eval(problem.replace('What is ', '').replace('?', ''))}"""
-            )
-        ]
-    )
+Answer: {result}"""
+                )
+            ]
+        )
+    except Exception as e:
+        logging.error(f"Error solving problem {problem}: {e}")
+        return Message(
+            role=MessageRole.ASSISTANT,
+            content=[
+                ContentBlock(
+                    type=MessageType.TEXT,
+                    text=f"I couldn't solve the problem: {e}"
+                )
+            ]
+        )
 
 def get_text_content(output: Message) -> str:
     content = output.content
@@ -93,76 +108,83 @@ def generate_arithmetic_dataset(num_examples=100):
 
 def sync_score(datapoint, output) -> float:
     """Score the output of the math problem solver."""
+    print(f"Datapoint: {datapoint}")
+    print(f"Output: {output}")
+    
     try:
         # Extract the answer from the output using get_text_content
         text = get_text_content(output) if isinstance(output, Message) else str(output)
+        print(f"Extracted text: {text}")
             
         if not text:
-            logging.debug("Empty text output")
+            print("No text found")
             return -10.0
-            
-        answer_line = [line for line in text.split('\n') if line and line.startswith('Answer:')]
-        if not answer_line:
-            logging.debug(f"No answer line found in output: {text}")
-            return -10.0
-            
-        answer_str = answer_line[0].replace('Answer:', '').strip()
+
+        # Extract the numeric answer from the text
         try:
-            answer = float(answer_str)
-        except ValueError:
-            logging.debug(f"Could not convert answer to float: {answer_str}")
-            return -10.0
+            expected_output = datapoint.get('output', '').replace('Answer:\n', '').strip()
+            print(f"Expected output: {expected_output}")
             
-        # Extract expected answer from datapoint
-        if 'answer' not in datapoint:
-            # Try to extract from output field
-            expected_text = datapoint.get('output', '')
-            expected_line = [line for line in expected_text.split('\n') if line and line.startswith('Answer:')]
-            if not expected_line:
-                logging.debug(f"No answer line found in expected output: {expected_text}")
+            if not expected_output:
+                print("No expected output")
                 return -10.0
-            expected_str = expected_line[0].replace('Answer:', '').strip()
-            expected = float(expected_str)
-        else:
-            expected = float(datapoint['answer'])
-        
-        # Check if answers are close
-        if abs(answer - expected) < 0.01:
-            return 1.0
-        else:
-            return 0.0
             
+            expected_value = float(expected_output)
+            print(f"Expected value: {expected_value}")
+            
+            # Find the numeric answer in the text
+            import re
+            match = re.search(r'Answer:\s*(-?\d+(?:\.\d+)?)', text)
+            
+            if match:
+                predicted_value = float(match.group(1))
+                print(f"Predicted value: {predicted_value}")
+                
+                # Use L2 distance as the scoring metric
+                distance = abs(predicted_value - expected_value)
+                print(f"Distance: {distance}")
+                return -distance  # Negative distance so that closer values get higher scores
+            else:
+                print("No numeric answer found in text")
+                return -10.0
+        except (ValueError, TypeError) as e:
+            print(f"Error converting values: {e}")
+            return -10.0
     except Exception as e:
-        logging.debug(f"Error scoring: {str(e)}")
+        print(f"Unexpected error: {e}")
         return -10.0
 
 arithmetic_eval = Evaluation(
-    name="Arithmetic",
+    name="arithmetic",
+    description="Evaluation of arithmetic problem solving",
     n_evals=10,
+    samples_per_datapoint=2,
     metrics={
         "answer_is_close_l2": sync_score,
     }
 )
 
-async def main():
-    dataset = generate_arithmetic_dataset()
-    
-    # Create a wrapper class that takes input from dataset
-    @simple(model="deepseek-coder-33b-instruct", temperature=0.7)
-    class SolveProblem:
-        async def __call__(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-            problem = input_data["input"]
-            response = await math_problem_solver(problem)
-            return {"output": response}
+class SolveProblem:
+    def __init__(self):
+        pass
+        
+    async def __call__(self, input_data: Dict[str, Any]) -> Message:
+        problem = input_data.get("input", input_data.get("problem", ""))
+        return await solve_problem(problem)
 
-        def __await__(self):
-            return self.__call__.__await__()
+async def main():
+    # Generate the arithmetic dataset
+    dataset = generate_arithmetic_dataset(num_examples=10)
     
-    # Pass the SolveProblem class
-    run = await arithmetic_eval.run(SolveProblem, data=dataset, n_workers=10, verbose=True)
-    print(f"Run metrics: {run.metrics}")
-    result = await math_problem_solver("What is 2 + 2?")
-    print(result)
+    # Run the evaluation with the generated dataset
+    result = await arithmetic_eval.run(
+        cast(Type[Any], SolveProblem),
+        data=dataset,
+        verbose=True
+    )
+    
+    # Print the results
+    print("Run metrics:", result.metrics)
 
 if __name__ == "__main__":
     asyncio.run(main())
